@@ -70,7 +70,12 @@ func (r *runner) onChatEvent(_ context.Context, message []byte, err error) {
 		return
 	}
 	var event codersdk.ChatWatchEvent
-	if err := json.Unmarshal(message, &event); err == nil &&
+	err = json.Unmarshal(message, &event)
+	if err == nil && event.Kind == codersdk.ChatWatchEventKindForkChange {
+		// A panel change of a chat changes nothing that delivery reads.
+		return
+	}
+	if err == nil &&
 		event.Kind == codersdk.ChatWatchEventKindCreated &&
 		event.Chat.ParentChatID == nil &&
 		event.Chat.OrganizationID == r.plugin.OrganizationID {

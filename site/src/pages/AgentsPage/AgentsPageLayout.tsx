@@ -42,6 +42,7 @@ import {
 	updateInfiniteChatsCache,
 	userChatPersonalModelOverrides,
 } from "#/api/queries/chats";
+import { createForkChatWatch } from "#/api/queries/forkChatWatch";
 import type * as TypesGen from "#/api/typesGenerated";
 import { toast } from "#/components/Toaster/toast";
 import { useAuthenticated } from "#/hooks/useAuthenticated";
@@ -331,7 +332,8 @@ const AgentsPageLayout: React.FC = () => {
 		void invalidateChatSearches(queryClient);
 	}, [agentId, queryClient]);
 	useEffect(() => {
-		return createReconnectingWebSocket({
+		const forkWatch = createForkChatWatch(queryClient);
+		const disposeSocket = createReconnectingWebSocket({
 			connect() {
 				const ws = watchChats();
 
@@ -341,6 +343,7 @@ const AgentsPageLayout: React.FC = () => {
 						return;
 					}
 					const chatEvent = event.parsedMessage;
+					if (forkWatch.onEvent(chatEvent)) return;
 					const updatedChat = chatEvent.chat;
 					// The old membership is only available before the cache write below.
 					const prevStatus = findChatInListCaches(
@@ -470,6 +473,7 @@ const AgentsPageLayout: React.FC = () => {
 				void invalidateChatListQueries(queryClient);
 				void invalidateChatsByWorkspace(queryClient);
 				void invalidateChatSearches(queryClient);
+				forkWatch.onOpen();
 				// Events missed while disconnected, such as
 				// diff_status_change, only reach the open chat's cache
 				// through a refetch.
@@ -480,6 +484,10 @@ const AgentsPageLayout: React.FC = () => {
 				}
 			},
 		});
+		return () => {
+			disposeSocket();
+			forkWatch.dispose();
+		};
 	}, [queryClient]);
 
 	useAgentsPageKeybindings({

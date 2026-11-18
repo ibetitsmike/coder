@@ -2371,6 +2371,8 @@ type ChatWatchEvent struct {
 	// ChatWatchEventKindDiffStatusChange. It identifies the ref that
 	// changed.
 	ChangedDiffStatus *ChangedDiffStatus `json:"changed_diff_status,omitempty"`
+	// ForkChange is set when Kind is ChatWatchEventKindForkChange.
+	ForkChange *ChatWatchForkChange `json:"fork_change,omitempty"`
 }
 
 // ChatStreamEvent represents a real-time update for chat streaming.
