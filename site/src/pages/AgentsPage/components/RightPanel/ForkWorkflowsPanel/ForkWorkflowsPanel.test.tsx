@@ -432,7 +432,7 @@ describe("ForkWorkflowsPanel", () => {
 		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
 			MockChatWorkflowRunDetail,
 		);
-		renderPanel(chatId);
+		const { queryClient } = renderPanel(chatId);
 		const user = userEvent.setup();
 		const getRuns = vi.mocked(forkWorkflowsApi.getChatWorkflowRuns);
 
@@ -448,11 +448,14 @@ describe("ForkWorkflowsPanel", () => {
 
 		cursorResolver.current?.();
 		// The cursor page is short, so the control unmounts once it
-		// resolves.
+		// resolves. Wait out the fetch too: under CI load the page's
+		// re-render can land after the loop saw the removal, so the
+		// wait must not settle until the cache is quiet.
 		await waitFor(() => {
 			expect(
 				screen.queryByRole("button", { name: "Load older runs" }),
 			).toBeNull();
+			expect(queryClient.isFetching()).toBe(0);
 		});
 		// The list must not pull focus back: the user left it on the body
 		// on purpose, and the body is where a removed focused element
