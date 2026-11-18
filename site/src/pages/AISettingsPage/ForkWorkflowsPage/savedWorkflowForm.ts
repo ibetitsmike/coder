@@ -2,7 +2,10 @@
 // editor (fork-workflows experiment).
 
 import type { UpdateSavedWorkflowRequest } from "#/api/forkSavedWorkflows";
-import type { CreateForkSavedWorkflowRequest } from "#/api/typesGenerated";
+import type {
+	CreateForkSavedWorkflowRequest,
+	ForkSavedWorkflow,
+} from "#/api/typesGenerated";
 import { getSkillContentSizeBytes } from "#/pages/AgentsPage/utils/skills";
 
 // The backend limits, from coderd/fork_saved_workflows.go, except the
@@ -140,6 +143,34 @@ export const savedWorkflowFormErrors = (
 	}
 	return errors;
 };
+
+/**
+ * Whether two args schemas hold the same JSON object, so a lost update
+ * response can be checked against the submitted schema. Key order and
+ * whitespace do not matter.
+ */
+export const equalsSavedWorkflowArgsSchema = (
+	a: ForkSavedWorkflow["args_schema"] | null,
+	b: ForkSavedWorkflow["args_schema"] | null,
+): boolean => {
+	if (a === b) {
+		return true;
+	}
+	if (a == null || b == null) {
+		return false;
+	}
+	const keysA = Object.keys(a).sort();
+	const keysB = Object.keys(b).sort();
+	return (
+		keysA.length === keysB.length &&
+		keysA.every((key, index) => key === keysB[index] && a[key] === b[key])
+	);
+};
+
+/**
+ * Builds a create request from the form values. Empty optional fields are
+ * left out, so the server stores no schema and no phases.
+ */
 
 /**
  * Builds a create request from the form values. Empty optional fields are

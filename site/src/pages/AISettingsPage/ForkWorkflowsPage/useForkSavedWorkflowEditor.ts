@@ -33,6 +33,7 @@ import {
 	buildCreateSavedWorkflowRequest,
 	buildUpdateSavedWorkflowRequest,
 	emptySavedWorkflowFormValues,
+	equalsSavedWorkflowArgsSchema,
 	formatSavedWorkflowPhases,
 	type SavedWorkflowFormValues,
 } from "./savedWorkflowForm";
@@ -259,14 +260,28 @@ export const useForkSavedWorkflowEditor = (scope: SavedWorkflowScope) => {
 					{ scope, name, req: request },
 					{
 						// A lost response can hide a save that committed, which the
-						// refetched workflow then shows.
+						// refetched workflow then shows. Every submitted field must
+						// match, because an older workflow can hold the script alone.
 						onSettled: (_data, error) => {
 							const saved = queryClient.getQueryData(
 								savedWorkflow(queryClient, scope, name).queryKey,
 							);
 							if (
 								!error ||
-								(isResponseLost(error) && saved?.script === request.script)
+								(isResponseLost(error) &&
+									saved !== undefined &&
+									saved.script === request.script &&
+									saved.description === request.description &&
+									saved.phases.join("\n") ===
+										formValues.phases
+											.split("\n")
+											.map((phase) => phase.trim())
+											.filter((phase) => phase !== "")
+											.join("\n") &&
+									equalsSavedWorkflowArgsSchema(
+										saved.args_schema,
+										request.args_schema,
+									))
 							) {
 								closeEditorTarget(editorTarget);
 								toast.success("Workflow saved.");

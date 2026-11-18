@@ -315,6 +315,54 @@ it("shows a server validation error in the editor", async () => {
 	await within(dialog).findByText("Invalid saved workflow.");
 });
 
+it("keeps the editor open when a lost response did not save the edit", async () => {
+	const user = userEvent.setup();
+	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflows").mockResolvedValue([
+		MockForkSavedWorkflowMetadata,
+	]);
+	vi.spyOn(
+		forkSavedWorkflowsApi,
+		"getOrganizationSavedWorkflows",
+	).mockResolvedValue([]);
+	// The refetched workflow holds the submitted script, so a script-only
+	// check would count this lost-response save as committed.
+	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow").mockResolvedValue({
+		...MockForkSavedWorkflow,
+		script: MockForkWorkflowScript.trimEnd(),
+	});
+	// An axios error without a response, which the editor treats as an
+	// unknown outcome that the refetched workflow must prove committed.
+	const update = vi
+		.spyOn(forkSavedWorkflowsApi, "updateUserSavedWorkflow")
+		.mockRejectedValue({ isAxiosError: true });
+	renderPage(`?org=${MockOrganization2.name}`);
+
+	await user.click(
+		await screen.findByRole("button", {
+			name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
+		}),
+	);
+	await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+	const dialog = await screen.findByRole("dialog");
+	// Only the description changes, so the refetched workflow holds the
+	// submitted script and must not count as a committed save.
+	await user.type(
+		await within(dialog).findByLabelText("Description"),
+		" even harder",
+	);
+	await user.click(
+		within(dialog).getByRole("button", { name: "Save workflow" }),
+	);
+
+	await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+
+	// The editor stays open with the draft, so the user can retry the save.
+	await user.click(
+		within(dialog).getByRole("button", { name: "Save workflow" }),
+	);
+	await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+});
+
 it("deletes a workflow after confirmation", async () => {
 	const user = userEvent.setup();
 	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflows").mockResolvedValue([
