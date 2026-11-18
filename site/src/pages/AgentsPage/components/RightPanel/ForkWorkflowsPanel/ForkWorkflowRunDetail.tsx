@@ -221,6 +221,11 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 				/>
 			)}
 			{run.logs.length === 0 && isRunning && (
+				// The live region mounts empty, so the first lines land in a
+				// region that already exists and screen readers announce them.
+				<ForkWorkflowLongText key="logs" label="Logs" text="" isLive />
+			)}
+			{run.logs.length === 0 && isRunning && (
 				<p className="m-0 mt-1.5 text-xs text-content-secondary">
 					Logs appear as the script prints them.
 				</p>
