@@ -20,12 +20,10 @@ export const chatWorkflowRunsKey = (chatId: string) =>
 
 export type WorkflowRunPageParam = { after: string };
 
-/** Run statuses that cannot change anymore. Matches the journal's terminal set. */
-const terminalRunStatuses = new Set(["completed", "failed", "stopped"]);
-
-const isTerminalRun = (run: WorkflowRun) => terminalRunStatuses.has(run.status);
-
-/** Whether one of the run list's loaded pages still has a running run. */
+/**
+ * Whether one of the run list's loaded pages still has a running run. Pages
+ * with no running run are all terminal.
+ */
 export const runListHasRunningRun = (
 	data: InfiniteData<WorkflowRun[]> | undefined,
 ) =>
@@ -62,12 +60,12 @@ export const chatWorkflowRuns = (chatId: string) =>
 	infiniteQueryOptions({
 		queryKey: chatWorkflowRunsKey(chatId),
 		queryFn: async ({ client, queryKey, signal, pageParam }) => {
-			// A refetch revisits every loaded page, but only a page that is
-			// not all-terminal or whose cursor has shifted reaches the
-			// server: a resume flips an interrupted run to running in place,
-			// without moving its cursor, so only a fetch can notice it, and
-			// a new run shifts the first page's cursor, so the page behind
-			// it is fetched with its new cursor.
+			// A refetch revisits every loaded page: a resume flips an
+			// interrupted run to running in place, without moving its cursor,
+			// so only a fetch can notice it, and a new run shifts the first
+			// page's cursor, so the page behind it is fetched with its new
+			// cursor. Each fetch is also the reconcile with the server, so a
+			// run the server's retention has purged drops out of the cache.
 			const cached =
 				client.getQueryData<InfiniteData<WorkflowRun[], WorkflowRunPageParam>>(
 					queryKey,
@@ -78,9 +76,6 @@ export const chatWorkflowRuns = (chatId: string) =>
 					(param) => param.after === pageParam.after,
 				) ?? -1;
 			const cachedPage = pages[index];
-			if (pageParam.after !== "" && cachedPage?.every(isTerminalRun)) {
-				return cachedPage;
-			}
 			// A refetch asks a page for as many rows as it holds, so a page a
 			// top-up grew keeps its tail and the page behind it its cursor.
 			const limit = Math.min(
@@ -138,9 +133,11 @@ export const chatWorkflowRuns = (chatId: string) =>
 			return { after: `${last.created_at}/${last.id}` };
 		},
 		// Runs have no watch socket: poll faster while any loaded page has a
-		// run going, and slowly otherwise so a run the agent starts shows up.
+		// run going, slowly otherwise so a run the agent starts shows up, and
+		// slowly still so a loaded page that went all-terminal reconciles
+		// with the server and drops runs the retention has purged.
 		refetchInterval: ({ state }) =>
-			runListHasRunningRun(state.data) ? 5_000 : 30_000,
+			runListHasRunningRun(state.data) ? 5_000 : 120_000,
 	});
 
 /** Keys one run's detail under its chat's runs. */

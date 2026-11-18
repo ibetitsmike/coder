@@ -126,11 +126,12 @@ describe("chatWorkflowRuns polling", () => {
 			expect(getRuns.mock.calls[1][1]).toBe(cursor);
 
 			// One tick fetches the first page; the finished older page is
-			// reused from the cache, so its cursor is absent from the calls.
-			// The refetch resolves only after it has walked every page.
+			// fetched too, since a tick reconciles every loaded page with
+			// the server, so a purged run drops out. The refetch resolves
+			// only after it has walked every page.
 			getRuns.mockClear();
 			await refetch();
-			expect(getRuns.mock.calls.map((call) => call[1])).toEqual([""]);
+			expect(getRuns.mock.calls.map((call) => call[1])).toEqual(["", cursor]);
 		} finally {
 			unsubscribe();
 		}
@@ -285,7 +286,9 @@ describe("chatWorkflowRuns refetch top-up", () => {
 						: after === ""
 							? shiftedFirst
 							: after === newCursor
-								? shiftedSecond
+								? limit === 51
+									? [...shiftedSecond, makeRun(-50, "completed")]
+									: shiftedSecond
 								: [],
 				),
 			);
@@ -304,13 +307,14 @@ describe("chatWorkflowRuns refetch top-up", () => {
 			);
 			expect(pages()[1]).toHaveLength(51);
 
-			// With no new run the next tick fetches the first page only: its
-			// tail is unchanged, so the topped-up page keeps its cursor and
-			// comes from the cache.
+			// With no new run the next tick reconciles both pages: the first
+			// page's tail is unchanged, so the topped-up page keeps its cursor
+			// and is fetched with the 51 rows it holds.
 			getRuns.mockClear();
 			await refetch();
 			expect(getRuns.mock.calls.map((call) => [call[1], call[3]])).toEqual([
 				["", 50],
+				[cursorOf(shiftedFirst), 51],
 			]);
 			expect(pages()[1]).toHaveLength(51);
 
@@ -432,8 +436,8 @@ describe("chatWorkflowRuns refetch top-up", () => {
 				fullPage(52, new Array(53).fill("completed")).map((run) => run.id),
 			);
 
-			// The next tick asks for all 53 rows, so its tail is the cached
-			// tail and no top-up follows.
+			// The next tick asks for the topped-up page's 53 rows. There is
+			// no older page behind it, so the tick is one request.
 			getRuns.mockClear();
 			await refetch();
 			expect(getRuns.mock.calls.map((call) => [call[1], call[3]])).toEqual([
@@ -504,14 +508,25 @@ describe("chatWorkflowRuns refetch top-up", () => {
 
 			// With no new run, the 10 rows older than the first page's tail
 			// belong to the page behind it, so the first page does not top
-			// up and the finished short page comes from the cache.
-			getRuns.mockImplementation((_chatId, after) =>
-				Promise.resolve(after === "" ? first : []),
+			// up. The short page is reconciled with the server too, and its
+			// answer is unchanged.
+			getRuns.mockImplementation((_chatId, after, _signal, limit) =>
+				Promise.resolve(
+					after === cursorOf(first)
+						? fullPage(
+								0,
+								new Array(Math.min(limit ?? 50, 10)).fill("completed"),
+							)
+						: after === ""
+							? first
+							: [],
+				),
 			);
 			getRuns.mockClear();
 			await refetch();
 			expect(getRuns.mock.calls.map((call) => [call[1], call[3]])).toEqual([
 				["", 50],
+				[cursorOf(first), 50],
 			]);
 			expect(pages().map((page) => page.length)).toEqual([50, 10]);
 
@@ -612,7 +627,7 @@ describe("chatWorkflowRuns refetch top-up", () => {
 			}
 
 			// With no new run the next tick asks for the page's 100 rows and
-			// needs no top-up.
+			// needs no top-up. There is no older page behind it.
 			getRuns.mockClear();
 			await refetch();
 			expect(getRuns.mock.calls.map((call) => [call[1], call[3]])).toEqual([
@@ -642,6 +657,40 @@ describe("chatWorkflowRuns refetch top-up", () => {
 			expect(getRuns.mock.calls.map((call) => [call[1], call[3]])).toEqual([
 				["", 100],
 			]);
+		} finally {
+			unsubscribe();
+		}
+	});
+
+	it("drops a purged run when a tick reconciles its all-terminal page", async () => {
+		const { getRuns, pages, fetchNextPage, refetch, start, unsubscribe } =
+			observeRuns();
+		try {
+			// A full first page and an older all-terminal cursor page.
+			const first = fullPage(49, new Array(50).fill("completed"));
+			const older = fullPage(-1, new Array(50).fill("completed"));
+			getRuns.mockResolvedValueOnce(first).mockResolvedValueOnce(older);
+			start();
+			await waitForPages(pages, 1);
+			await fetchNextPage();
+			await waitForPages(pages, 2);
+
+			// The server purged run -50 after the retention window. The tick
+			// reconciles the cursor page, and the purged run must leave the
+			// cache instead of staying visible forever.
+			const purged = older.slice(0, -1);
+			getRuns.mockImplementation((_chatId, after) =>
+				Promise.resolve(
+					after === cursorOf(first) ? purged : after === "" ? first : [],
+				),
+			);
+			getRuns.mockClear();
+			await refetch();
+			const flatIds = pages()
+				.flat()
+				.map((run: WorkflowRun) => run.id);
+			expect(flatIds).not.toContain(makeRun(-50, "completed").id);
+			expect(flatIds).toHaveLength(99);
 		} finally {
 			unsubscribe();
 		}
@@ -705,7 +754,7 @@ describe("runListHasRunningRun", () => {
 					pageParams: [{ after: "" }, { after: "c" }],
 				}),
 			),
-		).toBe(30_000);
-		expect(refetchInterval(queryOf(undefined))).toBe(30_000);
+		).toBe(120_000);
+		expect(refetchInterval(queryOf(undefined))).toBe(120_000);
 	});
 });

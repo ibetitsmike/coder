@@ -100,6 +100,29 @@ describe("ForkWorkflowsPanel", () => {
 		).toHaveFocus();
 	});
 
+	it("announces appended log lines while the run is live", async () => {
+		const chatId = generateUUID();
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockResolvedValue([
+			{ ...MockChatWorkflowRun, status: "running" },
+		]);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue({
+			...MockChatWorkflowRunDetail,
+			chat_id: chatId,
+			status: "running",
+			result: undefined,
+			finished_at: undefined,
+		});
+		renderPanel(chatId);
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: /review changed files/i }),
+		);
+		const logs = await screen.findByRole("log", { name: "Logs" });
+		expect(logs).toHaveAttribute("aria-live", "polite");
+		expect(logs).toHaveAttribute("aria-relevant", "additions");
+	});
+
 	it("reports a failed stop and refreshes the runs", async () => {
 		const chatId = generateUUID();
 		const runningRun: WorkflowRunDetail = {
@@ -536,6 +559,32 @@ describe("ForkWorkflowsPanel", () => {
 		} finally {
 			focusManager.setFocused(true);
 		}
+	});
+
+	it("shows a large integer in Arguments exactly as the server sent it", async () => {
+		const chatId = generateUUID();
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockResolvedValue([
+			MockChatWorkflowRun,
+		]);
+		// The axios default parse would round 9007199254740993 to
+		// ...992 before the formatter saw it, so this pins the lossless
+		// path end to end, from the response text to the rendered block.
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue({
+			...MockChatWorkflowRunDetail,
+			chat_id: chatId,
+			args: { count: { forkUnsafeInteger: "9007199254740993" } },
+		});
+		renderPanel(chatId);
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: /review changed files/i }),
+		);
+		const argumentsBlock = await screen.findByRole("region", {
+			name: "Arguments",
+		});
+		expect(argumentsBlock).toHaveTextContent("9007199254740993");
+		expect(argumentsBlock).not.toHaveTextContent("9007199254740992");
 	});
 
 	it("opens a run, then a step's child chat, and back again", async () => {

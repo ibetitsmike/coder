@@ -1,6 +1,7 @@
 // This file is fork code: it parses the Starlark workflow tool results of
 // the fork-workflows experiment and maps their statuses to display values.
 
+import { isUnsafeInteger } from "#/api/forkWorkflows";
 import type { WorkflowRun, WorkflowRunDetail } from "#/api/typesGenerated";
 import { humanDurationShort } from "#/utils/time";
 import { asRecord, asString } from "../ChatElements/runtimeTypeUtils";
@@ -323,4 +324,10 @@ export const forkWorkflowRunDuration = (
 
 /** Formats a JSON value for display; strings show as they are. */
 export const formatForkWorkflowValue = (value: unknown): string =>
-	typeof value === "string" ? value : JSON.stringify(value, null, 2);
+	typeof value === "string"
+		? value
+		: JSON.stringify(
+				value,
+				(_key, item) => (isUnsafeInteger(item) ? item.forkUnsafeInteger : item),
+				2,
+			);

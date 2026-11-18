@@ -217,6 +217,7 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 					key="logs"
 					label="Logs"
 					text={run.logs.join("\n")}
+					isLive={isRunning}
 				/>
 			)}
 			{run.logs.length === 0 && isRunning && (

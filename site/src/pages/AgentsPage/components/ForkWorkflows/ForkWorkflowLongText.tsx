@@ -33,12 +33,15 @@ type ForkWorkflowLongTextProps = {
 	label: string;
 	text: string;
 	isError?: boolean;
+	/** Marks a block whose text grows while it is on screen, such as logs. */
+	isLive?: boolean;
 };
 
 export const ForkWorkflowLongText: React.FC<ForkWorkflowLongTextProps> = ({
 	label,
 	text,
 	isError = false,
+	isLive = false,
 }) => {
 	// Once the text shows in full, it stays in full: polling can grow
 	// it past the threshold, and collapsing it under the user would
@@ -54,6 +57,9 @@ export const ForkWorkflowLongText: React.FC<ForkWorkflowLongTextProps> = ({
 		<section
 			aria-label={label}
 			className="mt-1.5 flex min-w-0 flex-col gap-0.5"
+			role={isLive ? "log" : undefined}
+			aria-live={isLive ? "polite" : undefined}
+			aria-relevant={isLive ? "additions" : undefined}
 		>
 			<div className="text-xs font-medium text-content-secondary">{label}</div>
 			{preview === null ? (
