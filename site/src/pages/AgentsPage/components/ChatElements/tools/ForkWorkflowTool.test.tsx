@@ -5,6 +5,7 @@ import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as forkWorkflowsApi from "#/api/forkWorkflows";
 import { chatEntityKey } from "#/api/queries/chats";
+import { forkPanelResyncInterval } from "#/api/queries/forkPanelResync";
 import { chatWorkflowRunKey } from "#/api/queries/forkWorkflows";
 import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
 import { MockChat } from "#/testHelpers/chatEntities";
@@ -160,7 +161,7 @@ describe("ForkWorkflowTool", () => {
 		);
 
 		await waitFor(() => expect(getRun).toHaveBeenCalledTimes(1));
-		await vi.advanceTimersByTimeAsync(3_000);
+		await vi.advanceTimersByTimeAsync(forkPanelResyncInterval);
 		expect(getRun).toHaveBeenCalledTimes(2);
 	});
 
@@ -172,7 +173,7 @@ describe("ForkWorkflowTool", () => {
 		renderWorkflowTool("run_workflow", MockForkWorkflowStartedResult);
 
 		await waitFor(() => expect(getRun).toHaveBeenCalledTimes(1));
-		await vi.advanceTimersByTimeAsync(3_000);
+		await vi.advanceTimersByTimeAsync(forkPanelResyncInterval);
 		expect(getRun).toHaveBeenCalledTimes(2);
 	});
 
@@ -184,7 +185,7 @@ describe("ForkWorkflowTool", () => {
 		renderWorkflowTool("run_workflow", MockForkWorkflowStartedResult);
 
 		await waitFor(() => expect(getRun).toHaveBeenCalledTimes(1));
-		await vi.advanceTimersByTimeAsync(10_000);
+		await vi.advanceTimersByTimeAsync(forkPanelResyncInterval * 2);
 		expect(getRun).toHaveBeenCalledTimes(1);
 	});
 

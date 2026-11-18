@@ -23,6 +23,7 @@ import {
 	bootstrapChatEmbedSession,
 	EmbedContext,
 } from "../components/EmbedContext";
+import { useForkChatWatch } from "../hooks/useForkChatWatch";
 
 type BootstrapMessage = {
 	type: "coder:vscode-auth-bootstrap";
@@ -95,6 +96,7 @@ const AgentEmbedPage: React.FC = () => {
 	}
 
 	const auth = useAuthContext();
+	useForkChatWatch(auth.isSignedIn);
 	const queryClient = useQueryClient();
 	const embedSessionMutation = useMutation(
 		bootstrapChatEmbedSession({ checks: permissionChecks }, queryClient),

@@ -5,19 +5,19 @@ import {
 	stopChatWorkflowRun,
 } from "#/api/forkWorkflows";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
+import { forkPanelResyncInterval } from "./forkPanelResync";
+
+export const chatWorkflowRunsRootKey = ["chats", "fork-workflow-runs"] as const;
 
 /** Also prefixes each run's key, so invalidating it refetches the details. */
 export const chatWorkflowRunsKey = (chatId: string) =>
-	["chats", "fork-workflow-runs", chatId] as const;
+	[...chatWorkflowRunsRootKey, chatId] as const;
 
 export const chatWorkflowRuns = (chatId: string) =>
 	queryOptions({
 		queryKey: chatWorkflowRunsKey(chatId),
 		queryFn: ({ signal }) => getChatWorkflowRuns(chatId, signal),
-		// Runs have no watch socket: poll faster while one is running, and
-		// slowly otherwise so a run the agent starts shows up.
-		refetchInterval: ({ state }) =>
-			state.data?.some((run) => run.status === "running") ? 5_000 : 30_000,
+		refetchInterval: forkPanelResyncInterval,
 	});
 
 /** Keys one run's detail under its chat's runs. */
@@ -26,7 +26,7 @@ export const chatWorkflowRunKey = (chatId: string, runId: string) =>
 
 /** The detail query and the live tool card share this polling policy. */
 export const workflowRunRefetchInterval = (status: string | undefined) =>
-	status === "running" ? 3_000 : false;
+	status === "running" ? forkPanelResyncInterval : false;
 
 export const chatWorkflowRun = (chatId: string, runId: string) =>
 	queryOptions({

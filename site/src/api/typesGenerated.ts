@@ -4370,6 +4370,10 @@ export interface ChatWatchEvent {
 	 * changed.
 	 */
 	readonly changed_diff_status?: ChangedDiffStatus;
+	/**
+	 * ForkChange is set when Kind is ChatWatchEventKindForkChange.
+	 */
+	readonly fork_change?: ChatWatchForkChange;
 }
 
 // From codersdk/chats.go
@@ -4380,6 +4384,7 @@ export type ChatWatchEventKind =
 	| "created"
 	| "deleted"
 	| "diff_status_change"
+	| "fork_change"
 	| "project_change"
 	| "status_change"
 	| "summary_change"
@@ -4392,10 +4397,47 @@ export const ChatWatchEventKinds: ChatWatchEventKind[] = [
 	"created",
 	"deleted",
 	"diff_status_change",
+	"fork_change",
 	"project_change",
 	"status_change",
 	"summary_change",
 	"title_change",
+];
+
+// From codersdk/fork_chat_watch.go
+/**
+ * ChatWatchForkChange names the chat and the fork state that changed, so
+ * the client refetches only that.
+ */
+export interface ChatWatchForkChange {
+	/**
+	 * ChatID is the chat whose state changed: the chat that asked the
+	 * question, owns the wake-up or ran the workflow.
+	 */
+	readonly chat_id: string;
+	/**
+	 * RootChatID is the root of ChatID's family, ChatID itself for a root.
+	 */
+	readonly root_chat_id: string;
+	readonly facets: readonly ChatWatchForkFacet[];
+	/**
+	 * WorkflowRunID is set for the workflow facets.
+	 */
+	readonly workflow_run_id?: string;
+}
+
+// From codersdk/fork_chat_watch.go
+export type ChatWatchForkFacet =
+	| "questions"
+	| "wakeups"
+	| "workflow_logs"
+	| "workflows";
+
+export const ChatWatchForkFacets: ChatWatchForkFacet[] = [
+	"questions",
+	"wakeups",
+	"workflow_logs",
+	"workflows",
 ];
 
 // From codersdk/chats.go

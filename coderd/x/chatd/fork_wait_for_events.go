@@ -22,6 +22,7 @@ import (
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
 
@@ -219,6 +220,7 @@ func (p *Server) waitForEventsTool(chat database.Chat) fantasy.AgentTool {
 				// already. The poke lists it now, not at the next commit of
 				// the chat or the sweep.
 				p.forkWaker().poke(chat.ID)
+				p.publishForkChange(chat, codersdk.ChatWatchForkFacetWakeups, nil)
 				wakeup = &created
 			}
 			result, err := p.waitForEventsResponse(ctx, chat, *wakeup)

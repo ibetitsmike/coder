@@ -200,7 +200,7 @@ func (t *workflowReportTool) accept(ctx context.Context, input string) (fantasy.
 	// row, so of two racing calls only the first wakes the owner. The reuse
 	// flag carries over: a row a resume already replayed must not read as
 	// fresh.
-	landed, err := j.reportStep(ctx, &workflowStep{
+	landed, err := j.reportStep(ctx, t.runID, &workflowStep{
 		id:     step.ID,
 		status: stepStatusReported,
 		value:  json.RawMessage(input),
