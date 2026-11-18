@@ -13,22 +13,15 @@ import {
 	workflowRunsPageSize,
 } from "#/api/forkWorkflows";
 import type { WorkflowRun, WorkflowRunDetail } from "#/api/typesGenerated";
+import { forkPanelResyncInterval } from "./forkPanelResync";
+
+export const chatWorkflowRunsRootKey = ["chats", "fork-workflow-runs"] as const;
 
 /** Also prefixes each run's key, so invalidating it refetches the details. */
 export const chatWorkflowRunsKey = (chatId: string) =>
-	["chats", "fork-workflow-runs", chatId] as const;
+	[...chatWorkflowRunsRootKey, chatId] as const;
 
 export type WorkflowRunPageParam = { after: string };
-
-/**
- * Whether one of the run list's loaded pages still has a running run. Pages
- * with no running run are all terminal.
- */
-export const runListHasRunningRun = (
-	data: InfiniteData<WorkflowRun[]> | undefined,
-) =>
-	data?.pages.some((page) => page.some((run) => run.status === "running")) ??
-	false;
 
 /**
  * An RFC 3339 timestamp as whole seconds and nanosecond digits. The server
@@ -132,13 +125,11 @@ export const chatWorkflowRuns = (chatId: string) =>
 			}
 			return { after: `${last.created_at}/${last.id}` };
 		},
-		// Runs have no watch socket: poll faster while any loaded page has a
-		// run going. The slow tick keeps going even once every loaded page is
-		// all-terminal, so each page refetches and reconciles with the
-		// server, dropping runs the retention has purged and picking up new
-		// ones the agent starts.
-		refetchInterval: ({ state }) =>
-			runListHasRunningRun(state.data) ? 5_000 : 30_000,
+		// The watch stream invalidates a run's panels on each change; this
+		// resync tick catches what it misses. Its refetch walks every loaded
+		// page, so it is also the reconcile with the server: a run the
+		// retention has purged drops out of the cache within one interval.
+		refetchInterval: forkPanelResyncInterval,
 	});
 
 /** Keys one run's detail under its chat's runs. */
@@ -147,7 +138,7 @@ export const chatWorkflowRunKey = (chatId: string, runId: string) =>
 
 /** The detail query and the live tool card share this polling policy. */
 export const workflowRunRefetchInterval = (status: string | undefined) =>
-	status === "running" ? 3_000 : false;
+	status === "running" ? forkPanelResyncInterval : false;
 
 export const chatWorkflowRun = (chatId: string, runId: string) =>
 	queryOptions({

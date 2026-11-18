@@ -25919,20 +25919,20 @@ const docTemplate = `{
         "codersdk.ChatContextResourceKind": {
             "type": "string",
             "enum": [
-                "subagent",
                 "instruction_file",
                 "skill",
                 "mcp_config",
                 "mcp_server",
-                "acp_harness"
+                "acp_harness",
+                "subagent"
             ],
             "x-enum-varnames": [
-                "ChatContextResourceKindSubagent",
                 "ChatContextResourceKindInstructionFile",
                 "ChatContextResourceKindSkill",
                 "ChatContextResourceKindMCPConfig",
                 "ChatContextResourceKindMCPServer",
-                "ChatContextResourceKindACPHarness"
+                "ChatContextResourceKindACPHarness",
+                "ChatContextResourceKindSubagent"
             ]
         },
         "codersdk.ChatContextResourceStatus": {
@@ -28236,6 +28236,14 @@ const docTemplate = `{
                 "chat": {
                     "$ref": "#/definitions/codersdk.Chat"
                 },
+                "fork_change": {
+                    "description": "ForkChange is set when Kind is ChatWatchEventKindForkChange.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.ChatWatchForkChange"
+                        }
+                    ]
+                },
                 "kind": {
                     "$ref": "#/definitions/codersdk.ChatWatchEventKind"
                 },
@@ -28250,6 +28258,7 @@ const docTemplate = `{
         "codersdk.ChatWatchEventKind": {
             "type": "string",
             "enum": [
+                "fork_change",
                 "status_change",
                 "summary_change",
                 "chat_summary_change",
@@ -28262,6 +28271,7 @@ const docTemplate = `{
                 "project_change"
             ],
             "x-enum-varnames": [
+                "ChatWatchEventKindForkChange",
                 "ChatWatchEventKindStatusChange",
                 "ChatWatchEventKindSummaryChange",
                 "ChatWatchEventKindChatSummaryChange",
@@ -28272,6 +28282,47 @@ const docTemplate = `{
                 "ChatWatchEventKindActionRequired",
                 "ChatWatchEventKindContextDirty",
                 "ChatWatchEventKindProjectChange"
+            ]
+        },
+        "codersdk.ChatWatchForkChange": {
+            "type": "object",
+            "properties": {
+                "chat_id": {
+                    "description": "ChatID is the chat whose state changed: the chat that asked the\nquestion, owns the wake-up or ran the workflow.",
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "facets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.ChatWatchForkFacet"
+                    }
+                },
+                "root_chat_id": {
+                    "description": "RootChatID is the root of ChatID's family, ChatID itself for a root.",
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "workflow_run_id": {
+                    "description": "WorkflowRunID is set for the workflow facets.",
+                    "type": "string",
+                    "format": "uuid"
+                }
+            }
+        },
+        "codersdk.ChatWatchForkFacet": {
+            "type": "string",
+            "enum": [
+                "questions",
+                "wakeups",
+                "workflows",
+                "workflow_logs"
+            ],
+            "x-enum-varnames": [
+                "ChatWatchForkFacetQuestions",
+                "ChatWatchForkFacetWakeups",
+                "ChatWatchForkFacetWorkflows",
+                "ChatWatchForkFacetWorkflowLogs"
             ]
         },
         "codersdk.ChatWorkspaceTTLResponse": {
@@ -30510,6 +30561,20 @@ const docTemplate = `{
         "codersdk.Experiment": {
             "type": "string",
             "enum": [
+                "fork-chat-todos",
+                "fork-nested-subagents",
+                "fork-agent-definitions",
+                "fork-subagent-isolation",
+                "fork-chat-wakeups",
+                "fork-plugin-packs",
+                "fork-pinned-skills",
+                "fork-workflows",
+                "fork-family-messages",
+                "fork-html-attachments",
+                "fork-token-budget",
+                "fork-view-image",
+                "fork-context-cache",
+                "fork-context-hash-rows",
                 "example",
                 "notifications",
                 "workspace-usage",
@@ -30528,21 +30593,7 @@ const docTemplate = `{
                 "chat-stage-metrics",
                 "chat-acp-subagents",
                 "chat-automations",
-                "agent-plugins",
-                "fork-chat-todos",
-                "fork-nested-subagents",
-                "fork-agent-definitions",
-                "fork-subagent-isolation",
-                "fork-chat-wakeups",
-                "fork-plugin-packs",
-                "fork-pinned-skills",
-                "fork-workflows",
-                "fork-family-messages",
-                "fork-html-attachments",
-                "fork-token-budget",
-                "fork-view-image",
-                "fork-context-cache",
-                "fork-context-hash-rows"
+                "agent-plugins"
             ],
             "x-enum-comments": {
                 "ExperimentAIGatewayReverseProxy": "Uses stateless reverse proxy routing when MCP injection is not configured.",
@@ -30566,6 +30617,20 @@ const docTemplate = `{
                 "ExperimentWorkspaceUsage": "Enables the new workspace usage tracking."
             },
             "x-enum-descriptions": [
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
                 "This isn't used for anything.",
                 "Sends notifications via SMTP and webhooks following certain events.",
                 "Enables the new workspace usage tracking.",
@@ -30584,23 +30649,23 @@ const docTemplate = `{
                 "Exposes chat lifecycle stage durations as Prometheus metrics.",
                 "Enables workspace-local ACP subagent tools in root chats.",
                 "Enables webhook and scheduled automations that deliver prompts to agent chats.",
-                "Enables skills and MCP servers from Agent Plugins (agent-plugins.org) in workspaces.",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                ""
+                "Enables skills and MCP servers from Agent Plugins (agent-plugins.org) in workspaces."
             ],
             "x-enum-varnames": [
+                "ExperimentForkChatTodos",
+                "ExperimentForkNestedSubagents",
+                "ExperimentForkAgentDefinitions",
+                "ExperimentForkSubagentIsolation",
+                "ExperimentForkChatWakeups",
+                "ExperimentForkPluginPacks",
+                "ExperimentForkPinnedSkills",
+                "ExperimentForkWorkflows",
+                "ExperimentForkFamilyMessages",
+                "ExperimentForkHTMLAttachments",
+                "ExperimentForkTokenBudget",
+                "ExperimentForkViewImage",
+                "ExperimentForkContextCache",
+                "ExperimentForkContextHashRows",
                 "ExperimentExample",
                 "ExperimentNotifications",
                 "ExperimentWorkspaceUsage",
@@ -30619,21 +30684,7 @@ const docTemplate = `{
                 "ExperimentChatStageMetrics",
                 "ExperimentChatACPSubagents",
                 "ExperimentChatAutomations",
-                "ExperimentAgentPlugins",
-                "ExperimentForkChatTodos",
-                "ExperimentForkNestedSubagents",
-                "ExperimentForkAgentDefinitions",
-                "ExperimentForkSubagentIsolation",
-                "ExperimentForkChatWakeups",
-                "ExperimentForkPluginPacks",
-                "ExperimentForkPinnedSkills",
-                "ExperimentForkWorkflows",
-                "ExperimentForkFamilyMessages",
-                "ExperimentForkHTMLAttachments",
-                "ExperimentForkTokenBudget",
-                "ExperimentForkViewImage",
-                "ExperimentForkContextCache",
-                "ExperimentForkContextHashRows"
+                "ExperimentAgentPlugins"
             ]
         },
         "codersdk.ExperimentRule": {

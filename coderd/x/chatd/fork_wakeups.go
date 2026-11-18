@@ -168,6 +168,7 @@ func (p *Server) finishWakeupSend(ctx context.Context, chat database.Chat, wakeu
 	if err != nil {
 		return xerrors.Errorf("record failed wake-up run: %w", err)
 	}
+	p.publishForkChange(chat, codersdk.ChatWatchForkFacetWakeups, nil)
 	if finish.status == forkdb.ChatWakeupStatusPaused {
 		p.notifyWakeupPaused(ctx, chat, finish)
 	}
@@ -244,6 +245,9 @@ func (p *Server) sendWakeupPrompt(ctx context.Context, chat database.Chat, wakeu
 			return err
 		},
 	})
+	if err == nil {
+		p.publishForkChange(chat, codersdk.ChatWatchForkFacetWakeups, nil)
+	}
 	if err == nil && finish.status == forkdb.ChatWakeupStatusPaused {
 		p.notifyWakeupPaused(ctx, chat, finish)
 	}
@@ -394,6 +398,11 @@ func (p *Server) finishWakeup(ctx context.Context, chat database.Chat, wakeup fo
 	}
 	if err != nil {
 		return xerrors.Errorf("update wake-up run: %w", err)
+	}
+	// An events poll that found nothing only moves the next poll time,
+	// which the panel does not show.
+	if finish.status != wakeup.Status || finish.runDelta != 0 || wakeup.Kind != forkdb.ChatWakeupKindEvents {
+		p.publishForkChange(chat, codersdk.ChatWatchForkFacetWakeups, nil)
 	}
 	if finish.status == forkdb.ChatWakeupStatusPaused {
 		p.notifyWakeupPaused(ctx, chat, finish)

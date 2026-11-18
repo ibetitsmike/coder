@@ -19,6 +19,8 @@ import {
 	chatListFamilyKey,
 	infiniteChats,
 } from "#/api/queries/chats";
+import { chatDescendantQuestionsKey } from "#/api/queries/forkChatQuestions";
+import { chatWakeupsKey } from "#/api/queries/forkChatWakeups";
 import type {
 	Chat,
 	ChatDiffStatus,
@@ -1096,5 +1098,75 @@ describe("AgentsPageLayout nested subagents", () => {
 				"child-1",
 			]),
 		);
+	});
+});
+
+describe("AgentsPageLayout fork panel events", () => {
+	const sidebarChats = (queryClient: QueryClient) =>
+		queryClient
+			.getQueryData<InfiniteData<Chat[]>>(
+				infiniteChats({ sources: DEFAULT_AGENT_SIDEBAR_FILTERS.sources })
+					.queryKey,
+			)
+			?.pages.flat();
+
+	it("refetches the panel a fork_change event names and leaves the chat list alone", async () => {
+		vi.spyOn(API.experimental, "getChats").mockResolvedValue([MockChat]);
+		const publishChatWatchEvent = mockChatWatchSocket();
+		const { queryClient } = renderLayout();
+		await waitFor(() => expect(sidebarChats(queryClient)).toEqual([MockChat]));
+		const renamed: Chat = { ...MockChat, title: "Renamed" };
+		const pendingList = createDeferred<Chat[]>();
+		vi.mocked(API.experimental.getChats).mockReturnValue(pendingList.promise);
+		void queryClient.invalidateQueries({ queryKey: chatListFamilyKey });
+		await waitFor(() =>
+			expect(API.experimental.getChats).toHaveBeenCalledTimes(2),
+		);
+
+		// The event carries no chat, so it must not cancel the list refetch
+		// as a chat update does.
+		queryClient.setQueryData(chatWakeupsKey(MockChat.id), []);
+		publishChatWatchEvent({
+			kind: "fork_change",
+			chat: MockChat,
+			fork_change: {
+				chat_id: MockChat.id,
+				root_chat_id: MockChat.id,
+				facets: ["wakeups"],
+			},
+		});
+		expect(
+			queryClient.getQueryState(chatWakeupsKey(MockChat.id))?.isInvalidated,
+		).toBe(true);
+		await act(async () => pendingList.resolve([renamed]));
+
+		await waitFor(() => expect(sidebarChats(queryClient)).toEqual([renamed]));
+	});
+
+	it("refetches the fork panels when the chat watch socket opens", async () => {
+		let chatWatchServer: MockWebSocketServer | undefined;
+		vi.spyOn(apiModule, "watchChats").mockImplementation(
+			() =>
+				new OneWayWebSocket<ChatWatchEvent>({
+					apiRoute: "/api/v2/chats/watch",
+					websocketInit: (url, protocol) => {
+						const [socket, server] = createMockWebSocket(url, protocol);
+						chatWatchServer = server;
+						return socket;
+					},
+				}),
+		);
+		vi.spyOn(API.experimental, "getChats").mockResolvedValue([MockChat]);
+		const { queryClient } = renderLayout();
+		await waitFor(() => expect(chatWatchServer).toBeDefined());
+		queryClient.setQueryData(chatDescendantQuestionsKey(MockChat.id), []);
+
+		// An event published before the subscription reached no one.
+		act(() => chatWatchServer?.publishOpen(new Event("open")));
+
+		expect(
+			queryClient.getQueryState(chatDescendantQuestionsKey(MockChat.id))
+				?.isInvalidated,
+		).toBe(true);
 	});
 });

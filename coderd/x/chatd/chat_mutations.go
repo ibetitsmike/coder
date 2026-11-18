@@ -257,6 +257,7 @@ func (p *Server) SendMessage(
 	if result.FirstUserTurn && result.Chat.Title != chatprompt.DefaultChatTitle {
 		p.publishChatPubsubEvent(result.Chat, codersdk.ChatWatchEventKindTitleChange, nil)
 	}
+	p.publishForkLoopScheduled(result.Chat, forkLoop)
 	p.recordQueueWait(ctx, result.Chat, promotedQueuedAt)
 	return result, nil
 }

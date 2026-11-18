@@ -12,10 +12,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as forkWorkflowsApi from "#/api/forkWorkflows";
 import type { WorkflowRun } from "#/api/typesGenerated";
 import { MockChatWorkflowRun } from "#/testHelpers/forkWorkflows";
+import { forkPanelResyncInterval } from "./forkPanelResync";
 import {
 	chatWorkflowRuns,
 	chatWorkflowRunsKey,
-	runListHasRunningRun,
 	type WorkflowRunPageParam,
 } from "./forkWorkflows";
 
@@ -697,64 +697,9 @@ describe("chatWorkflowRuns refetch top-up", () => {
 	});
 });
 
-describe("runListHasRunningRun", () => {
-	it("sees a running run on any loaded page, not just the first", () => {
-		const first = fullPage(49, new Array(50).fill("completed"));
-		const data = {
-			pages: [first, fullPage(-1, ["completed", "running"])],
-			pageParams: [
-				{ after: "" },
-				{ after: "c" },
-			] satisfies WorkflowRunPageParam[],
-		};
-		expect(runListHasRunningRun(data)).toBe(true);
-		expect(
-			runListHasRunningRun({
-				pages: [first, fullPage(-1, new Array(50).fill("completed"))],
-				pageParams: [{ after: "" }, { after: "c" }],
-			}),
-		).toBe(false);
-		expect(runListHasRunningRun(undefined)).toBe(false);
-	});
-
-	it("polls fast while any loaded page has a running run", () => {
+describe("run list resync", () => {
+	it("polls on the panel resync interval the watch stream sits beside", () => {
 		const { refetchInterval } = chatWorkflowRuns("chat-1");
-		if (typeof refetchInterval !== "function") {
-			throw new Error("refetchInterval must be a function");
-		}
-		const queryOf = (
-			data: InfiniteData<WorkflowRun[], WorkflowRunPageParam> | undefined,
-		) =>
-			({ state: { data } }) as Parameters<
-				NonNullable<typeof refetchInterval>
-			>[0];
-		const first = fullPage(49, new Array(50).fill("completed"));
-		// The running run sits on page 2, so the fast interval has to come
-		// from a page other than the first one.
-		expect(
-			refetchInterval(
-				queryOf({
-					pages: [first, fullPage(-1, ["completed", "running"])],
-					pageParams: [{ after: "" }, { after: "c" }],
-				}),
-			),
-		).toBe(5_000);
-		expect(
-			refetchInterval(
-				queryOf({
-					pages: [fullPage(49, ["completed", "running"]), first],
-					pageParams: [{ after: "" }, { after: "c" }],
-				}),
-			),
-		).toBe(5_000);
-		expect(
-			refetchInterval(
-				queryOf({
-					pages: [first, fullPage(-1, new Array(50).fill("completed"))],
-					pageParams: [{ after: "" }, { after: "c" }],
-				}),
-			),
-		).toBe(30_000);
-		expect(refetchInterval(queryOf(undefined))).toBe(30_000);
+		expect(refetchInterval).toBe(forkPanelResyncInterval);
 	});
 });

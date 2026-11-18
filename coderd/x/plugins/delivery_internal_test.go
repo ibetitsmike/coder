@@ -326,6 +326,20 @@ func TestRunnerBindsOnlyChangedChats(t *testing.T) {
 	r.scan(ctx)
 	fullBinds, _ = binds()
 	require.Equal(t, 8, fullBinds)
+
+	// A fork panel change wakes no delivery; any other event does.
+	forkChange, err := json.Marshal(codersdk.ChatWatchEvent{Kind: codersdk.ChatWatchEventKindForkChange})
+	require.NoError(t, err)
+	r.onChatEvent(ctx, forkChange, nil)
+	select {
+	case <-r.deliverWake:
+		t.Fatal("a fork_change event woke delivery")
+	default:
+	}
+	statusChange, err := json.Marshal(codersdk.ChatWatchEvent{Kind: codersdk.ChatWatchEventKindStatusChange})
+	require.NoError(t, err)
+	r.onChatEvent(ctx, statusChange, nil)
+	testutil.TryReceive(ctx, t, r.deliverWake)
 }
 
 type failingChatSubscribe struct{ pubsub.Pubsub }

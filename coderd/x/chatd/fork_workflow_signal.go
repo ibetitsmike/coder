@@ -77,7 +77,7 @@ func (r *workflowRun) addStepLocked(step *workflowStep) bool {
 
 // journalEarlyReport journals a report that addStepLocked applied.
 func (r *workflowRun) journalEarlyReport(ctx context.Context, step *workflowStep) {
-	if err := r.journalStepState(ctx, step, r.p.workflowJournal().writeReport); err != nil {
+	if err := r.journalStepState(ctx, step, r.writeReport); err != nil {
 		r.p.logger.Warn(ctx, "journal an early workflow step report",
 			slog.F("workflow_id", r.id), slog.F("step_id", step.id), slog.Error(err))
 	}
@@ -150,7 +150,7 @@ func (r *workflowRun) acceptReport(ctx context.Context, chatID uuid.UUID, input 
 		// value already. The write repeats the first value, for a report
 		// from the history or an early report whose journal write failed.
 		r.mu.Unlock()
-		if err := r.journalStepState(ctx, step, r.p.workflowJournal().writeReport); err != nil {
+		if err := r.journalStepState(ctx, step, r.writeReport); err != nil {
 			return reportNotRecordedResponse(err), true
 		}
 		return fantasy.NewTextResponse(reportKeptText), true
@@ -162,7 +162,7 @@ func (r *workflowRun) acceptReport(ctx context.Context, chatID uuid.UUID, input 
 	// this write. Only a report that landed wakes the wait, so the script
 	// and the journal hold the same value.
 	snap.status, snap.value = stepStatusReported, value
-	landed, err := r.p.workflowJournal().reportStep(ctx, &snap)
+	landed, err := r.p.workflowJournal().reportStep(ctx, r.id, &snap)
 	if err != nil {
 		return reportNotRecordedResponse(err), true
 	}
@@ -275,7 +275,7 @@ func (r *workflowRun) scanJournaledStepHistory(ctx context.Context, step *workfl
 	}
 	step.setReportedLocked(value)
 	r.mu.Unlock()
-	if err := r.journalStepState(ctx, step, r.p.workflowJournal().writeReport); err != nil {
+	if err := r.journalStepState(ctx, step, r.writeReport); err != nil {
 		r.p.logger.Warn(ctx, "journal a workflow step report from the history",
 			slog.F("workflow_id", r.id), slog.F("step_id", step.id), slog.Error(err))
 	}
