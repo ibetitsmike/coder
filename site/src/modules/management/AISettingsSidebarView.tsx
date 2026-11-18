@@ -19,6 +19,7 @@ import { modelOrganizationSearchParam } from "#/pages/AISettingsPage/ModelsPage/
 import {
 	useForkAgentDefinitionsPath,
 	useForkPluginPacksPath,
+	useForkWorkflowsPath,
 } from "./forkAISettingsNav";
 
 type AISettingsSidebarViewProps = {
@@ -142,6 +143,10 @@ const AISettingsSidebarView: React.FC<AISettingsSidebarViewProps> = ({
 		skillOrganizations,
 		organizationName,
 	);
+	const workflowsPath = useForkWorkflowsPath(
+		skillOrganizations,
+		organizationName,
+	);
 
 	return (
 		<BaseSidebar>
@@ -189,6 +194,9 @@ const AISettingsSidebarView: React.FC<AISettingsSidebarViewProps> = ({
 						{permissions.viewAnyOrganizationSkills && pluginPacksPath && (
 							<SubNavItem href={pluginPacksPath}>Plugin packs</SubNavItem>
 						)}
+						{permissions.viewAnyOrganizationSkills && workflowsPath && (
+							<SubNavItem href={workflowsPath}>Workflows</SubNavItem>
+						)}
 						<SubNavItem href="/ai/settings/lifecycle">Lifecycle</SubNavItem>
 					</SubNavGroup>
 				)}
@@ -235,6 +243,9 @@ const AISettingsSidebarView: React.FC<AISettingsSidebarViewProps> = ({
 							)}
 							{pluginPacksPath && (
 								<SubNavItem href={pluginPacksPath}>Plugin packs</SubNavItem>
+							)}
+							{workflowsPath && (
+								<SubNavItem href={workflowsPath}>Workflows</SubNavItem>
 							)}
 						</SubNavGroup>
 					)}
