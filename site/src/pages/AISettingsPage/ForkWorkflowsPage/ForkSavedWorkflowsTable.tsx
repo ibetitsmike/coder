@@ -9,6 +9,7 @@ import {
 	isSameScope,
 	type SavedWorkflowScope,
 	savedWorkflow,
+	savedWorkflowKey,
 	savedWorkflows,
 } from "#/api/queries/forkSavedWorkflows";
 import type { ForkSavedWorkflowMetadata } from "#/api/typesGenerated";
@@ -32,7 +33,7 @@ const copy = {
 	organization: {
 		title: "Organization workflows",
 		description:
-			"Starlark workflows every member of this organization can run. Chats run one with run_workflow.",
+			"Starlark workflows owned by this organization. Members can run one with run_workflow when its permissions allow.",
 		emptyMessage: "No organization workflows yet.",
 		deleteMessage: (name: string) =>
 			`The organization workflow ${name} will be deleted for everyone in the organization. Personal workflows with the same name are not affected. This action cannot be undone.`,
@@ -122,6 +123,13 @@ export const ForkSavedWorkflowsTable: React.FC<
 								workflows !== undefined &&
 								!workflows.some((workflow) => workflow.name === name);
 							if (!error || isGone) {
+								// A lost response or a 404 can mean the delete committed
+								// without the mutation's success path running, so the
+								// cached detail must not outlive it.
+								queryClient.removeQueries({
+									queryKey: savedWorkflowKey(requestScope, name),
+									exact: true,
+								});
 								setDeleteTarget(undefined);
 								toast.success("Workflow deleted.");
 							}

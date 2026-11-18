@@ -72,8 +72,8 @@ const editFormValues = (
 });
 
 // After a lost response, the create counts as done only when the name was
-// not listed before, is listed after the refetch, and the fetched script
-// matches what the user submitted.
+// not listed before, is listed after the refetch, and the fetched workflow
+// holds every field the user submitted.
 const confirmCreated = async (
 	queryClient: QueryClient,
 	scope: SavedWorkflowScope,
@@ -98,7 +98,12 @@ const confirmCreated = async (
 		const created = await queryClient.fetchQuery(
 			savedWorkflow(queryClient, scope, request.name),
 		);
-		return created.script === request.script;
+		return (
+			created.script === request.script &&
+			created.description === request.description &&
+			created.phases.join("\n") === (request.phases ?? []).join("\n") &&
+			equalsSavedWorkflowArgsSchema(created.args_schema, request.args_schema)
+		);
 	} catch {
 		return false;
 	}
