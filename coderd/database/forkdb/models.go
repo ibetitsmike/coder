@@ -633,7 +633,9 @@ type WorkflowRun struct {
 	Phases        []string              `db:"phases" json:"phases"`
 	CurrentPhase  string                `db:"current_phase" json:"current_phase"`
 	// The last log lines of a live run with their journal sequence under fork_seq, written through as the script logs. The terminal snapshot of result replaces them.
-	Logs json.RawMessage `db:"logs" json:"logs"`
+	Logs        json.RawMessage `db:"logs" json:"logs"`
+	OwnerID     uuid.NullUUID   `db:"owner_id" json:"owner_id"`
+	HeartbeatAt sql.NullTime    `db:"heartbeat_at" json:"heartbeat_at"`
 }
 
 // Workflow steps (child chats) of a fork-workflows run. Finished steps replay from this table without running again.

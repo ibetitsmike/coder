@@ -43,8 +43,11 @@ sql:
       - "../migrations/chatdmig/nodes/01a1e197-0d6a-7ab6-a3a5-c8a54aee0336_chat_wakeup_run_counts.up.sql"
       - "../migrations/chatdmig/nodes/01a1e3a6-abb4-79d2-8ab8-1669a9415507_workflow_run_detail2.up.sql"
       - "../migrations/chatdmig/nodes/01a1e3cc-151b-7b20-af52-1914d69f50a6_chat_user_notifications.up.sql"
+      - "../migrations/chatdmig/nodes/01a1e710-db8b-794a-aa26-1e682b35dda5_chat_wakeup_watches_open_process_idx.up.sql"
       - "../migrations/chatdmig/nodes/01a1e7a0-b608-7a28-af2a-694f67c1ea4a_chat_wakeups_retention_index.up.sql"
       - "../migrations/chatdmig/nodes/01a1e7a0-b6c0-7429-bb01-13b604e2c875_workflow_runs_retention_index.up.sql"
+      - "../migrations/chatdmig/nodes/01a1e891-6025-7d4e-b4bc-bf9b42beabf2_workflow_run_owner.up.sql"
+      - "../migrations/chatdmig/nodes/01a1e891-a2d2-7cfc-9764-2d4c44131e5b_workflow_runs_running_index.up.sql"
     queries: "./queries"
     engine: "postgresql"
     gen:

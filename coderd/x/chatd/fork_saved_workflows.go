@@ -43,7 +43,7 @@ const (
 )
 
 const listWorkflowsDescription = `List the saved workflows that run_workflow can run by name. ` +
-	`They are your personal workflows and the organization workflows shared with you. ` +
+	`They are your personal workflows and the organization workflows that you can read. ` +
 	`Without "name", it returns a page of workflows, each with its name, tier (personal or organization), a short description and whether it has an args schema, and "next_offset" when more remain: send it as "offset" for the next page. ` +
 	`With "name", it returns that workflow's full description, args schema and phases, and a "note" when some of it does not fit. ` +
 	`This tool only reads. Users save and edit workflows in Coder; agents cannot.`
@@ -74,10 +74,7 @@ func ValidateWorkflowArgsSchema(raw json.RawMessage) error {
 	if _, err := checkStepSchema(raw); err != nil {
 		return xerrors.Errorf("args schema: %w", err)
 	}
-	if err := rejectOutOfRangeNumbers(string(raw)); err != nil {
-		return xerrors.Errorf("args schema: %w", err)
-	}
-	return nil
+	return rejectOutOfRangeNumbers(string(raw), "the args schema contains")
 }
 
 type listWorkflowsArgs struct {
@@ -243,7 +240,9 @@ func truncateWorkflowDescription(s string) string {
 // validateSavedWorkflowArgs checks args against the workflow's args
 // schema, with the rules a workflow_report value meets. Missing args
 // validate as an empty object, which main(args) receives. rawArgs, when
-// set, is args before decoding, so no number is rounded before the check.
+// set, is args as the caller sent them, so the out-of-range number check
+// runs on the exact input. The schema check itself validates the
+// re-marshaled args, which the float64 decode has already rounded.
 func validateSavedWorkflowArgs(saved listedWorkflow, args any, rawArgs json.RawMessage) error {
 	if !saved.HasArgsSchema {
 		return nil
@@ -260,12 +259,12 @@ func validateSavedWorkflowArgs(saved listedWorkflow, args any, rawArgs json.RawM
 		}
 	}
 	if len(rawArgs) > 0 {
-		if err := rejectOutOfRangeNumbers(string(rawArgs)); err != nil {
-			return xerrors.Errorf("args: %w", err)
+		if err := rejectOutOfRangeNumbers(string(rawArgs), "the args contain"); err != nil {
+			return err
 		}
 	}
-	if err := rejectOutOfRangeNumbers(string(raw)); err != nil {
-		return xerrors.Errorf("args: %w", err)
+	if err := rejectOutOfRangeNumbers(string(raw), "the args contain"); err != nil {
+		return err
 	}
 	var value any
 	if err := json.Unmarshal(raw, &value); err != nil {

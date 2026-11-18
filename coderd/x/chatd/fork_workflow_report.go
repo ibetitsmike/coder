@@ -16,11 +16,12 @@ import (
 	"strconv"
 	"strings"
 
-	"cdr.dev/slog/v3"
 	"charm.land/fantasy"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/google/uuid"
 	"golang.org/x/xerrors"
+
+	"cdr.dev/slog/v3"
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
@@ -63,10 +64,14 @@ type workflowReportTool struct {
 	chatID uuid.UUID
 }
 
-// reportAcceptedText answers a report the workflow will read: through the
-// live run's own history scan, or through the journal of an interrupted run
-// that a resume replays.
+// reportAcceptedText answers a report the workflow will read: from the live
+// run of this process, or from the journal that the owner of the run or a
+// resume reads.
 const reportAcceptedText = "Value accepted. The workflow has your result."
+
+// reportKeptText answers a report to a step of a running run that already
+// has its value: the run took the first report.
+const reportKeptText = "The workflow already has your earlier result; this call changed nothing. Stop working."
 
 var _ fantasy.AgentTool = (*workflowReportTool)(nil)
 
@@ -114,7 +119,7 @@ func (t *workflowReportTool) Run(ctx context.Context, call fantasy.ToolCall) (fa
 	// cannot validate json.Number instances (they surface as strings), so
 	// an integer beyond the float64 range would be compared rounded while
 	// the workflow receives the original token below.
-	if err := rejectOutOfRangeNumbers(call.Input); err != nil {
+	if err := rejectOutOfRangeNumbers(call.Input, "the report contains"); err != nil {
 		return fantasy.NewTextErrorResponse(err.Error() +
 			". Call workflow_report again with a corrected value."), nil
 	}
@@ -129,19 +134,18 @@ func (t *workflowReportTool) Run(ctx context.Context, call fantasy.ToolCall) (fa
 	return t.accept(ctx, call.Input)
 }
 
-// accept records a valid report. A run this registry still executes
-// captures the value itself: waitStep reads the chat history after the
-// turn ends, so the journal stays the run's writer. An orphaned turn lands
-// here: the process restarted while the run was open, chat recovery
-// re-ran the step child, and the report would otherwise stay in the chat
-// history that nothing reads until a resume replays it. A run this
-// registry holds but that already ended falls through too: its journal row
-// is terminal, and the answer names that instead of accepting a value
-// nothing will read.
+// accept records a valid report. A run this process executes takes the
+// value at once and wakes the step's wait (fork_workflow_signal.go). Any
+// other report lands in the journal: a run another process owns, whose
+// owner the owner channel then wakes, or an orphaned turn, where the
+// process restarted while the run was open, chat recovery re-ran the step
+// child, and a resume replays the row. A run that already ended answers
+// with its terminal status instead of accepting a value nothing will read.
 func (t *workflowReportTool) accept(ctx context.Context, input string) (fantasy.ToolResponse, error) {
-	if run := t.p.workflows.get(t.runID); run != nil &&
-		run.snapshot().Status == workflowStatusRunning {
-		return fantasy.NewTextResponse(reportAcceptedText), nil
+	if run := t.p.workflows.get(t.runID); run != nil {
+		if resp, ok := run.acceptReport(ctx, t.chatID, input); ok {
+			return resp, nil
+		}
 	}
 	j := t.p.workflowJournal()
 	row, found, err := j.getRun(ctx, t.runID)
@@ -165,6 +169,12 @@ func (t *workflowReportTool) accept(ctx context.Context, input string) (fantasy.
 	}
 	step, err := j.getStep(ctx, t.chatID)
 	if errors.Is(err, sql.ErrNoRows) {
+		if row.Status == workflowStatusRunning && row.OwnerID.Valid && row.OwnerID.UUID != j.owner().UUID {
+			// The owner of the run journals the step right after it
+			// creates the child chat, so the row is on its way.
+			return fantasy.NewTextErrorResponse(
+				"the workflow has not journaled this step yet. Call workflow_report again."), nil
+		}
 		// The process died between the child chat's creation and the
 		// step's journal row, so a resume starts the step from scratch.
 		return fantasy.NewTextErrorResponse(
@@ -179,18 +189,32 @@ func (t *workflowReportTool) accept(ctx context.Context, input string) (fantasy.
 		return fantasy.NewTextErrorResponse("this step already failed (" + step.Error +
 			"); the workflow no longer waits for it. Stop working."), nil
 	}
-	// A reported row keeps receiving later calls: the history scan of a
-	// resume reads the last accepted call, so the journal must agree and
-	// record the latest value too. The reuse flag carries over: a row a
-	// resume already replayed must not read as fresh.
-	if err := j.reportStep(ctx, &workflowStep{
+	if row.Status == workflowStatusRunning && step.Status == stepStatusReported {
+		// The owner of a running run takes the first report at once, so a
+		// later one would change a value the script may already hold.
+		return fantasy.NewTextResponse(reportKeptText), nil
+	}
+	// A reported row of an interrupted run keeps receiving later calls:
+	// the latest accepted call wins, the way the history scan of a resume
+	// reads it. While the run is running the write lands only on an open
+	// row, so of two racing calls only the first wakes the owner. The reuse
+	// flag carries over: a row a resume already replayed must not read as
+	// fresh.
+	landed, err := j.reportStep(ctx, &workflowStep{
 		id:     step.ID,
 		status: stepStatusReported,
 		value:  json.RawMessage(input),
 		reused: step.Reused,
-	}); err != nil {
+	})
+	if err != nil {
 		return fantasy.NewTextErrorResponse("the report could not be recorded: " + err.Error() +
 			". Call workflow_report again."), nil
+	}
+	if !landed {
+		return fantasy.NewTextResponse(reportKeptText), nil
+	}
+	if row.Status == workflowStatusRunning && row.OwnerID.Valid {
+		t.p.publishStepReport(ctx, row.OwnerID.UUID, t.runID, step.ID)
 	}
 	return fantasy.NewTextResponse(reportAcceptedText), nil
 }
@@ -215,8 +239,10 @@ const (
 // validation pipeline cannot judge faithfully: integers beyond the exact
 // range in any spelling (plain, exponent, trailing zero), or mantissas and
 // exponents too large to parse exactly. Smaller fractions validate as their
-// float64 decode, which the report semantics tolerate.
-func rejectOutOfRangeNumbers(input string) error {
+// float64 decode, which the report semantics tolerate. subject names what
+// the input holds, so the args path can say "the args contain" where the
+// report path says "the report contains".
+func rejectOutOfRangeNumbers(input, subject string) error {
 	bound := new(big.Int).Lsh(big.NewInt(1), 53)
 	decoder := json.NewDecoder(strings.NewReader(input))
 	decoder.UseNumber()
@@ -239,12 +265,12 @@ func rejectOutOfRangeNumbers(input string) error {
 			// The token is valid JSON, so only an overflowing exponent can
 			// land here: a giant exponent hides any magnitude, and the
 			// float64 decode of it says nothing about the exact value.
-			return xerrors.Errorf("the report contains the number %s, which is too large to validate exactly: send a smaller value or bound the schema", text)
+			return xerrors.Errorf("%s the number %s, which is too large to validate exactly: send a smaller value or bound the schema", subject, text)
 		}
 		// Two-sided rather than abs: abs(math.MinInt) overflows back to a
 		// negative value on 64-bit hosts and would bypass the bound.
 		if len(mantissa) > maxNumberDigits || exponent > maxNumberExponent || exponent < -maxNumberExponent {
-			return xerrors.Errorf("the report contains the number %s, which is too large to validate exactly: send a smaller value or bound the schema", text)
+			return xerrors.Errorf("%s the number %s, which is too large to validate exactly: send a smaller value or bound the schema", subject, text)
 		}
 		// Parse exactly: an integer can hide in exponent or trailing-zero
 		// form (9007199254740993e0, 9007199254740992.0), and the float64
@@ -255,7 +281,7 @@ func rejectOutOfRangeNumbers(input string) error {
 		}
 		integer := ratio.Num()
 		if integer.Abs(integer).Cmp(bound) > 0 {
-			return xerrors.Errorf("the report contains the integer %s, which exceeds the exact validation range (%d): bound the schema or send the value as a string", text, maxExactInteger)
+			return xerrors.Errorf("%s the integer %s, which exceeds the exact validation range (%d): bound the schema or send the value as a string", subject, text, maxExactInteger)
 		}
 	}
 }

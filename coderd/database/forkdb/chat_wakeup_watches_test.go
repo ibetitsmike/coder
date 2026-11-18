@@ -439,6 +439,7 @@ func TestClaimDuePullRequestWatchesPlan(t *testing.T) {
 type planNode struct {
 	NodeType     string     `json:"Node Type"`
 	RelationName string     `json:"Relation Name"`
+	IndexName    string     `json:"Index Name"`
 	Plans        []planNode `json:"Plans"`
 }
 

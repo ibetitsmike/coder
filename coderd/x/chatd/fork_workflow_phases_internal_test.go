@@ -99,8 +99,7 @@ func TestForkWorkflowPhases(t *testing.T) {
 		// Count the phase journal writes while the run is live: a script that
 		// re-enters its current phase in a loop is a no-op and must not
 		// journal a write per call.
-		counting, restore := countPhaseWrites(t, f.server)
-		defer restore()
+		counting := countPhaseWrites(t, f.server)
 		run := f.start(ctx, t, parent, runWorkflowArgs{Script: `
 PHASES = ["plan"]
 

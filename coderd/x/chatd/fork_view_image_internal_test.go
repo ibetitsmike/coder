@@ -24,7 +24,9 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
 	"github.com/coder/coder/v2/coderd/x/chatd/chattest"
 	"github.com/coder/coder/v2/codersdk"
@@ -68,11 +70,58 @@ func testWebP(width, height uint32) []byte {
 	return testRIFF("VP8L", chunk)
 }
 
+// testVP8XChunk returns the payload of an extended WebP header with a width x
+// height canvas and, when animated is true, the animation flag.
+func testVP8XChunk(width, height uint32, animated bool) []byte {
+	vp8x := make([]byte, 10)
+	if animated {
+		vp8x[0] = 0x02
+	}
+	vp8x[4] = byte(width - 1)
+	vp8x[5] = byte((width - 1) >> 8)
+	vp8x[6] = byte((width - 1) >> 16)
+	vp8x[7] = byte(height - 1)
+	vp8x[8] = byte((height - 1) >> 8)
+	vp8x[9] = byte((height - 1) >> 16)
+	return vp8x
+}
+
+// testVP8LChunk returns the payload of a lossless WebP image chunk with a
+// width x height canvas.
+func testVP8LChunk(width, height uint32) []byte {
+	chunk := make([]byte, 10)
+	chunk[0] = 0x2f
+	binary.LittleEndian.PutUint32(chunk[1:], (width-1)|(height-1)<<14)
+	return chunk
+}
+
+// testWebPANMF returns a WebP with a VP8X header whose animation flag is
+// clear and one ANMF frame, so only the frame makes it animated.
+func testWebPANMF(width, height uint32) []byte {
+	return testRIFF2("VP8X", testVP8XChunk(width, height, false), "ANMF", make([]byte, 16))
+}
+
 // testRIFF returns a WebP file with one chunk.
 func testRIFF(name string, chunk []byte) []byte {
-	data := []byte("RIFF\x00\x00\x00\x00WEBP" + name)
-	data = binary.LittleEndian.AppendUint32(data, uint32(len(chunk))) //nolint:gosec // Test chunks are small.
-	data = append(data, chunk...)
+	return testRIFF2(name, chunk, "", nil)
+}
+
+// testRIFF2 returns a WebP file with one or two chunks.
+func testRIFF2(name1 string, chunk1 []byte, name2 string, chunk2 []byte) []byte {
+	data := []byte("RIFF\x00\x00\x00\x00WEBP" + name1)
+	data = binary.LittleEndian.AppendUint32(data, uint32(len(chunk1))) //nolint:gosec // Test chunks are small.
+	data = append(data, chunk1...)
+	if len(chunk1)%2 == 1 {
+		data = append(data, 0)
+	}
+	if name2 != "" {
+		data = append(data, name2...)
+		data = binary.LittleEndian.AppendUint32(data, uint32(len(chunk2))) //nolint:gosec // Test chunks are small.
+		data = append(data, chunk2...)
+		if len(chunk2)%2 == 1 {
+			data = append(data, 0)
+		}
+	}
 	binary.LittleEndian.PutUint32(data[4:8], uint32(len(data)-8)) //nolint:gosec // Test files are small.
 	return data
 }
@@ -167,6 +216,12 @@ func TestViewImageTool(t *testing.T) {
 		"/vp8.webp": testRIFF("VP8 ", []byte{100 << 5 & 0xff, 100 >> 3, 0, 0x9d, 0x01, 0x2a, 9, 0, 10, 0}),
 		// An extended header with no image chunk after it.
 		"/noimage.webp": testRIFF("VP8X", make([]byte, 10)),
+		// A VP8X header with the animation flag set.
+		"/anim-x.webp": testRIFF2("VP8X", testVP8XChunk(9, 10, true), "VP8L", testVP8LChunk(9, 10)),
+		// A VP8X header without the flag, but one ANMF frame.
+		"/anim-f.webp": testWebPANMF(9, 10),
+		// A VP8X header with the flag clear and a VP8L image chunk.
+		"/still-x.webp": testRIFF2("VP8X", testVP8XChunk(9, 10, false), "VP8L", testVP8LChunk(9, 10)),
 	})
 
 	t.Run("DetectsTypeByContent", func(t *testing.T) {
@@ -267,6 +322,20 @@ func TestViewImageTool(t *testing.T) {
 		frames, err := gifFrames(noisyGIF.Bytes())
 		require.NoError(t, err)
 		require.Equal(t, 1, frames)
+	})
+
+	t.Run("AnimatedWebP", func(t *testing.T) {
+		t.Parallel()
+		// A VP8X animation flag alone makes the file animated, as does one
+		// ANMF frame without the flag.
+		for _, path := range []string{"/anim-x.webp", "/anim-f.webp"} {
+			resp := runViewImage(t, openai, conn, path)
+			require.True(t, resp.IsError, path)
+			require.Contains(t, resp.Content, "is an animated WebP, and view_image accepts only still images. Save one frame as a PNG and view that", path)
+		}
+		// The flag clear and no ANMF chunk is a still extended file.
+		resp := runViewImage(t, openai, conn, "/still-x.webp")
+		require.False(t, resp.IsError, resp.Content)
 	})
 
 	t.Run("CallsPerResponse", func(t *testing.T) {
@@ -426,6 +495,26 @@ func TestLimitViewedImages(t *testing.T) {
 		}
 	})
 
+	t.Run("OtherImagesFillTheCount", func(t *testing.T) {
+		t.Parallel()
+		// Even the newest viewed image yields when the prompt's other images
+		// already reach the count, so the total never goes above it.
+		var messages []fantasy.Message
+		for range maxImagesInPrompt {
+			messages = append(messages, fantasy.Message{Role: fantasy.MessageRoleUser, Content: []fantasy.MessagePart{fantasy.FilePart{Data: make([]byte, 10), MediaType: "image/png"}}})
+		}
+		messages = append(messages, turn("a", viewImageToolName, media(10, "older"))...)
+		messages = append(messages, turn("b", viewImageToolName, media(10, "newest"))...)
+		out := limitViewedImages(messages, nil, nil)
+		require.False(t, isMedia(out[len(messages)-3]), "the older image is dropped")
+		require.False(t, isMedia(out[len(messages)-1]), "the newest image does not go over the count")
+		// One image of headroom keeps the newest one.
+		messages[maxImagesInPrompt-1].Content[0] = fantasy.FilePart{Data: make([]byte, 10), MediaType: "application/pdf"}
+		out = limitViewedImages(messages, nil, nil)
+		require.False(t, isMedia(out[len(messages)-3]), "the older image is dropped")
+		require.True(t, isMedia(out[len(messages)-1]), "the newest image stays in the one free slot")
+	})
+
 	t.Run("ReusedCallID", func(t *testing.T) {
 		t.Parallel()
 		// A later computer call reuses a view_image call's ID. Its
@@ -493,12 +582,16 @@ func TestViewImageToolGate(t *testing.T) {
 
 	model := routedModel("anthropic", "anthropic")
 	for _, tt := range []struct {
-		name        string
-		experiments codersdk.Experiments
-		dynamic     bool
-		planMode    bool
-		want        []string
-		bounded     bool
+		name                 string
+		experiments          codersdk.Experiments
+		dynamic              bool
+		planMode             bool
+		policyDropsViewImage bool
+		policyKeepsViewImage bool
+		policyReadOnly       bool
+		policyDisallows      bool
+		want                 []string
+		bounded              bool
 	}{
 		{name: "Off", want: []string{}, bounded: true},
 		{name: "On", experiments: codersdk.Experiments{codersdk.ExperimentForkViewImage}, want: []string{viewImageToolName}, bounded: true},
@@ -507,6 +600,17 @@ func TestViewImageToolGate(t *testing.T) {
 		{name: "OnWithDynamicTool", experiments: codersdk.Experiments{codersdk.ExperimentForkViewImage}, dynamic: true, want: []string{viewImageToolName}, bounded: true},
 		// Plan mode offers no dynamic tools, so the results are the built-in's.
 		{name: "OffWithDynamicToolInPlanMode", dynamic: true, planMode: true, want: []string{}, bounded: true},
+		// A custom agent policy that drops the dynamic view_image leaves the
+		// bound with the name.
+		{name: "OffWithDynamicToolDroppedByPolicy", experiments: codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions}, dynamic: true, policyDropsViewImage: true, want: []string{}, bounded: true},
+		// A policy that keeps the dynamic tool leaves it the owner.
+		{name: "OffWithDynamicToolKeptByPolicy", experiments: codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions}, dynamic: true, policyKeepsViewImage: true, want: []string{}, bounded: false},
+		// A readonly policy drops every dynamic tool, with or without a
+		// tools allowlist naming view_image.
+		{name: "OffWithDynamicToolDroppedByReadOnlyPolicy", experiments: codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions}, dynamic: true, policyReadOnly: true, want: []string{}, bounded: true},
+		{name: "OffWithDynamicToolDroppedByReadOnlyAllowlistPolicy", experiments: codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions}, dynamic: true, policyReadOnly: true, policyKeepsViewImage: true, want: []string{}, bounded: true},
+		// A disallowed_tools policy with no allowlist drops the tool.
+		{name: "OffWithDynamicToolDroppedByDisallowedPolicy", experiments: codersdk.Experiments{codersdk.ExperimentForkAgentDefinitions}, dynamic: true, policyDisallows: true, want: []string{}, bounded: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -529,17 +633,46 @@ func TestViewImageToolGate(t *testing.T) {
 			if tt.dynamic {
 				chat.DynamicTools = pqtype.NullRawMessage{RawMessage: json.RawMessage(`[{"name":"view_image"}]`), Valid: true}
 			}
+			if tt.policyDropsViewImage || tt.policyKeepsViewImage || tt.policyReadOnly || tt.policyDisallows {
+				policy := customAgentToolPolicy{MCPMode: "inherit"}
+				if tt.policyReadOnly {
+					policy.ReadOnly = true
+				}
+				if tt.policyDisallows {
+					policy.DisallowedTools = []string{viewImageToolName}
+				}
+				if tt.policyDropsViewImage || tt.policyKeepsViewImage {
+					policy.Tools = []string{"read_file"}
+					if tt.policyKeepsViewImage {
+						policy.Tools = append(policy.Tools, viewImageToolName)
+					}
+				}
+				raw, err := json.Marshal(policy)
+				require.NoError(t, err)
+				dbgen.ChatSubagent(t, db, forkdb.ChatSubagent{
+					ChatID:     chat.ID,
+					Depth:      1,
+					Isolation:  subagentIsolationShared,
+					ToolPolicy: pqtype.NullRawMessage{RawMessage: raw, Valid: true},
+				})
+			}
 			if tt.planMode {
 				chat.PlanMode = database.NullChatPlanMode{ChatPlanMode: database.ChatPlanModePlan, Valid: true}
 			}
 			original := prompt
-			tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID, forkToolsWithModel(model, &prompt, nil))
+			var policy *customAgentToolPolicy
+			if tt.policyDropsViewImage || tt.policyKeepsViewImage || tt.policyReadOnly || tt.policyDisallows {
+				policy, err = server.customAgentToolPolicyOfChat(ctx, chat)
+				require.NoError(t, err)
+				require.NotNil(t, policy)
+			}
+			tools, err := server.appendForkTools(ctx, nil, chat, chat.LastModelConfigID, forkToolsWithModel(model, &prompt, nil), forkToolsWithCustomAgentPolicy(policy))
 			require.NoError(t, err)
 			require.Equal(t, tt.want, toolNames(tools))
 			_, isText := prompt[1].Content[0].(fantasy.ToolResultPart).Output.(fantasy.ToolResultOutputContentText)
 			require.Equal(t, tt.bounded, isText, "the prompt bound in case %s", tt.name)
 			// A compaction override model gets the same bound.
-			compaction := server.limitViewedImagesForModel(chat, original, model)
+			compaction := server.limitViewedImagesForModel(chat, policy, original, model)
 			_, isText = compaction[1].Content[0].(fantasy.ToolResultPart).Output.(fantasy.ToolResultOutputContentText)
 			require.Equal(t, tt.bounded, isText, "the compaction bound in case %s", tt.name)
 		})

@@ -6,12 +6,16 @@ package chatd
 // 01a1d041) let a restart resume a run and replay its finished steps without
 // running them again. The engine writes every state transition through, and
 // a resume compiles the journaled script and rehydrates the journaled steps.
+// Each run names its owner process (fork_workflow_owner.go), and every
+// engine write carries that owner, so the write of a process that lost the
+// run changes nothing.
 
 import (
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 
 	"github.com/google/uuid"
 	"golang.org/x/xerrors"
@@ -42,7 +46,7 @@ func jsonbValue(raw json.RawMessage) pqtype.NullRawMessage {
 	return pqtype.NullRawMessage{RawMessage: raw, Valid: len(raw) > 0}
 }
 
-// workflowJournal writes the run and step state of one replica through to// workflowJournal writes the run and step state of one replica through to
+// workflowJournal writes the run and step state of one replica through to
 // the journal. Every method runs as the system-restricted actor: the journal
 // is chatd-internal state of chats that chatd manages, and the turn context
 // is the chatd daemon subject, which cannot otherwise update a chat (the way
@@ -64,6 +68,14 @@ func journalCtx(ctx context.Context) context.Context {
 	return dbauthz.AsSystemRestricted(ctx)
 }
 
+// owner is the owner fence of the engine writes: the worker ID of this
+// process. A server that never ran forkInitWorkflowJournal has none, and a
+// NULL owner skips the fence.
+func (j workflowJournal) owner() uuid.NullUUID {
+	id := j.p.workflows.owner.id
+	return uuid.NullUUID{UUID: id, Valid: id != uuid.Nil}
+}
+
 // insertRun journals a fresh run before its script goroutine starts. A
 // failure fails the run_workflow call: an unjournaled run would lose its
 // resume state on a restart.
@@ -81,6 +93,8 @@ func (j workflowJournal) insertRun(ctx context.Context, run *workflowRun) error 
 		Status:        workflowStatusRunning,
 		Phases:        append([]string(nil), run.phases...),
 		CurrentPhase:  run.currentPhase,
+		OwnerID:       j.owner(),
+		HeartbeatAt:   sql.NullTime{Time: j.p.clock.Now(), Valid: true},
 	})
 }
 
@@ -106,39 +120,55 @@ func (j workflowJournal) getRun(ctx context.Context, id uuid.UUID) (run forkdb.W
 // costs the replay that the journal exists to prevent. phases carries the
 // run's phase list and current phase, the state phase() changes while the
 // script runs; a nil phases clears them to empty, so a caller outside the
-// script goroutine must pass the run's snapshot instead. The startup sweep
-// and every other caller pass it.
+// script goroutine must pass the run's snapshot instead. Every caller
+// passes it. fenced is true when the write reached the database but the
+// owner fence rejected it: this process no longer owns the run.
 func (j workflowJournal) updateRunStatus(
 	ctx context.Context, id uuid.UUID, status, errText string, result *runWorkflowResult,
 	phases *workflowPhases,
-) {
+) (fenced bool) {
+	fenced, err := j.writeRunStatus(ctx, id, status, errText, result, phases)
+	if err != nil {
+		j.warn(ctx, "journal workflow run status", id, err)
+	}
+	return fenced
+}
+
+// writeRunStatus is updateRunStatus with the error of a failed write, for
+// the terminal write of a run, which the heartbeat retries
+// (fork_workflow_owner.go).
+func (j workflowJournal) writeRunStatus(
+	ctx context.Context, id uuid.UUID, status, errText string, result *runWorkflowResult,
+	phases *workflowPhases,
+) (fenced bool, err error) {
 	fdb, err := j.store(ctx)
 	if err != nil {
-		j.warn(ctx, "open workflow journal store", id, err)
-		return
+		return false, xerrors.Errorf("open workflow journal store: %w", err)
 	}
 	var raw json.RawMessage
 	if result != nil {
 		data, marshalErr := json.Marshal(result)
 		if marshalErr != nil {
-			j.warn(ctx, "marshal workflow run result", id, marshalErr)
-			return
+			return false, xerrors.Errorf("marshal workflow run result: %w", marshalErr)
 		}
 		raw = data
 	}
 	params := forkdb.UpdateWorkflowRunStatusParams{
-		ID:     id,
-		Status: status,
-		Error:  errText,
-		Result: jsonbValue(raw),
+		ID:      id,
+		Status:  status,
+		Error:   errText,
+		Result:  jsonbValue(raw),
+		OwnerID: j.owner(),
 	}
 	if phases != nil {
 		params.Phases = phases.names
 		params.CurrentPhase = phases.current
 	}
-	if err := fdb.UpdateWorkflowRunStatus(journalCtx(ctx), params); err != nil {
-		j.warn(ctx, "journal workflow run status", id, err)
+	rows, err := fdb.UpdateWorkflowRunStatus(journalCtx(ctx), params)
+	if err != nil {
+		return false, err
 	}
+	return rows == 0, nil
 }
 
 // updateRunPhases journals the phase state of a live run, best effort like
@@ -157,6 +187,7 @@ func (j workflowJournal) updateRunPhases(ctx context.Context, id uuid.UUID, phas
 		ID:           id,
 		Phases:       phases.names,
 		CurrentPhase: phases.current,
+		OwnerID:      j.owner(),
 	}); err != nil {
 		j.warn(ctx, "journal workflow run phases", id, err)
 	}
@@ -177,25 +208,86 @@ func (r *workflowRun) phasesSnapshot() *workflowPhases {
 	return &workflowPhases{names: append([]string(nil), r.phases...), current: r.currentPhase}
 }
 
-// markInterrupted marks every open run of a dead process interrupted. It
-// runs once at chatd startup, before any turn can resume a run.
-func (j workflowJournal) markInterrupted(ctx context.Context) (int64, error) {
+// markStale marks the running runs of dead owners interrupted: the runs
+// whose heartbeat is older than workflowStaleAfter, or that have none. It
+// runs at chatd startup and on every heartbeat tick.
+func (j workflowJournal) markStale(ctx context.Context) (int64, error) {
 	fdb, err := j.store(ctx)
 	if err != nil {
 		return 0, err
 	}
-	return fdb.MarkOpenWorkflowRunsInterrupted(journalCtx(ctx), workflowInterruptedError)
+	return fdb.MarkStaleWorkflowRunsInterrupted(journalCtx(ctx), forkdb.MarkStaleWorkflowRunsInterruptedParams{
+		ErrText:     workflowInterruptedError,
+		StaleBefore: j.p.clock.Now().Add(-workflowStaleAfter),
+	})
+}
+
+// heartbeat renews the heartbeat of the runs ids and returns the ones this
+// process still owns.
+func (j workflowJournal) heartbeat(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error) {
+	fdb, err := j.store(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return fdb.HeartbeatWorkflowRuns(journalCtx(ctx), forkdb.HeartbeatWorkflowRunsParams{
+		Now:     j.p.clock.Now(),
+		Ids:     slices.Clone(ids),
+		OwnerID: j.owner(),
+	})
+}
+
+// claimRun makes this process the owner of an interrupted run, of a
+// running run whose owner is stale, or of a run it already owns. found is
+// false when a live process owns the run or the run ended.
+func (j workflowJournal) claimRun(ctx context.Context, id uuid.UUID) (forkdb.WorkflowRun, bool, error) {
+	fdb, err := j.store(ctx)
+	if err != nil {
+		return forkdb.WorkflowRun{}, false, err
+	}
+	now := j.p.clock.Now()
+	row, err := fdb.ClaimWorkflowRun(journalCtx(ctx), forkdb.ClaimWorkflowRunParams{
+		OwnerID:     j.owner(),
+		Now:         now,
+		ID:          id,
+		StaleBefore: now.Add(-workflowStaleAfter),
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return forkdb.WorkflowRun{}, false, nil
+	}
+	if err != nil {
+		return forkdb.WorkflowRun{}, false, err
+	}
+	return row, true, nil
+}
+
+// releaseRuns marks the runs this process still owns interrupted. Close
+// runs it, so the next process resumes them at once.
+func (j workflowJournal) releaseRuns(ctx context.Context) (int64, error) {
+	owner := j.owner()
+	if !owner.Valid {
+		return 0, nil
+	}
+	fdb, err := j.store(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return fdb.ReleaseWorkflowRuns(journalCtx(ctx), forkdb.ReleaseWorkflowRunsParams{
+		ErrText: workflowInterruptedError,
+		OwnerID: owner,
+	})
 }
 
 // insertStep journals a step after its child chat was created. A failure
 // fails the step and the run, and stops the child: a step that the journal
-// lost must not keep consuming model capacity.
+// lost must not keep consuming model capacity. errWorkflowRunLost means
+// this process no longer owns the run; the child then belongs to the new
+// owner, which adopts it.
 func (j workflowJournal) insertStep(ctx context.Context, runID uuid.UUID, step *workflowStep) error {
 	fdb, err := j.store(ctx)
 	if err != nil {
 		return err
 	}
-	return fdb.InsertWorkflowStep(journalCtx(ctx), forkdb.InsertWorkflowStepParams{
+	rows, err := fdb.InsertWorkflowStep(journalCtx(ctx), forkdb.InsertWorkflowStepParams{
 		ID:         step.id,
 		RunID:      runID,
 		SpecKey:    step.specKey,
@@ -206,7 +298,15 @@ func (j workflowJournal) insertStep(ctx context.Context, runID uuid.UUID, step *
 		Value:      jsonbValue(step.value),
 		Reused:     step.reused,
 		Phase:      step.phase,
+		OwnerID:    j.owner(),
 	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return errWorkflowRunLost
+	}
+	return nil
 }
 
 // failOpenSteps journals the open steps of a run that is being stopped as
@@ -220,6 +320,7 @@ func (j workflowJournal) failOpenSteps(ctx context.Context, runID uuid.UUID) (in
 	return fdb.FailOpenWorkflowStepsOfRun(journalCtx(ctx), forkdb.FailOpenWorkflowStepsOfRunParams{
 		RunID:   runID,
 		ErrText: workflowStopError,
+		OwnerID: j.owner(),
 	})
 }
 
@@ -230,12 +331,13 @@ func (j workflowJournal) updateStep(ctx context.Context, step *workflowStep) {
 		j.warn(ctx, "open workflow journal store", step.id, err)
 		return
 	}
-	if err := fdb.UpdateWorkflowStep(journalCtx(ctx), forkdb.UpdateWorkflowStepParams{
-		ID:     step.id,
-		Status: step.status,
-		Value:  jsonbValue(step.value),
-		Error:  step.err,
-		Reused: step.reused,
+	if _, err := fdb.UpdateWorkflowStep(journalCtx(ctx), forkdb.UpdateWorkflowStepParams{
+		ID:      step.id,
+		Status:  step.status,
+		Value:   jsonbValue(step.value),
+		Error:   step.err,
+		Reused:  step.reused,
+		OwnerID: j.owner(),
 	}); err != nil {
 		j.warn(ctx, "journal workflow step status", step.id, err)
 	}
@@ -243,7 +345,8 @@ func (j workflowJournal) updateStep(ctx context.Context, step *workflowStep) {
 
 // markStepReused journals the reuse flag of a replayed step. A finished row
 // keeps its status, value and finished_at; only the flag flips. Best effort
-// like updateStep.
+// like updateStep. The flag only records that a resume replayed the step,
+// so the write carries no owner fence.
 func (j workflowJournal) markStepReused(ctx context.Context, id uuid.UUID) {
 	fdb, err := j.store(ctx)
 	if err != nil {
@@ -284,19 +387,29 @@ func (j workflowJournal) getStep(ctx context.Context, id uuid.UUID) (forkdb.Work
 // recovery and reported before anyone resumed the run. Unlike updateStep it
 // is not best effort: the tool's answer tells the model whether the value
 // reached the journal, and a lost write would answer "accepted" for a value
-// that only the next report's retry can save.
-func (j workflowJournal) reportStep(ctx context.Context, step *workflowStep) error {
+// that only the next report's retry can save. It carries no owner fence:
+// a report reaches the row whichever process owns the run. landed is false
+// when the row already holds a report of a running run, which wins.
+func (j workflowJournal) reportStep(ctx context.Context, step *workflowStep) (landed bool, err error) {
 	fdb, err := j.store(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return fdb.UpdateWorkflowStep(journalCtx(ctx), forkdb.UpdateWorkflowStepParams{
+	n, err := fdb.UpdateWorkflowStep(journalCtx(ctx), forkdb.UpdateWorkflowStepParams{
 		ID:     step.id,
 		Status: step.status,
 		Value:  jsonbValue(step.value),
 		Error:  step.err,
 		Reused: step.reused,
 	})
+	return n > 0, err
+}
+
+// writeReport journals the report of step for journalStepState, which only
+// needs to know that the write ran.
+func (j workflowJournal) writeReport(ctx context.Context, step *workflowStep) error {
+	_, err := j.reportStep(ctx, step)
+	return err
 }
 
 // setLogs writes the retained log lines of a live run through to the journal,
@@ -323,6 +436,7 @@ func (j workflowJournal) setLogs(ctx context.Context, runID uuid.UUID, seq int64
 		ID:      runID,
 		Lines:   raw,
 		ForkSeq: seq,
+		OwnerID: j.owner(),
 	}); err != nil {
 		j.warn(ctx, "journal workflow run logs", runID, err)
 	}
@@ -376,26 +490,13 @@ func (j workflowJournal) getSteps(ctx context.Context, runID uuid.UUID) ([]forkd
 	return fdb.GetWorkflowStepsByRun(journalCtx(ctx), runID)
 }
 
-// forkInitWorkflowJournal marks the open runs of previous processes
-// interrupted. chatd runs it once at startup, before any turn can resume a
-// run.
-func (p *Server) forkInitWorkflowJournal() {
-	ctx := journalCtx(p.ctx)
-	n, err := p.workflowJournal().markInterrupted(ctx)
-	if err != nil {
-		p.logger.Warn(p.ctx, "mark workflow runs interrupted", slog.Error(err))
-		return
-	}
-	if n > 0 {
-		p.logger.Info(p.ctx, "marked workflow runs interrupted", slog.F("count", n))
-	}
-}
-
 // resumeWorkflowRun continues a run that the registry lost: the journaled
 // run of this chat. A terminal row returns its result snapshot at once; an
 // open row rehydrates and re-executes the journaled script, where finished
 // steps replay their journaled values and unfinished steps re-run in their
-// child chats.
+// child chats. A resume first claims the run, so a run that another live
+// process executes is not executed twice: the resume answers with a
+// *workflowRunElsewhereError that carries the journal state.
 func (p *Server) resumeWorkflowRun(
 	ctx context.Context,
 	chat database.Chat,
@@ -417,19 +518,40 @@ func (p *Server) resumeWorkflowRun(
 		p.workflowJournal().markStepsReused(ctx, row.ID)
 		return run, nil
 	}
+	// The claim makes the row running and owned by this process before the
+	// script starts, so a crash during the resume leaves the row resumable
+	// once the heartbeat goes stale.
+	release, err := p.workflows.reserveRun(ctx, row.ID)
+	if err != nil {
+		return nil, xerrors.Errorf("wait for another resume of the workflow run: %w", err)
+	}
+	claimed, ok, err := p.workflowJournal().claimRun(ctx, row.ID)
+	if err != nil {
+		release()
+		return nil, xerrors.Errorf("claim the workflow run: %w", err)
+	}
+	if !ok {
+		release()
+		return p.resumeUnclaimedWorkflowRun(ctx, chat, row.ID)
+	}
+	row = claimed
 	run, err := p.rehydrateWorkflowRun(ctx, chat, row)
 	if err != nil {
+		// The row stays resumable for a later process that can compile it,
+		// unless another caller of this process resumed the run meanwhile.
+		if p.workflows.get(row.ID) == nil {
+			p.workflowJournal().updateRunStatus(ctx, row.ID, workflowStatusInterrupted, "resume the run: "+err.Error(), nil,
+				&workflowPhases{names: row.Phases, current: row.CurrentPhase})
+		}
+		release()
 		return nil, err
 	}
-	if _, added := p.workflows.add(run); !added {
+	_, added := p.workflows.add(run)
+	release()
+	if !added {
 		// Another caller resumed the same run first.
 		return p.workflows.get(row.ID), nil
 	}
-	// The run is live again before its script starts, so a crash during the
-	// resume leaves the row resumable. The write carries the journaled
-	// phases back: a nil phases would blank them.
-	p.workflowJournal().updateRunStatus(ctx, row.ID, workflowStatusRunning, "", nil,
-		&workflowPhases{names: row.Phases, current: row.CurrentPhase})
 	runCtx, stop := p.inflightChatContext(dbauthz.AsChatd(context.Background()), chat) //nolint:gocritic // see startWorkflowRun
 	run.mu.Lock()
 	run.cancel = stop
@@ -446,6 +568,30 @@ func (p *Server) resumeWorkflowRun(
 		return nil, xerrors.Errorf("resume workflow run: %w", err)
 	}
 	return run, nil
+}
+
+// resumeUnclaimedWorkflowRun answers a resume whose claim found no row: the
+// run ended since the read, a caller of this process resumed it, or another
+// live process executes it.
+func (p *Server) resumeUnclaimedWorkflowRun(ctx context.Context, chat database.Chat, id uuid.UUID) (*workflowRun, error) {
+	if run := p.workflows.get(id); run != nil {
+		return run, nil
+	}
+	row, found, err := p.workflowJournal().getRun(ctx, id)
+	if err != nil {
+		return nil, xerrors.Errorf("load the workflow journal: %w", err)
+	}
+	if !found {
+		return nil, xerrors.Errorf("the workflow run %s is no longer in the journal", id)
+	}
+	if row.Status == workflowStatusCompleted || row.Status == workflowStatusFailed || row.Status == workflowStatusStopped {
+		return p.resumeWorkflowRun(ctx, chat, row)
+	}
+	res, _, err := p.workflowResultFromJournal(ctx, chat.ID, id)
+	if err != nil {
+		return nil, err
+	}
+	return nil, &workflowRunElsewhereError{result: res}
 }
 
 // rehydrateWorkflowRun rebuilds an open run from its journal rows. seen
@@ -622,7 +768,9 @@ func (p *Server) workflowResultFromJournal(
 			ChatID: srow.ID.String(),
 			Title:  srow.Title,
 			Status: srow.Status,
-			Reused: true,
+			// A running row has a live owner, whose row carries the flag; a
+			// resume of an interrupted run replays every step.
+			Reused: srow.Reused || row.Status != workflowStatusRunning,
 			Phase:  srow.Phase,
 			Error:  srow.Error,
 		})

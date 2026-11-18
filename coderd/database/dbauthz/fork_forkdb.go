@@ -711,14 +711,14 @@ func (f *forkQuerier) InsertWorkflowRun(ctx context.Context, arg forkdb.InsertWo
 // InsertWorkflowStep authorizes as an update of the run's chat. A caller
 // with site-wide chat permission skips the read of the run, which no longer
 // contributes to the decision (fork issue #292).
-func (f *forkQuerier) InsertWorkflowStep(ctx context.Context, arg forkdb.InsertWorkflowStepParams) error {
+func (f *forkQuerier) InsertWorkflowStep(ctx context.Context, arg forkdb.InsertWorkflowStepParams) (int64, error) {
 	if !f.actsOnAllChats(ctx) {
 		run, err := f.db.GetWorkflowRun(ctx, arg.RunID)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		if err := f.authorizeChat(ctx, policy.ActionUpdate, run.ChatID); err != nil {
-			return err
+			return 0, err
 		}
 	}
 	return f.db.InsertWorkflowStep(ctx, arg)
@@ -925,6 +925,42 @@ func (f *forkQuerier) ClaimDuePullRequestWatches(ctx context.Context, arg forkdb
 	return f.db.ClaimDuePullRequestWatches(ctx, arg)
 }
 
+// FireChatProcessWatches spans the wake-ups of chats on one agent, so it
+// needs site-wide chat access, like chatd's.
+func (f *forkQuerier) FireChatProcessWatches(ctx context.Context, arg forkdb.FireChatProcessWatchesParams) ([]uuid.UUID, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChat); err != nil {
+		return nil, err
+	}
+	return f.db.FireChatProcessWatches(ctx, arg)
+}
+
+// ChatProcessWatchTakesLines spans the wake-ups of a chat on one agent, so
+// it needs site-wide chat access, like chatd's.
+func (f *forkQuerier) ChatProcessWatchTakesLines(ctx context.Context, arg forkdb.ChatProcessWatchTakesLinesParams) (bool, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
+		return false, err
+	}
+	return f.db.ChatProcessWatchTakesLines(ctx, arg)
+}
+
+// MarkChatProcessWatchesReported spans the wake-ups of chats on one agent,
+// so it needs site-wide chat access, like chatd's.
+func (f *forkQuerier) MarkChatProcessWatchesReported(ctx context.Context, arg forkdb.MarkChatProcessWatchesReportedParams) (int64, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChat); err != nil {
+		return 0, err
+	}
+	return f.db.MarkChatProcessWatchesReported(ctx, arg)
+}
+
+// MarkLostChatProcessWatches spans chats, so it needs site-wide chat access,
+// like chatd's.
+func (f *forkQuerier) MarkLostChatProcessWatches(ctx context.Context, arg forkdb.MarkLostChatProcessWatchesParams) ([]uuid.UUID, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChat); err != nil {
+		return nil, err
+	}
+	return f.db.MarkLostChatProcessWatches(ctx, arg)
+}
+
 func (f *forkQuerier) RecordPullRequestWatchPoll(ctx context.Context, arg forkdb.RecordPullRequestWatchPollParams) (int64, error) {
 	if err := f.authorizeChatWakeupID(ctx, policy.ActionUpdate, arg.WakeupID); err != nil {
 		return 0, err
@@ -932,12 +968,46 @@ func (f *forkQuerier) RecordPullRequestWatchPoll(ctx context.Context, arg forkdb
 	return f.db.RecordPullRequestWatchPoll(ctx, arg)
 }
 
-// MarkOpenWorkflowRunsInterrupted runs once at chatd startup, as the system.
-func (f *forkQuerier) MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error) {
+// MarkStaleWorkflowRunsInterrupted runs at chatd startup and on every
+// heartbeat tick, as the system.
+func (f *forkQuerier) MarkStaleWorkflowRunsInterrupted(ctx context.Context, arg forkdb.MarkStaleWorkflowRunsInterruptedParams) (int64, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
 		return 0, err
 	}
-	return f.db.MarkOpenWorkflowRunsInterrupted(ctx, errText)
+	return f.db.MarkStaleWorkflowRunsInterrupted(ctx, arg)
+}
+
+// HeartbeatWorkflowRuns spans the runs of many chats, as the system, like
+// MarkStaleWorkflowRunsInterrupted.
+func (f *forkQuerier) HeartbeatWorkflowRuns(ctx context.Context, arg forkdb.HeartbeatWorkflowRunsParams) ([]uuid.UUID, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
+		return nil, err
+	}
+	return f.db.HeartbeatWorkflowRuns(ctx, arg)
+}
+
+// ReleaseWorkflowRuns runs once when chatd closes, as the system, like
+// MarkStaleWorkflowRunsInterrupted.
+func (f *forkQuerier) ReleaseWorkflowRuns(ctx context.Context, arg forkdb.ReleaseWorkflowRunsParams) (int64, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
+		return 0, err
+	}
+	return f.db.ReleaseWorkflowRuns(ctx, arg)
+}
+
+// ClaimWorkflowRun authorizes as an update of the run's chat, like
+// UpdateWorkflowRunStatus.
+func (f *forkQuerier) ClaimWorkflowRun(ctx context.Context, arg forkdb.ClaimWorkflowRunParams) (forkdb.WorkflowRun, error) {
+	if !f.actsOnAllChats(ctx) {
+		run, err := f.db.GetWorkflowRun(ctx, arg.ID)
+		if err != nil {
+			return forkdb.WorkflowRun{}, err
+		}
+		if err := f.authorizeChat(ctx, policy.ActionUpdate, run.ChatID); err != nil {
+			return forkdb.WorkflowRun{}, err
+		}
+	}
+	return f.db.ClaimWorkflowRun(ctx, arg)
 }
 
 // LockChatForNoKeyUpdate authorizes as an update of the chat, like
@@ -1126,14 +1196,14 @@ func (f *forkQuerier) UpdateWorkflowRunPhases(ctx context.Context, arg forkdb.Up
 // UpdateWorkflowRunStatus authorizes as an update of the run's chat. A caller
 // with site-wide chat permission skips the read, which no longer contributes
 // to the decision (fork issue #292).
-func (f *forkQuerier) UpdateWorkflowRunStatus(ctx context.Context, arg forkdb.UpdateWorkflowRunStatusParams) error {
+func (f *forkQuerier) UpdateWorkflowRunStatus(ctx context.Context, arg forkdb.UpdateWorkflowRunStatusParams) (int64, error) {
 	if !f.actsOnAllChats(ctx) {
 		run, err := f.db.GetWorkflowRun(ctx, arg.ID)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		if err := f.authorizeChat(ctx, policy.ActionUpdate, run.ChatID); err != nil {
-			return err
+			return 0, err
 		}
 	}
 	return f.db.UpdateWorkflowRunStatus(ctx, arg)
@@ -1191,22 +1261,21 @@ func (f *forkQuerier) SetWorkflowRunLogs(ctx context.Context, arg forkdb.SetWork
 // UpdateWorkflowStep authorizes as an update of the step run's chat. A caller
 // with site-wide chat permission skips the authorization reads, which no
 // longer contribute to the decision (fork issue #292). GetWorkflowStep still
-// runs even on the fast path: the UPDATE is a :exec query, so without the
-// pre-read a step deleted between the caller's read and this write would
-// vanish silently and workflowJournal.reportStep would report success on a
-// lost write.
-func (f *forkQuerier) UpdateWorkflowStep(ctx context.Context, arg forkdb.UpdateWorkflowStepParams) error {
+// runs even on the fast path: a step deleted between the caller's read and
+// this write answers sql.ErrNoRows, while 0 rows means the row kept its
+// report.
+func (f *forkQuerier) UpdateWorkflowStep(ctx context.Context, arg forkdb.UpdateWorkflowStepParams) (int64, error) {
 	step, err := f.db.GetWorkflowStep(ctx, arg.ID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if !f.actsOnAllChats(ctx) {
 		run, err := f.db.GetWorkflowRun(ctx, step.RunID)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		if err := f.authorizeChat(ctx, policy.ActionUpdate, run.ChatID); err != nil {
-			return err
+			return 0, err
 		}
 	}
 	return f.db.UpdateWorkflowStep(ctx, arg)

@@ -22,6 +22,12 @@ type Querier interface {
 	// each other.
 	AcquireSharedLock(ctx context.Context, lockID int64) error
 	CancelChatWakeupsByChatID(ctx context.Context, arg CancelChatWakeupsByChatIDParams) ([]ChatWakeup, error)
+	// Reports whether an open process watch of an active or paused wake-up on
+	// process @process_id of chat @chat_id on agent @agent_id still takes output
+	// lines, as FireChatProcessWatches fires them, without the output_at check.
+	// @wakeup_id narrows the watches when set. The agent stops its output watch
+	// when none does.
+	ChatProcessWatchTakesLines(ctx context.Context, arg ChatProcessWatchTakesLinesParams) (bool, error)
 	// Claims the open pull_request watches that the pull request poller of a
 	// replica reads next: those of active wake-ups of unarchived chats whose
 	// spec next_poll_at has come by @now, or that have none, and that no read
@@ -32,12 +38,21 @@ type Querier interface {
 	// read or the lease runs out. The rows are sorted by pull request and chat
 	// owner, the key of one shared read.
 	ClaimDuePullRequestWatches(ctx context.Context, arg ClaimDuePullRequestWatchesParams) ([]ClaimDuePullRequestWatchesRow, error)
+	// A resume takes over a run: an interrupted run, a running run whose owner
+	// stopped its heartbeat, or a run this process already owns. A running run
+	// of a live owner returns no row, so two resumes of one run cannot both
+	// execute it.
+	ClaimWorkflowRun(ctx context.Context, arg ClaimWorkflowRunParams) (WorkflowRun, error)
 	ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLinkCodeParams) (PluginLinkCode, error)
 	CountChatFamilyMessagesSince(ctx context.Context, arg CountChatFamilyMessagesSinceParams) (int64, error)
 	// Counts the notifications of a chat since a time, for the hourly limit.
 	CountChatUserNotificationsSince(ctx context.Context, arg CountChatUserNotificationsSinceParams) (int64, error)
 	// Counts the unarchived subagent chats under @root_chat_id that have not
-	// finished. A finished subagent is waiting or error.
+	// finished. A finished subagent is waiting or error. A workflow step child
+	// whose step is reported counts as finished: the workflow is done with it
+	// and admits its next step while the child ends its turn. A user message
+	// after the report, such as a message_agent that resumes the child, starts
+	// new work, so the child counts again. A step's ID is its child chat ID.
 	CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error)
 	DeleteChatExcludedPluginPack(ctx context.Context, arg DeleteChatExcludedPluginPackParams) error
 	DeleteChatFamilyMessagesBefore(ctx context.Context, arg DeleteChatFamilyMessagesBeforeParams) error
@@ -95,6 +110,21 @@ type Querier interface {
 	// stop_workflow fails the open steps of a run that it stops. err_text, not
 	// error: it becomes a mock parameter name.
 	FailOpenWorkflowStepsOfRun(ctx context.Context, arg FailOpenWorkflowStepsOfRunParams) (int64, error)
+	// Fires the open process watches of active or paused wake-ups on process
+	// @process_id of chat @chat_id on agent @agent_id, for an event that the
+	// agent reported or that chatd read from it. The agent drops an event once
+	// it is acked, so a paused wake-up keeps it for its resume. @wakeup_id
+	// narrows the watches when set. An event that ends the watch, @ended, is an
+	// object with an exit or a lost key, which merges into the payload.
+	// Otherwise the event carries @matched output lines that matched the
+	// pattern of the watch, @lines, which add to the lines the payload holds
+	// until a delivery, keeping the last 16384 characters. Lines fire only a
+	// watch with an output pattern whose message count is below its
+	// output_max_events, and that has not ended. @output_at, the time the agent matched the lines, must be after
+	// the output_at in the spec of the watch, which it then replaces, so a
+	// report that the agent sends again changes nothing. The first event keeps
+	// its fired_at. Returns the chats to poke.
+	FireChatProcessWatches(ctx context.Context, arg FireChatProcessWatchesParams) ([]uuid.UUID, error)
 	GetChatFamilyMessageRecipient(ctx context.Context, arg GetChatFamilyMessageRecipientParams) (uuid.UUID, error)
 	GetChatNote(ctx context.Context, arg GetChatNoteParams) (ChatNote, error)
 	GetChatNoteCall(ctx context.Context, arg GetChatNoteCallParams) (ChatNoteCall, error)
@@ -200,6 +230,11 @@ type Querier interface {
 	// The authorizer of UpdateWorkflowStep reads the step to find its run.
 	GetWorkflowStep(ctx context.Context, id uuid.UUID) (WorkflowStep, error)
 	GetWorkflowStepsByRun(ctx context.Context, runID uuid.UUID) ([]WorkflowStep, error)
+	// The owner of the runs ids says it still executes them. It returns the IDs
+	// that it still owns: a run that is missing was swept or claimed by another
+	// process. The heartbeat leaves updated_at alone, which tells the UI that a
+	// run changed.
+	HeartbeatWorkflowRuns(ctx context.Context, arg HeartbeatWorkflowRunsParams) ([]uuid.UUID, error)
 	// Turns off a pack of the chat's organization for the chat. It returns no
 	// row for a pack that does not exist or is in another organization.
 	InsertChatExcludedPluginPack(ctx context.Context, arg InsertChatExcludedPluginPackParams) (ChatExcludedPluginPack, error)
@@ -240,10 +275,12 @@ type Querier interface {
 	// phases. The ::text[] cast makes sqlc emit []string wrapped in pq.Array; a
 	// bare COALESCE(@phases, ...) leaves it interface{}. COALESCE keeps a nil
 	// slice out of the NOT NULL column: pq encodes a nil []string as NULL.
+	// owner_id and heartbeat_at name the chatd process that runs the script.
 	InsertWorkflowRun(ctx context.Context, arg InsertWorkflowRunParams) error
 	// phase is the name that was current when the step started, or '' when the
-	// script called no phase() before it.
-	InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStepParams) error
+	// script called no phase() before it. owner_id fences the insert like
+	// UpdateWorkflowRunStatus: a run this process does not own inserts nothing.
+	InsertWorkflowStep(ctx context.Context, arg InsertWorkflowStepParams) (int64, error)
 	// Lists the unarchived chats of the family of @root_id, the root first.
 	ListChatFamilyMembers(ctx context.Context, arg ListChatFamilyMembersParams) ([]ListChatFamilyMembersRow, error)
 	// ListChatHistoryRows lists the rows that shape the context windows of a
@@ -270,16 +307,18 @@ type Querier interface {
 	// nothing: a delivery locks its wake-up with LockActiveChatWakeup. A wake-up
 	// is due when its chat would not queue a new message and either its run time
 	// has come or, for an events wake-up before its expiry, it has a child_done
-	// watch or a fired pull_request watch in chat_wakeup_ready_watches whose
-	// last send did not fail. A failed send waits for the run time that the
-	// failure set, so it does not repeat at once, and the other watches wait for
-	// their run time, which reads them. The chats that would queue are the busy
-	// and paused chats, and the errored chats with a non-empty queue
-	// (chatstate's R, I, A, P and E1 states). The wake-ups of archived chats are
-	// always due by their run time, so the waker cancels them. chat_id limits
-	// the list to the wake-ups of one chat and to those that watch it as a
-	// child. The due rows page by (next_run_at, id) after after_run_at and
-	// after_id.
+	// watch or a fired pull_request or process watch in
+	// chat_wakeup_ready_watches whose last send did not fail. A failed send
+	// waits for the run time that the failure set, so it does not repeat at
+	// once, and the other watches wait for their run time, which reads them.
+	// Output lines of a process watch also wait for the run time while the
+	// cool-down after the last message of the wake-up runs.
+	// The chats that would queue are the busy and paused chats, and the errored
+	// chats with a non-empty queue (chatstate's R, I, A, P and E1 states). The
+	// wake-ups of archived chats are always due by their run time, so the waker
+	// cancels them. chat_id limits the list to the wake-ups of one chat and to
+	// those that watch it as a child. The due rows page by (next_run_at, id)
+	// after after_run_at and after_id.
 	ListDueChatWakeups(ctx context.Context, arg ListDueChatWakeupsParams) ([]ListDueChatWakeupsRow, error)
 	// Lists the watches of the active wake-ups of @chat_id that are not
 	// delivered, so a new watch can leave out what an earlier one still watches.
@@ -303,19 +342,39 @@ type Querier interface {
 	// conflict with the FOR KEY SHARE locks that foreign key checks of child chat
 	// rows take, so a child transaction can commit while the lock is held.
 	LockChatForNoKeyUpdate(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	// Records that agent @agent_id held no event at @reported_at that coderd
+	// did not ack: sets reported_at in the spec of its open process
+	// watches of active or paused wake-ups that have not ended. The final poll
+	// of a wake-up waits for it.
+	MarkChatProcessWatchesReported(ctx context.Context, arg MarkChatProcessWatchesReportedParams) (int64, error)
 	// Records a message that the watch sent. Run it in the transaction that
 	// inserts the message, after the wake-up row is locked. @deliveries is the
 	// count the caller read: no row means another delivery of the watch won,
 	// or the watch is done. @done marks the watch delivered, and @spec_patch
 	// merges into its spec. A delivery consumes the fired event, so an open
-	// watch is not ready again until a new event fires.
+	// watch is not ready again until a new event fires. @fired_payload, when set,
+	// is the payload the caller read: no row means that a later event changed
+	// it.
 	MarkChatWakeupWatchDelivered(ctx context.Context, arg MarkChatWakeupWatchDeliveredParams) (ChatWakeupWatch, error)
 	// Records that a send of the watch failed. The first failure since the last
 	// delivery keeps its time.
 	MarkChatWakeupWatchFailed(ctx context.Context, arg MarkChatWakeupWatchFailedParams) error
-	// chatd runs this once at startup: runs owned by a dead process stay open.
-	// The parameter is err_text, not error: it becomes a mock parameter name.
-	MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error)
+	// Fires as lost the open process watches of active or paused wake-ups whose
+	// agent can no longer report the process. With @reason when the agent is
+	// not an agent of the latest build of the chat's workspace, or that build
+	// does not start the workspace, or the chat has no workspace; the time of
+	// the loss is when the latest build was created, or @now without one. With
+	// @restarted_reason when the agent is current but started after the watch
+	// was created, which an agent reports only when its process starts, so it
+	// lost the processes of its earlier run; the time of the loss is when the
+	// agent started. Watches that already ended stay as they are. Returns the
+	// chats to poke.
+	MarkLostChatProcessWatches(ctx context.Context, arg MarkLostChatProcessWatchesParams) ([]uuid.UUID, error)
+	// chatd runs this at startup and on every heartbeat tick: a running run
+	// whose owner stopped its heartbeat belongs to a dead process. A NULL
+	// heartbeat is a row written before owners existed. The parameter is
+	// err_text, not error: it becomes a mock parameter name.
+	MarkStaleWorkflowRunsInterrupted(ctx context.Context, arg MarkStaleWorkflowRunsInterruptedParams) (int64, error)
 	// The replay of a finished step flips only the reuse flag: its status, value
 	// and finished_at stay as the journal holds them.
 	MarkWorkflowStepReused(ctx context.Context, id uuid.UUID) error
@@ -329,6 +388,11 @@ type Querier interface {
 	// replaces the text. No row changes when the watch is delivered.
 	RecordPullRequestWatchPoll(ctx context.Context, arg RecordPullRequestWatchPollParams) (int64, error)
 	ReleasePluginLeases(ctx context.Context, runnerID uuid.UUID) error
+	// chatd runs this when it closes: the runs it still owns stay open as
+	// interrupted at once, so the next process can resume them without waiting
+	// for the stale window. err_text, not error: it becomes a mock parameter
+	// name.
+	ReleaseWorkflowRuns(ctx context.Context, arg ReleaseWorkflowRunsParams) (int64, error)
 	// Renews the leases a replica holds on enabled plugins. It returns only the
 	// id and updated_at, so a renewal reads and decrypts no config: the replica
 	// reads a full row only when updated_at changed.
@@ -353,7 +417,9 @@ type Querier interface {
 	// to the last maxWorkflowLogs lines. lines replaces the retained lines when
 	// it is at least as new as the stored sequence, so a stalled write of an
 	// older snapshot cannot replace newer lines. The caller keeps the sequence in
-	// the lines payload under the fork_seq key.
+	// the lines payload under the fork_seq key. owner_id fences the write to
+	// the owner without the running check: the terminal flush follows the
+	// terminal status write of the same owner.
 	SetWorkflowRunLogs(ctx context.Context, arg SetWorkflowRunLogsParams) error
 	// Deleted messages count too: they were paid for. Messages without a price
 	// have a NULL cost and count as zero.
@@ -394,8 +460,11 @@ type Querier interface {
 	// a resume can end it later. The param stays uncast so sqlc ties it to the
 	// nullable column and applies the NullRawMessage override: a plain
 	// json.RawMessage would reach pq as a zero-length string, which Postgres
-	// rejects on jsonb.
-	UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflowRunStatusParams) error
+	// rejects on jsonb. owner_id fences the write of a live run: only the
+	// process that owns a running run writes it, so a process that lost the run
+	// to a sweep or a claim cannot overwrite the state of the new owner. A NULL
+	// owner_id skips the fence. The same fence guards every engine write below.
+	UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflowRunStatusParams) (int64, error)
 	// A reported or failed step stamps finished_at; started_at is set once, at
 	// the insert. The param stays uncast so sqlc ties it to the nullable column
 	// and applies the NullRawMessage override. reused only sets the flag: a
@@ -404,8 +473,14 @@ type Querier interface {
 	// run's retention clock in DeleteOldWorkflowRuns. The step update joins the
 	// run update, so the run row is locked before the step row, the same order
 	// as the purge's cascade. Without the join Postgres may run the two updates
-	// in any order, and a report racing the purge could deadlock.
-	UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) error
+	// in any order, and a report racing the purge could deadlock. owner_id
+	// fences the write of the engine; the workflow_report tool passes NULL, so a
+	// report reaches the row whoever owns the run. A reported row keeps its
+	// value against every engine write, and against a later report while the
+	// run is running, because the owner wakes the step on the first report. A
+	// report to an interrupted run replaces it. A write that changes nothing
+	// returns 0 rows.
+	UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) (int64, error)
 	// A new question of the chat replaces the old one and is pending. The root
 	// comes from chats.root_chat_id; a chat without one names itself.
 	UpsertChatDescendantQuestion(ctx context.Context, arg UpsertChatDescendantQuestionParams) (ChatDescendantQuestion, error)

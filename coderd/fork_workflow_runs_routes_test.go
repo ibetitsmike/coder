@@ -80,7 +80,7 @@ func insertForkWorkflowRun(t *testing.T, db database.Store, chat database.Chat) 
 		CurrentPhase:  "build",
 	})
 	require.NoError(t, err)
-	err = fdb.InsertWorkflowStep(forkWorkflowSystemContext(t), forkdb.InsertWorkflowStepParams{
+	_, err = fdb.InsertWorkflowStep(forkWorkflowSystemContext(t), forkdb.InsertWorkflowStepParams{
 		ID:         uuid.New(),
 		RunID:      runID,
 		SpecKey:    "s1",
@@ -94,7 +94,7 @@ func insertForkWorkflowRun(t *testing.T, db database.Store, chat database.Chat) 
 	})
 	require.NoError(t, err)
 	snapshot := `{"run_id":` + strconv.Quote(runID.String()) + `,"status":"completed","steps":[],"logs":["all done"],"result":{"ok":true},"phases":["plan","build","review"],"current_phase":"review"}`
-	err = fdb.UpdateWorkflowRunStatus(forkWorkflowSystemContext(t), forkdb.UpdateWorkflowRunStatusParams{
+	_, err = fdb.UpdateWorkflowRunStatus(forkWorkflowSystemContext(t), forkdb.UpdateWorkflowRunStatusParams{
 		ID:           runID,
 		Status:       "completed",
 		Error:        "",
@@ -234,12 +234,13 @@ func TestForkWorkflowRunsRoutes(t *testing.T) {
 			Status:        "running",
 		}))
 		snapshot := `{"run_id":` + strconv.Quote(runID.String()) + `,"status":"failed","steps":[],"logs":["boom"]}`
-		require.NoError(t, fdb.UpdateWorkflowRunStatus(forkWorkflowSystemContext(t), forkdb.UpdateWorkflowRunStatusParams{
+		_, err = fdb.UpdateWorkflowRunStatus(forkWorkflowSystemContext(t), forkdb.UpdateWorkflowRunStatusParams{
 			ID:     runID,
 			Status: "failed",
 			Error:  "the step ended its turn twice without calling workflow_report",
 			Result: pqtype.NullRawMessage{RawMessage: json.RawMessage(snapshot), Valid: true},
-		}))
+		})
+		require.NoError(t, err)
 
 		res, err := client.Request(ctx, http.MethodGet,
 			"/api/v2/chats/fork/"+chat.ID.String()+"/workflow-runs/"+runID.String(), nil)
@@ -273,11 +274,12 @@ func TestForkWorkflowRunsRoutes(t *testing.T) {
 			Status:        "running",
 		}))
 		snapshot := `{"run_id":` + strconv.Quote(runID.String()) + `,"status":"completed","steps":[],"logs":["done"],"result":null}`
-		require.NoError(t, fdb.UpdateWorkflowRunStatus(forkWorkflowSystemContext(t), forkdb.UpdateWorkflowRunStatusParams{
+		_, err = fdb.UpdateWorkflowRunStatus(forkWorkflowSystemContext(t), forkdb.UpdateWorkflowRunStatusParams{
 			ID:     runID,
 			Status: "completed",
 			Result: pqtype.NullRawMessage{RawMessage: json.RawMessage(snapshot), Valid: true},
-		}))
+		})
+		require.NoError(t, err)
 
 		res, err := client.Request(ctx, http.MethodGet,
 			"/api/v2/chats/fork/"+chat.ID.String()+"/workflow-runs/"+runID.String(), nil)

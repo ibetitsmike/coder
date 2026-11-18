@@ -26,3 +26,8 @@ const CountChatUserNotificationsSinceSQL = countChatUserNotificationsSince
 // DeleteOldChatUserNotificationsSQL is the statement of
 // DeleteOldChatUserNotifications, so a test can EXPLAIN it.
 const DeleteOldChatUserNotificationsSQL = deleteOldChatUserNotifications
+
+// MarkStaleWorkflowRunsInterruptedSQL is the statement of the workflow run
+// sweep, which every chatd process runs on each heartbeat tick, so a test
+// can EXPLAIN it.
+const MarkStaleWorkflowRunsInterruptedSQL = markStaleWorkflowRunsInterrupted

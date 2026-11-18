@@ -120,7 +120,14 @@ type Options struct {
 	// visible pack agent rows only while it is set, so a deployment
 	// without agent definitions never fills its snapshot caps with
 	// rows chatd would drop anyway.
-	ForkAgentDefinitions              bool
+	ForkAgentDefinitions bool
+	// ForkContextHashRows lets agents send hash-only rows for bodies
+	// coderd already stores (the fork-context-hash-rows experiment).
+	ForkContextHashRows bool
+	// ForkContextCache lets agents reuse their resolve cache across
+	// reconnects (the fork-context-cache experiment).
+	ForkContextCache                  bool
+	ForkChatProcessEvents             *ForkChatProcessEvents // fork: see fork_process_events.go
 	ConnectionLogger                  *atomic.Pointer[connectionlog.ConnectionLogger]
 	DerpMapFn                         func() *tailcfg.DERPMap
 	TailnetCoordinator                *atomic.Pointer[tailnet.Coordinator]
@@ -164,6 +171,7 @@ func New(opts Options, workspace database.Workspace, agent database.WorkspaceAge
 		DisableDirectConnections:  opts.DisableDirectConnections,
 		DerpForceWebSockets:       opts.DerpForceWebSockets,
 		DisableUserSecretFilePath: opts.DisableUserSecretFilePath,
+		AgentPluginsEnabled:       opts.Experiments.Enabled(codersdk.ExperimentAgentPlugins),
 		AgentFn:                   api.agent,
 		Database:                  opts.Database,
 		DerpMapFn:                 opts.DerpMapFn,
@@ -299,8 +307,11 @@ func New(opts Options, workspace database.Workspace, agent database.WorkspaceAge
 		Database:             opts.Database,
 		DirtyMarker:          opts.ContextDirtyMarker,
 		Disabled:             opts.ContextSyncDisabled,
+		Experiments:          opts.Experiments,
 		ForkPluginPacks:      opts.ForkPluginPacks,
 		ForkAgentDefinitions: opts.ForkAgentDefinitions,
+		ForkContextCache:     opts.ForkContextCache,
+		ForkContextHashRows:  opts.ForkContextHashRows,
 	}
 
 	// Start background cache refresh loop to handle workspace changes

@@ -2,12 +2,14 @@ package chatd
 
 // This file is fork code: it holds the background process events of the
 // wait_for_events tool of the fork-chat-wakeups experiment. The tool checks
-// that each process belongs to the chat, and the wake-up worker polls the
-// chat's workspace agent until the process exits or is gone.
+// that each process belongs to the chat and registers its watches with the
+// chat's workspace agent. The agent reports exits and matching output lines
+// over its Agent API connection (coderd/agentapi/fork_process_events.go),
+// which fires the watches, and the wake-up worker delivers what fired. See
+// "Background process events" in ARCHITECTURE.md.
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,9 +21,12 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 	"golang.org/x/xerrors"
 
+	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
@@ -31,13 +36,21 @@ const (
 	wakeupEventProcessExit = "process_exit"
 
 	maxWaitForEventsProcesses = 10
-	// processReadTimeout bounds the agent reads of one delivery, dial
-	// included, well within wakeupDeliveryTimeout, so a stalled agent holds
-	// one delivery slot of the waker for a bounded time.
-	processReadTimeout = 30 * time.Second
-	// processErrorRetry is the next poll after a failed read, when no other
-	// entry of the wake-up needs a sooner one.
-	processErrorRetry = time.Minute
+	// processWatchTimeout bounds the agent requests of one wait_for_events
+	// call, dial included.
+	processWatchTimeout = 30 * time.Second
+	// processSweepInterval is how often the waker fires the process watches
+	// whose workspace stopped or was rebuilt as lost.
+	processSweepInterval = 5 * time.Minute
+	// processReportMargin is how long after the expiry of a wake-up its
+	// agent must last have said that it holds no unacked event, for the
+	// final poll to know every exit from before the expiry. It covers the
+	// time between the exit and the send of that report. The agent says so
+	// every 30 seconds while a chat process runs.
+	processReportMargin = 5 * time.Second
+	// processFinalReportWindow bounds how long after the expiry the final
+	// poll waits for that report.
+	processFinalReportWindow = 10 * time.Minute
 	// maxProcessTailLines and maxProcessTailBytes cap the output that an
 	// exit message quotes.
 	maxProcessTailLines = 40
@@ -48,6 +61,11 @@ const (
 	maxProcessOutputCooldown       = 86400
 	defaultProcessOutputMaxEvents  = 10
 	maxProcessOutputMaxEventsLimit = 100
+
+	processLostStopped   = "the workspace stopped or was rebuilt, so the process is gone"
+	processLostRestarted = "the workspace agent restarted, so it no longer runs the process"
+	processLostUnknown   = "the workspace agent no longer knows it (the agent restarted or the process exited more than an hour ago)"
+	processAgentTooOld   = "the workspace agent of this chat is too old to report process events: restart the workspace to update its agent, or poll the process with schedule_wakeup"
 )
 
 type waitForEventsProcess struct {
@@ -95,9 +113,10 @@ func processOutputArgs(args waitForEventsArgs) (wakeupEvent, error) {
 }
 
 // processWaitEvents checks that the workspace agent of chat runs the
-// background processes ids for chat, and returns the process_exit events
-// that watch them, with the output pattern fields of output. A process that
-// already exited is still watched, so the first poll reports it.
+// background processes ids for chat and reports process events, and returns
+// the process_exit events that watch them, with the output pattern fields of
+// output. A process that already exited is still watched:
+// registerProcessWatches fires its watch once the wake-up is committed.
 func (p *Server) processWaitEvents(ctx context.Context, chat database.Chat, ids []string, output wakeupEvent) ([]wakeupEvent, error) {
 	var requested []string
 	for _, raw := range ids {
@@ -138,7 +157,7 @@ func (p *Server) processWaitEvents(ctx context.Context, chat database.Chat, ids 
 		return nil, xerrors.Errorf("these processes are already watched by wake-up %s: end your turn to wait for them", strings.Join(watchedBy, ", "))
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, processReadTimeout)
+	ctx, cancel := context.WithTimeout(ctx, processWatchTimeout)
 	defer cancel()
 	conn, release, err := p.processAgentConn(ctx, chat.ID, chat.AgentID.UUID)
 	if err != nil {
@@ -147,12 +166,13 @@ func (p *Server) processWaitEvents(ctx context.Context, chat database.Chat, ids 
 	defer release()
 	events := make([]wakeupEvent, 0, len(requested))
 	for _, id := range requested {
-		process, err := conn.ProcessOutput(ctx, id, nil)
-		if processNotFound(err) {
-			return nil, xerrors.Errorf("process %q is not a process of this chat: pass the background_process_id that execute returned", id)
-		}
+		// A request without a pattern only reads the process.
+		process, err := conn.ForkWatchProcess(ctx, id, workspacesdk.ForkWatchProcessRequest{})
 		if err != nil {
 			return nil, xerrors.Errorf("read process %q: %w", id, err)
+		}
+		if !process.Known {
+			return nil, xerrors.Errorf("process %q is not a process of this chat: pass the background_process_id that execute returned", id)
 		}
 		event := output
 		event.Type = wakeupEventProcessExit
@@ -165,8 +185,9 @@ func (p *Server) processWaitEvents(ctx context.Context, chat database.Chat, ids 
 }
 
 // processAgentConn dials the workspace agent agentID for the processes of
-// the chat chatID. The caller calls the returned release.
-func (p *Server) processAgentConn(ctx context.Context, chatID, agentID uuid.UUID) (workspacesdk.AgentConn, func(), error) {
+// the chat chatID. It fails with processAgentTooOld when the agent has no
+// process watch API. The caller calls the returned release.
+func (p *Server) processAgentConn(ctx context.Context, chatID, agentID uuid.UUID) (workspacesdk.ForkProcessEventsConn, func(), error) {
 	if p.agentConnFn == nil {
 		return nil, nil, xerrors.New("workspace agent connections are not available")
 	}
@@ -177,295 +198,269 @@ func (p *Server) processAgentConn(ctx context.Context, chatID, agentID uuid.UUID
 	if err != nil {
 		return nil, nil, xerrors.Errorf("connect to workspace agent: %w", err)
 	}
+	events, ok := conn.(workspacesdk.ForkProcessEventsConn)
+	if !ok {
+		release()
+		return nil, nil, xerrors.New(processAgentTooOld)
+	}
 	// The agent keys processes by chat.
 	conn.SetExtraHeaders(http.Header{workspacesdk.CoderChatIDHeader: {chatID.String()}})
-	return conn, release, nil
+	return processEventsConn{events}, release, nil
 }
 
-// processNotFound reports whether err is the agent's answer for a process it
-// does not know.
-func processNotFound(err error) bool {
-	sdkErr, ok := errors.AsType[*codersdk.Error](err)
-	return ok && sdkErr.StatusCode() == http.StatusNotFound
+// processEventsConn maps the answer of an agent without the process watch
+// API, a 404 for an unknown route, to processAgentTooOld. An agent with the
+// API answers an unknown process with Known false.
+type processEventsConn struct {
+	workspacesdk.ForkProcessEventsConn
 }
 
-// processConns holds what the process_exit entries of one tick of an events
-// wake-up share: one read deadline, the latest build of the chat's workspace
-// and its agents, and one connection per agent. release closes the
-// connections.
-type processConns struct {
-	// ctx bounds every read of the tick, so the entries together stay
-	// within processReadTimeout.
-	ctx    context.Context
-	cancel context.CancelFunc
-	agents []uuid.UUID
-	// builtAt is when the latest build was created, zero without one.
-	builtAt time.Time
-	read    bool
-	conns   map[uuid.UUID]processConn
-}
-
-type processConn struct {
-	conn    workspacesdk.AgentConn
-	release func()
-	err     error
-}
-
-// readContext returns ctx bounded by processReadTimeout from the first read
-// of the tick on.
-func (c *processConns) readContext(ctx context.Context) context.Context {
-	if c.ctx == nil {
-		c.ctx, c.cancel = context.WithTimeout(ctx, processReadTimeout)
+func (c processEventsConn) ForkWatchProcess(ctx context.Context, id string, req workspacesdk.ForkWatchProcessRequest) (workspacesdk.ForkWatchProcessResponse, error) {
+	resp, err := c.ForkProcessEventsConn.ForkWatchProcess(ctx, id, req)
+	if sdkErr, ok := errors.AsType[*codersdk.Error](err); ok && sdkErr.StatusCode() == http.StatusNotFound {
+		return workspacesdk.ForkWatchProcessResponse{}, xerrors.New(processAgentTooOld)
 	}
-	return c.ctx
+	return resp, err
 }
 
-// release closes the connections of the tick.
-func (c *processConns) release() {
-	for _, conn := range c.conns {
-		if conn.release != nil {
-			conn.release()
+// registerProcessWatches registers the open process watches of wakeup with
+// the workspace agent of chat, which then reports their output lines, and
+// fires the watches whose process already exited or that the agent no
+// longer knows. It runs after the wake-up commits, so a process that exits
+// before the registration fires its watch here, and one that exits after it
+// fires its watch through the report of the agent: an exit is never missed,
+// and a watch delivers once. It returns a warning for the processes it could
+// not register, or "".
+func (p *Server) registerProcessWatches(ctx context.Context, chat database.Chat, wakeup forkdb.ChatWakeup) string {
+	fdb, err := forkdb.From(p.db)
+	if err != nil {
+		return fmt.Sprintf("could not register the process watches: %v", err)
+	}
+	watches, err := fdb.ListChatWakeupWatchesByWakeupID(ctx, wakeup.ID)
+	if err != nil {
+		return fmt.Sprintf("could not register the process watches: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, processWatchTimeout)
+	defer cancel()
+	type agentConn struct {
+		conn    workspacesdk.ForkProcessEventsConn
+		release func()
+		err     error
+	}
+	conns := make(map[uuid.UUID]agentConn)
+	defer func() {
+		for _, c := range conns {
+			if c.release != nil {
+				c.release()
+			}
 		}
+	}()
+	var failed []string
+	fired := false
+	for _, watch := range watches {
+		if watch.Kind != forkdb.ChatWakeupWatchKindProcess || watch.DeliveredAt.Valid {
+			continue
+		}
+		event, err := watchEvent(watch)
+		if err != nil {
+			continue
+		}
+		c, ok := conns[event.AgentID]
+		if !ok {
+			c.conn, c.release, c.err = p.processAgentConn(ctx, chat.ID, event.AgentID)
+			conns[event.AgentID] = c
+		}
+		ok, err = p.registerProcessWatch(ctx, fdb, c.conn, c.err, wakeup, event)
+		if err != nil {
+			p.logger.Warn(ctx, "chat wake-up could not register its process watch",
+				slog.F("wakeup_id", wakeup.ID),
+				slog.F("chat_id", chat.ID),
+				slog.F("process_id", event.ProcessID),
+				slog.Error(err),
+			)
+			failed = append(failed, fmt.Sprintf("%s (%v)", event.ProcessID, err))
+		}
+		fired = fired || ok
 	}
-	if c.cancel != nil {
-		c.cancel()
+	if fired {
+		p.forkWaker().poke(chat.ID)
 	}
+	if len(failed) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("the workspace agent did not confirm the watch on %s. Its exit still wakes this chat if the agent reports it, but an exit before this call and matching output may be missed: check the process with process_output.", strings.Join(failed, ", "))
 }
 
-// agentRuns reports whether agentID is an agent of the latest build of the
-// workspace of chat, and that build starts the workspace. It reads the
-// workspace once per tick.
-func (c *processConns) agentRuns(ctx context.Context, db database.Store, chat database.Chat, agentID uuid.UUID) (bool, error) {
-	if !chat.WorkspaceID.Valid {
+// registerProcessWatch registers the watch of event with conn, or fails
+// with dialErr, and fires the watch when the process already exited or the
+// agent does not know it. It reports whether it fired the watch.
+func (p *Server) registerProcessWatch(ctx context.Context, fdb forkdb.Store, conn workspacesdk.ForkProcessEventsConn, dialErr error, wakeup forkdb.ChatWakeup, event wakeupEvent) (bool, error) {
+	if dialErr != nil {
+		return false, dialErr
+	}
+	resp, err := conn.ForkWatchProcess(ctx, event.ProcessID, workspacesdk.ForkWatchProcessRequest{
+		WakeupID:              wakeup.ID,
+		OutputPattern:         event.OutputPattern,
+		OutputCooldownSeconds: event.OutputCooldownSeconds,
+	})
+	if err != nil {
+		return false, err
+	}
+	now := dbtime.Time(p.clock.Now())
+	var ended pqtype.NullRawMessage
+	switch {
+	case !resp.Known:
+		ended, err = forkdb.ChatProcessLostEnded(forkdb.ChatProcessLost{Reason: processLostUnknown, At: now})
+	case !resp.Running:
+		exit := forkdb.ChatProcessExit{Code: -1, Tail: resp.OutputTail, At: now}
+		if resp.ExitCode != nil {
+			exit.Code = *resp.ExitCode
+		}
+		if resp.ExitedAt != nil {
+			exit.At = time.Unix(*resp.ExitedAt, 0).UTC()
+		}
+		ended, err = forkdb.ChatProcessExitEnded(exit)
+	default:
 		return false, nil
 	}
-	if !c.read {
-		build, err := db.GetLatestWorkspaceBuildByWorkspaceID(ctx, chat.WorkspaceID.UUID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return false, xerrors.Errorf("get latest workspace build: %w", err)
-		}
-		if err == nil {
-			c.builtAt = build.CreatedAt
-		}
-		if err == nil && build.Transition == database.WorkspaceTransitionStart {
-			agents, err := db.GetWorkspaceAgentsInLatestBuildByWorkspaceID(ctx, chat.WorkspaceID.UUID)
-			if err != nil {
-				return false, xerrors.Errorf("get workspace agents: %w", err)
-			}
-			for _, agent := range agents {
-				c.agents = append(c.agents, agent.ID)
-			}
-		}
-		c.read = true
-	}
-	return slices.Contains(c.agents, agentID), nil
-}
-
-// conn returns the connection of the tick to agentID, dialed on first use.
-// A failed dial is not retried within the tick.
-func (c *processConns) conn(ctx context.Context, p *Server, chatID, agentID uuid.UUID) (workspacesdk.AgentConn, error) {
-	if cached, ok := c.conns[agentID]; ok {
-		return cached.conn, cached.err
-	}
-	conn, release, err := p.processAgentConn(ctx, chatID, agentID)
-	if c.conns == nil {
-		c.conns = make(map[uuid.UUID]processConn)
-	}
-	c.conns[agentID] = processConn{conn: conn, release: release, err: err}
-	return conn, err
-}
-
-// processMessage is the message that a poll of a process watch sends: for
-// its exit or a lost watch, which ends the watch, or for matching output
-// lines, with the spec patch that moves the watch's cursor past them.
-type processMessage struct {
-	text      string
-	exited    bool
-	specPatch json.RawMessage
-}
-
-// processWakeupText reads the process of event on the workspace agent of
-// chat and returns the message for its exit or for a lost watch, or no text
-// while it runs. With lines set, a running process that printed matching
-// lines returns the message for them instead. With endedBy set, it also
-// returns no text unless the process provably ended by endedBy: the agent
-// lists it as exited by then, or its workspace stopped or was rebuilt by
-// then. An error is transient: the watch polls again later.
-func (p *Server) processWakeupText(ctx context.Context, chat database.Chat, event wakeupEvent, endedBy time.Time, lines *processLines, conns *processConns) (processMessage, error) {
-	ctx = conns.readContext(ctx)
-	runs, err := conns.agentRuns(ctx, p.db, chat, event.AgentID)
 	if err != nil {
-		return processMessage{}, err
+		return false, err
 	}
-	if !runs {
-		if !endedBy.IsZero() && conns.builtAt.After(endedBy) {
-			return processMessage{}, nil
-		}
-		return processMessage{text: processLostText(event, "the workspace stopped or was rebuilt, so the process is gone"), exited: true}, nil
-	}
-	conn, err := conns.conn(ctx, p, chat.ID, event.AgentID)
+	chats, err := fdb.FireChatProcessWatches(ctx, forkdb.FireChatProcessWatchesParams{
+		FiredAt:   now,
+		Ended:     ended,
+		ChatID:    wakeup.ChatID,
+		AgentID:   event.AgentID,
+		ProcessID: event.ProcessID,
+		WakeupID:  uuid.NullUUID{UUID: wakeup.ID, Valid: true},
+	})
 	if err != nil {
-		return processMessage{}, err
+		return false, xerrors.Errorf("fire process watch: %w", err)
 	}
-	output, err := conn.ProcessOutput(ctx, event.ProcessID, nil)
-	if processNotFound(err) {
-		// The agent does not tell when it forgot the process.
-		if !endedBy.IsZero() {
-			return processMessage{}, nil
-		}
-		return processMessage{text: processLostText(event, "the workspace agent no longer knows it (the agent restarted or the process exited more than an hour ago)"), exited: true}, nil
-	}
-	if err != nil {
-		return processMessage{}, xerrors.Errorf("read process %q: %w", event.ProcessID, err)
-	}
-	if output.Running {
-		if lines == nil {
-			return processMessage{}, nil
-		}
-		text, end := processLinesText(event, output, *lines)
-		if text == "" {
-			return processMessage{}, nil
-		}
-		patch, err := json.Marshal(map[string]int{"output_cursor": end})
-		if err != nil {
-			return processMessage{}, xerrors.Errorf("encode output cursor: %w", err)
-		}
-		return processMessage{text: text, specPatch: patch}, nil
-	}
-	if !endedBy.IsZero() {
-		exited, err := processExitedBy(ctx, conn, event.ProcessID, endedBy)
-		if err != nil || !exited {
-			return processMessage{}, err
-		}
-	}
-	return processMessage{text: processExitText(event, output), exited: true}, nil
+	return len(chats) > 0, nil
 }
 
-// processLines is where the output pattern of a process watch continues:
-// cursor is the output position after the lines that earlier messages
-// covered, and sent counts those messages.
-type processLines struct {
-	cursor int
-	sent   int
+// processReported reports whether the agent of the process watch of event
+// said, processReportMargin or more after expiresAt, that it holds no event
+// that coderd did not ack, so every exit from before expiresAt fired the
+// watch. Only a report that coderd acked records it, so neither a lost
+// connection nor a failing report passes for it.
+func processReported(event wakeupEvent, expiresAt time.Time) bool {
+	return !event.ReportedAt.Before(expiresAt.Add(processReportMargin))
 }
 
-// processLinesDue returns where the output pattern of event continues, or
-// false when this poll of wakeup at now reports no lines: event has no
-// pattern, its line messages are used up, the wake-up is in its cool-down
-// after its last message, or this is the final poll, which reports exits
-// only. deliveries counts the messages of the watch, which are all line
-// messages while it is open.
-func processLinesDue(event wakeupEvent, deliveries int32, wakeup forkdb.ChatWakeup, now time.Time) (processLines, bool) {
-	if event.OutputPattern == "" || eventsFinalPoll(wakeup, now) {
-		return processLines{}, false
-	}
-	lines := processLines{cursor: event.OutputCursor, sent: int(deliveries)}
-	if lines.sent >= event.OutputMaxEvents {
-		return processLines{}, false
-	}
-	cooldown := time.Duration(event.OutputCooldownSeconds) * time.Second
-	if wakeup.LastRunAt.Valid && now.Before(wakeup.LastRunAt.Time.Add(cooldown)) {
-		return processLines{}, false
-	}
-	return lines, true
-}
-
-// processLinesText returns the message for the lines of output after
-// lines.cursor that match the pattern of event, with the output position
-// after them, or "" when none match.
-func processLinesText(event wakeupEvent, output workspacesdk.ProcessOutputResponse, lines processLines) (string, int) {
-	pattern, err := regexp.Compile(event.OutputPattern)
+// sweepProcessWatches fires as lost the process watches whose workspace
+// stopped or was rebuilt, or whose agent restarted after the watch began,
+// which no agent reports anything for any more, and pokes their chats.
+func (k *forkWaker) sweepProcessWatches(ctx context.Context, fdb forkdb.Store) {
+	chats, err := fdb.MarkLostChatProcessWatches(ctx, forkdb.MarkLostChatProcessWatchesParams{
+		Now:             dbtime.Time(k.clock.Now("chatd", "waker")),
+		Reason:          processLostStopped,
+		RestartedReason: processLostRestarted,
+	})
 	if err != nil {
-		// processOutputArgs checked the pattern.
-		return "", lines.cursor
+		if ctx.Err() == nil {
+			k.logger.Warn(ctx, "chat waker could not sweep process watches", slogError(err))
+		}
+		return
 	}
-	newLines, end := processNewLines(output, lines.cursor)
-	matched := slices.DeleteFunc(newLines, func(line string) bool { return !pattern.MatchString(line) })
-	if len(matched) == 0 {
-		return "", lines.cursor
+	for _, chatID := range chats {
+		k.poke(chatID)
 	}
+}
+
+// processWatchEnded reports whether an exit or a loss fired watch.
+func processWatchEnded(watch forkdb.ChatWakeupWatch) bool {
+	if !watch.FiredAt.Valid {
+		return false
+	}
+	var fired forkdb.ChatProcessFired
+	if err := json.Unmarshal(watch.FiredPayload.RawMessage, &fired); err != nil {
+		return true
+	}
+	return fired.Exit != nil || fired.Lost != nil
+}
+
+// processLinesCooldown returns the cool-down of the process watch watch,
+// whose event is event, when it may still deliver output lines: it has a
+// pattern and a cool-down, its line messages are not used up, and no exit or
+// loss fired it.
+func processLinesCooldown(watch forkdb.ChatWakeupWatch, event wakeupEvent) (time.Duration, bool) {
+	if event.OutputPattern == "" || event.OutputCooldownSeconds <= 0 ||
+		int(watch.Deliveries) >= event.OutputMaxEvents || processWatchEnded(watch) {
+		return 0, false
+	}
+	return time.Duration(event.OutputCooldownSeconds) * time.Second, true
+}
+
+// processLinesCooling reports whether the process watch watch of wakeup holds
+// output lines at now that wait for the cool-down after the last message of
+// wakeup. ListDueChatWakeups applies the same rule, so such a watch does not
+// make its wake-up due.
+func processLinesCooling(wakeup forkdb.ChatWakeup, watch forkdb.ChatWakeupWatch, event wakeupEvent, now time.Time) bool {
+	cooldown, ok := processLinesCooldown(watch, event)
+	return ok && wakeup.LastRunAt.Valid && now.Before(wakeup.LastRunAt.Time.Add(cooldown))
+}
+
+// processFiredText returns the message for what fired the process watch
+// watch of wakeup, whose event is event, and whether it ends the watch, or
+// "" when the pass at now delivers nothing for it. An exit or a loss ends
+// the watch. The final poll delivers no output lines, and a late final poll
+// (lateFinalPoll) leaves out an exit or a loss after the expiry, unless an
+// earlier send of it failed.
+func processFiredText(wakeup forkdb.ChatWakeup, watch forkdb.ChatWakeupWatch, event wakeupEvent, now time.Time, lateFinalPoll bool) (string, bool) {
+	var fired forkdb.ChatProcessFired
+	if err := json.Unmarshal(watch.FiredPayload.RawMessage, &fired); err != nil {
+		return processLostText(event, "its event could not be read"), true
+	}
+	cutOff := func(at time.Time) bool {
+		return lateFinalPoll && !watch.FailedAt.Valid && at.After(wakeup.ExpiresAt.Time)
+	}
+	switch {
+	case fired.Exit != nil:
+		// The agent reports the exit time in whole seconds, so an exit in
+		// the second of the expiry may be after it.
+		if cutOff(fired.Exit.At.Add(time.Second)) {
+			return "", false
+		}
+		return processExitText(event, fired.Exit.Code, fired.Exit.Tail), true
+	case fired.Lost != nil:
+		if cutOff(fired.Lost.At) {
+			return "", false
+		}
+		return processLostText(event, fired.Lost.Reason), true
+	case fired.Matched > 0 && !eventsFinalPoll(wakeup, now):
+		text := processLinesText(event, fired.Matched, fired.Lines)
+		if int(watch.Deliveries)+1 >= event.OutputMaxEvents {
+			text += processLinesLastText
+		}
+		return text, false
+	}
+	return "", false
+}
+
+// processLinesText returns the message for matched output lines of the
+// process of event that matched its pattern, the last of which are lines,
+// joined by newlines.
+func processLinesText(event wakeupEvent, matched int, lines string) string {
 	noun := "lines"
-	if len(matched) == 1 {
+	if matched == 1 {
 		noun = "line"
 	}
-	text := fmt.Sprintf("Background process %s (`%s`) is still running and printed %d new %s matching `%s`.", event.ProcessID, event.Command, len(matched), noun, event.OutputPattern)
-	if tail, shown := processOutputTail(strings.Join(matched, "\n")); shown > 0 {
+	text := fmt.Sprintf("Background process %s (`%s`) is still running and printed %d new %s matching `%s`.", event.ProcessID, event.Command, matched, noun, event.OutputPattern)
+	if tail, shown := processOutputTail(lines); shown > 0 {
 		label := "Matching lines"
-		if shown < len(matched) {
+		if shown < matched {
 			label = fmt.Sprintf("Last %d matching lines", shown)
 		}
 		text += fmt.Sprintf("\n\n%s:\n```\n%s\n```", label, tail)
 	}
-	if lines.sent+1 >= event.OutputMaxEvents {
-		text += "\n\nThis is the last message for matching lines of this process. Its exit still wakes this chat."
-	}
-	return text, end
+	return text
 }
 
-// processNewLines returns the complete lines of output that end after
-// position cursor, and the position after the last of them, or cursor when
-// there are none. A position counts the bytes of the whole output of the
-// process. The agent keeps the first and the last 16 KiB of it and joins
-// them with an omission marker (agentproc.HeadTailBuffer), so once bytes are
-// omitted only the lines after the marker can be new, the first of which may
-// have lost its start. Lines that the agent no longer keeps are missed.
-func processNewLines(output workspacesdk.ProcessOutputResponse, cursor int) ([]string, int) {
-	text := output.Output
-	total := len(text)
-	start := 0
-	if truncated := output.Truncated; truncated != nil {
-		total = truncated.OriginalBytes
-		if truncated.OmittedBytes > 0 {
-			marker := fmt.Sprintf("\n\n... [omitted %d bytes] ...\n\n", truncated.OmittedBytes)
-			index := strings.Index(text, marker)
-			if index < 0 {
-				return nil, cursor
-			}
-			start = index + len(marker)
-			newline := strings.IndexByte(text[start:], '\n')
-			if newline < 0 {
-				return nil, cursor
-			}
-			start += newline + 1
-		}
-	}
-	// text ends at position total.
-	offset := total - len(text)
-	var lines []string
-	end := cursor
-	for start < len(text) {
-		newline := strings.IndexByte(text[start:], '\n')
-		if newline < 0 {
-			// The process may still be writing this line.
-			break
-		}
-		lineEnd := start + newline + 1
-		if offset+lineEnd > cursor {
-			lines = append(lines, text[start:lineEnd-1])
-			end = offset + lineEnd
-		}
-		start = lineEnd
-	}
-	return lines, end
-}
-
-// processExitedBy reports whether the agent lists processID as exited by t.
-// The list holds at most ten processes, running ones first, so it can leave
-// out an exited process, which then does not count as exited by t.
-func processExitedBy(ctx context.Context, conn workspacesdk.AgentConn, processID string, t time.Time) (bool, error) {
-	list, err := conn.ListProcesses(ctx)
-	if err != nil {
-		return false, xerrors.Errorf("list processes: %w", err)
-	}
-	for _, info := range list.Processes {
-		if info.ID == processID && info.ExitedAt != nil {
-			// ExitedAt has whole seconds, so an exit in the second of t
-			// may be after t.
-			return !time.Unix(*info.ExitedAt+1, 0).After(t), nil
-		}
-	}
-	return false, nil
-}
+// processLinesLastText ends the last message for matching lines of a
+// process.
+const processLinesLastText = "\n\nThis is the last message for matching lines of this process. Its exit still wakes this chat."
 
 // processLostText tells that the watch of event ended for reason, without the
 // process's exit.
@@ -473,16 +468,15 @@ func processLostText(event wakeupEvent, reason string) string {
 	return fmt.Sprintf("Lost the watch on background process %s (`%s`): %s.", event.ProcessID, event.Command, reason)
 }
 
-// processExitText tells how the process of event exited, with the end of its
-// output.
-func processExitText(event wakeupEvent, output workspacesdk.ProcessOutputResponse) string {
+// processExitText tells how the process of event exited, with code, -1 for
+// a process killed by a signal, and the end of its output, tail.
+func processExitText(event wakeupEvent, code int, tail string) string {
 	exit := "exited without an exit code (killed by a signal)."
-	// The agent reports -1 for a process killed by a signal.
-	if output.ExitCode != nil && *output.ExitCode >= 0 {
-		exit = fmt.Sprintf("exited with code %d.", *output.ExitCode)
+	if code >= 0 {
+		exit = fmt.Sprintf("exited with code %d.", code)
 	}
 	text := fmt.Sprintf("Background process %s (`%s`) %s", event.ProcessID, event.Command, exit)
-	tail, lines := processOutputTail(output.Output)
+	tail, lines := processOutputTail(tail)
 	if lines == 0 {
 		return text
 	}

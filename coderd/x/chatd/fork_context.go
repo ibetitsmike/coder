@@ -115,7 +115,7 @@ func (s *taskStarter) commitForkContextMessage(
 	message chatstate.Message,
 ) (sessionStartResult, error) {
 	var applied sessionStartResult
-	err := machine.Update(ctx, func(tx *chatstate.Tx, store database.Store) error {
+	_, err := machine.Update(ctx, func(tx *chatstate.Tx, store database.Store, _ *chatstate.ChatSnapshot) error {
 		if _, err := loadChatForGeneration(ctx, store, input, generationAttemptNotRequired); err != nil {
 			return xerrors.Errorf("load chat for fork context message: %w", err)
 		}

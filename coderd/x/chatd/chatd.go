@@ -1513,8 +1513,8 @@ func New(ps pubsub.Pubsub, cfg Config) (*Server, error) {
 
 	p.ctx = ctx
 
-	// The workflow journal marks the open runs of previous processes interrupted (fork-workflows).
-	p.forkInitWorkflowJournal()
+	// The workflow journal owns its runs as workerID and interrupts the runs of dead processes (fork-workflows).
+	p.forkInitWorkflowJournal(workerID)
 
 	// Spawn background goroutines that all servers need.
 
@@ -1532,21 +1532,6 @@ func (p *Server) Start() *Server {
 		}
 	}
 	return p
-}
-
-func subscribeWithInitialError(chatID uuid.UUID, message string) (
-	[]codersdk.ChatStreamEvent,
-	<-chan codersdk.ChatStreamEvent,
-	func(),
-	bool,
-) {
-	events := make(chan codersdk.ChatStreamEvent)
-	close(events)
-	return []codersdk.ChatStreamEvent{{
-		Type:   codersdk.ChatStreamEventTypeError,
-		ChatID: chatID,
-		Error:  &codersdk.ChatError{Message: message},
-	}}, events, func() {}, true
 }
 
 // publishChatPubsubEvents broadcasts a lifecycle event for each affected chat.
@@ -2773,6 +2758,7 @@ func (p *Server) Close() error {
 	p.cancel()
 	p.wg.Wait()
 	p.drainInflight()
+	p.forkCloseWorkflowJournal() // fork-workflows: release the runs this process owns
 	return nil
 }
 

@@ -158,9 +158,10 @@ func TestUpdateWorkflowStepLocksRunFirst(t *testing.T) {
 	require.NoError(t, fdb.InsertWorkflowRun(ctx, forkdb.InsertWorkflowRunParams{
 		ID: runID, ChatID: chat.ID, ModelConfigID: chat.LastModelConfigID, Script: "run()", Args: json.RawMessage(`{}`), Status: "interrupted",
 	}))
-	require.NoError(t, fdb.InsertWorkflowStep(ctx, forkdb.InsertWorkflowStepParams{
+	_, err = fdb.InsertWorkflowStep(ctx, forkdb.InsertWorkflowStepParams{
 		ID: stepID, RunID: runID, SpecKey: "step", Status: "running",
-	}))
+	})
+	require.NoError(t, err)
 
 	// The purge holds the run row while its cascade reaches the steps.
 	purge, err := sqlDB.BeginTx(ctx, nil)
@@ -171,7 +172,8 @@ func TestUpdateWorkflowStepLocksRunFirst(t *testing.T) {
 
 	updated := make(chan error, 1)
 	go func() {
-		updated <- fdb.UpdateWorkflowStep(ctx, forkdb.UpdateWorkflowStepParams{ID: stepID, Status: "reported"})
+		_, err := fdb.UpdateWorkflowStep(ctx, forkdb.UpdateWorkflowStepParams{ID: stepID, Status: "reported"})
+		updated <- err
 	}()
 	testutil.Eventually(ctx, t, func(ctx context.Context) bool {
 		var waiting int

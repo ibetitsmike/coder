@@ -36,9 +36,12 @@ func forkWorkflowDB(t *testing.T, db database.Store) forkdb.Store {
 }
 
 // restartWorkflowServer creates the chatd process that replaces f.server on
-// the same database.
+// the same database. f.server crashes first: its heartbeat loop stops
+// without releasing its runs, and their heartbeats age past the stale
+// window, so the new process's startup sweep interrupts them.
 func (f *forkWorkflowFixture) restartWorkflowServer(t *testing.T) *forkWorkflowFixture {
 	t.Helper()
+	crashWorkflowServer(t, f.server)
 	server := newInternalTestServer(t, f.db, f.ps, chatprovider.ProviderAPIKeys{},
 		withInternalTestServerExperiments(codersdk.Experiments{codersdk.ExperimentForkWorkflows}))
 	return &forkWorkflowFixture{db: f.db, ps: f.ps, server: server, user: f.user, org: f.org, model: f.model}
@@ -279,8 +282,12 @@ def main(args):
 
 		// The resumed run rehydrates as if the first runner had not yet
 		// journaled the step: its journal row exists, the rehydrated run
-		// does not hold it.
-		resumed, err := restarted.server.rehydrateWorkflowRun(ctx, parent, journalRow(ctx, t, fdb, run.id))
+		// does not hold it. The restarted process claims the run first, as
+		// a resume does.
+		claimed, ok, err := restarted.server.workflowJournal().claimRun(ctx, run.id)
+		require.NoError(t, err)
+		require.True(t, ok, "the restarted process claims the interrupted run")
+		resumed, err := restarted.server.rehydrateWorkflowRun(ctx, parent, claimed)
 		require.NoError(t, err)
 		require.Len(t, resumed.steps, 1)
 		resumed.steps = nil
@@ -351,7 +358,7 @@ def main(args):
 		testutil.Eventually(ctx, t, func(context.Context) bool {
 			return len(journalLogs()) == 3
 		}, testutil.IntervalFast)
-		f.restartWorkflowServer(t)
+		restarted := f.restartWorkflowServer(t)
 		testutil.Eventually(ctx, t, func(context.Context) bool {
 			return journalRunStatus(ctx, t, fdb, run.id) == workflowStatusInterrupted
 		}, testutil.IntervalFast)
@@ -360,7 +367,7 @@ def main(args):
 
 		// The run resumes and completes; the terminal snapshot carries the
 		// lines the script printed, live and replayed ones alike.
-		resumed, err := f.server.startWorkflowRun(ctx, parent, f.model.ID,
+		resumed, err := restarted.server.startWorkflowRun(ctx, parent, f.model.ID,
 			runWorkflowArgs{ResumeRunID: run.id.String()}, uuid.New())
 		require.NoError(t, err)
 		step := f.steps(ctx, t, resumed, 1)[0]

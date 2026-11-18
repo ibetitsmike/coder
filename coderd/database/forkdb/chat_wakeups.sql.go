@@ -422,10 +422,21 @@ WITH candidates AS (
     SELECT r.wakeup_id
     FROM chat_wakeup_ready_watches r
     JOIN chat_wakeups cw ON cw.id = r.wakeup_id
+    JOIN chat_wakeup_watches x ON x.id = r.id
     WHERE cw.kind = 'events'
         AND (cw.expires_at IS NULL OR cw.expires_at > $2::timestamptz)
-        AND r.kind IN ('child_done', 'pull_request')
+        AND r.kind IN ('child_done', 'pull_request', 'process')
         AND r.failed_at IS NULL
+        -- Output lines wait for the cool-down after the last message of the
+        -- wake-up, whose end the wake-up's run time covers.
+        AND NOT (
+            r.kind = 'process'
+            AND COALESCE(x.spec->>'output_pattern', '') <> ''
+            AND x.deliveries < COALESCE((x.spec->>'output_max_events')::int, 0)
+            AND x.fired_payload->'exit' IS NULL
+            AND x.fired_payload->'lost' IS NULL
+            AND COALESCE(cw.last_run_at + make_interval(secs => COALESCE((x.spec->>'output_cooldown_seconds')::int, 0)) > $2::timestamptz, false)
+        )
         AND (
             $1::uuid IS NULL
             OR r.chat_id = $1::uuid
@@ -492,16 +503,18 @@ type ListDueChatWakeupsRow struct {
 // nothing: a delivery locks its wake-up with LockActiveChatWakeup. A wake-up
 // is due when its chat would not queue a new message and either its run time
 // has come or, for an events wake-up before its expiry, it has a child_done
-// watch or a fired pull_request watch in chat_wakeup_ready_watches whose
-// last send did not fail. A failed send waits for the run time that the
-// failure set, so it does not repeat at once, and the other watches wait for
-// their run time, which reads them. The chats that would queue are the busy
-// and paused chats, and the errored chats with a non-empty queue
-// (chatstate's R, I, A, P and E1 states). The wake-ups of archived chats are
-// always due by their run time, so the waker cancels them. chat_id limits
-// the list to the wake-ups of one chat and to those that watch it as a
-// child. The due rows page by (next_run_at, id) after after_run_at and
-// after_id.
+// watch or a fired pull_request or process watch in
+// chat_wakeup_ready_watches whose last send did not fail. A failed send
+// waits for the run time that the failure set, so it does not repeat at
+// once, and the other watches wait for their run time, which reads them.
+// Output lines of a process watch also wait for the run time while the
+// cool-down after the last message of the wake-up runs.
+// The chats that would queue are the busy and paused chats, and the errored
+// chats with a non-empty queue (chatstate's R, I, A, P and E1 states). The
+// wake-ups of archived chats are always due by their run time, so the waker
+// cancels them. chat_id limits the list to the wake-ups of one chat and to
+// those that watch it as a child. The due rows page by (next_run_at, id)
+// after after_run_at and after_id.
 func (q *Queries) ListDueChatWakeups(ctx context.Context, arg ListDueChatWakeupsParams) ([]ListDueChatWakeupsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listDueChatWakeups,
 		arg.ChatID,

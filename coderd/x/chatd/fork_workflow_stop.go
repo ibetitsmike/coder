@@ -3,8 +3,9 @@ package chatd
 // This file is fork code: stop_workflow, the API-side stop of the
 // fork-workflows experiment. The coderd fork run API (fork_workflow_runs.go)
 // calls ForkStopWorkflowRun; the registry stops the live run of this
-// replica, and a run that this replica does not hold is stopped through its
-// journal rows.
+// replica, a run that another live process owns is stopped through that
+// owner's pubsub channel, and a run whose owner is gone is stopped through
+// its journal rows.
 
 import (
 	"context"
@@ -49,21 +50,16 @@ func (p *Server) ForkStopWorkflowRun(ctx context.Context, chatID, runID uuid.UUI
 		if run.parent.ID != chatID {
 			return ErrForkWorkflowRunNotFound
 		}
-		if !run.requestStop() {
-			return ErrForkWorkflowRunTerminal
+		if err := p.stopHeldRun(ctx, run); !errors.Is(err, errWorkflowRunLost) {
+			return err
 		}
-		// The script goroutine journals the stopped status, fails the open
-		// steps and interrupts their children as it unwinds. Wait briefly,
-		// so the API answers a snapshot that already says stopped.
-		select {
-		case <-run.done:
-		case <-p.clock.NewTimer(workflowStopTimeout, "chatd", "workflow_stop").C:
-		}
-		return nil
+		// Another process took the run since this one last renewed its
+		// heartbeat. The journal names the new owner.
 	}
 
 	// The registry does not hold the run: either it ended (the journal says
-	// which) or it is mid-resume. The journal is the source of truth.
+	// which), another process executes it, or its owner died. The journal is
+	// the source of truth.
 	row, found, err := p.workflowJournal().getRun(ctx, runID)
 	if err != nil {
 		return err
@@ -74,14 +70,92 @@ func (p *Server) ForkStopWorkflowRun(ctx context.Context, chatID, runID uuid.UUI
 	if row.Status != workflowStatusRunning {
 		return ErrForkWorkflowRunTerminal
 	}
-	return p.stopJournaledRun(ctx, row)
+	if p.workflowOwnerLive(row.OwnerID, row.HeartbeatAt.Time, row.HeartbeatAt.Valid) {
+		return p.stopRemoteRun(ctx, row.ID, row.OwnerID.UUID)
+	}
+	held, ok, err := p.stopOwnerlessRun(ctx, row)
+	if held != nil {
+		// A resume of this process registered the run meanwhile.
+		return p.stopHeldRun(ctx, held)
+	}
+	if err != nil || ok {
+		return err
+	}
+	// The run ended, or a resume elsewhere claimed it, since the read.
+	row, found, err = p.workflowJournal().getRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return ErrForkWorkflowRunNotFound
+	}
+	if row.Status != workflowStatusRunning || !row.OwnerID.Valid {
+		return ErrForkWorkflowRunTerminal
+	}
+	return p.stopRemoteRun(ctx, row.ID, row.OwnerID.UUID)
 }
 
-// stopJournaledRun stops a run that this replica does not hold but the
-// journal calls running: mid-resume at worst. It fails the open steps and
-// interrupts their children, then journals the stop. A live script that
-// still unwinds elsewhere would journal its own end over this state, which
-// single-replica chatd does not produce.
+// stopOwnerlessRun stops a running run whose owner is gone. A resume of
+// this process claims the row before it registers the run, so the row can
+// name this process while the registry is still empty. The stop reserves
+// the run: under the reservation the registry is current, and a resume
+// cannot claim the row between this claim and the journaled stop. held is
+// the run a resume registered meanwhile, which the caller stops instead.
+// ok is false when the claim found the run ended or owned elsewhere.
+// Claiming the run also fences a late write of the old owner before the
+// stop writes.
+func (p *Server) stopOwnerlessRun(ctx context.Context, row forkdb.WorkflowRun) (held *workflowRun, ok bool, err error) {
+	release, err := p.workflows.reserveRun(ctx, row.ID)
+	if err != nil {
+		return nil, false, xerrors.Errorf("wait for a resume of the workflow run: %w", err)
+	}
+	// The heartbeat renews the claim while the stop interrupts the steps,
+	// so no sweep hands the run to another process meanwhile.
+	defer release()
+	if run := p.workflows.get(row.ID); run != nil {
+		return run, false, nil
+	}
+	claimed, ok, err := p.workflowJournal().claimRun(ctx, row.ID)
+	if err != nil {
+		return nil, false, xerrors.Errorf("claim the workflow run: %w", err)
+	}
+	if !ok {
+		return nil, false, nil
+	}
+	return nil, true, p.stopJournaledRun(ctx, claimed)
+}
+
+// stopHeldRun stops a run of the registry. It confirms the ownership of a
+// live run first: a run that another process claimed since the last
+// heartbeat returns errWorkflowRunLost, and the caller stops it through
+// the journal and its new owner.
+func (p *Server) stopHeldRun(ctx context.Context, run *workflowRun) error {
+	run.mu.Lock()
+	live := run.result == nil && !run.lost
+	run.mu.Unlock()
+	if live && !run.confirmOwnership(ctx) && !run.isLost() {
+		return xerrors.New("confirm the ownership of the workflow run: the journal could not be read")
+	}
+	if run.isLost() {
+		return errWorkflowRunLost
+	}
+	if !run.requestStop() {
+		return ErrForkWorkflowRunTerminal
+	}
+	// The script goroutine journals the stopped status, fails the open
+	// steps and interrupts their children as it unwinds. Wait briefly,
+	// so the API answers a snapshot that already says stopped.
+	select {
+	case <-run.done:
+	case <-p.clock.NewTimer(workflowStopTimeout, "chatd", "workflow_stop").C:
+	}
+	return nil
+}
+
+// stopJournaledRun stops a run that this replica claimed from a dead owner.
+// It fails the open steps and interrupts their children, then journals the
+// stop. The claim fences the writes of the old owner, so a late write of
+// its script cannot replace this state.
 func (p *Server) stopJournaledRun(ctx context.Context, row forkdb.WorkflowRun) error {
 	ictx, stop := p.inflightContext(dbauthz.AsSystemRestricted(context.Background()))
 	defer stop()
@@ -127,8 +201,16 @@ func (p *Server) stopJournaledRun(ctx context.Context, row forkdb.WorkflowRun) e
 			Error:  srow.Error,
 		})
 	}
-	p.workflowJournal().updateRunStatus(ictx, row.ID, workflowStatusStopped, workflowStopError, &res,
+	// The claimed run is in no registry, so nothing retries a failed
+	// terminal write: the caller learns of it and the user can stop again.
+	fenced, err := p.workflowJournal().writeRunStatus(ictx, row.ID, workflowStatusStopped, workflowStopError, &res,
 		&workflowPhases{names: row.Phases, current: row.CurrentPhase})
+	if err != nil {
+		return xerrors.Errorf("journal the stop of run %s: %w", row.ID, err)
+	}
+	if fenced {
+		return xerrors.Errorf("journal the stop of run %s: another process claimed the run", row.ID)
+	}
 	return nil
 }
 

@@ -21,6 +21,8 @@ import (
 // per-request retries are handled by Manager.RunPush.
 type DRPCPusher struct {
 	client agentproto.DRPCAgentClient210
+
+	forkHashRows forkHashRows // fork: per-connection hash-only row state
 }
 
 // NewDRPCPusher wraps the supplied drpc client. The client must
@@ -39,7 +41,7 @@ func (p *DRPCPusher) PushContextState(ctx context.Context, req *PushRequest) (*P
 	if p == nil || p.client == nil {
 		return nil, xerrors.New("agentcontext: DRPCPusher has no client")
 	}
-	resp, err := p.client.PushContextState(ctx, pushRequestToProto(req))
+	resp, err := p.forkHashRows.push(ctx, p.client, pushRequestToProto(req)) // fork: hash-only rows
 	if err != nil {
 		if drpcerr.Code(err) == drpcerr.Unimplemented {
 			return nil, ErrPushUnimplemented
@@ -51,6 +53,7 @@ func (p *DRPCPusher) PushContextState(ctx context.Context, req *PushRequest) (*P
 		ForkPluginPacks:      resp.GetForkPluginPacks(),
 		ForkAgentDefinitions: resp.GetForkAgentDefinitions(),
 		ForkGlobRules:        resp.GetForkGlobRules(),
+		ForkContextCache:     resp.GetForkContextCache(),
 	}, nil
 }
 

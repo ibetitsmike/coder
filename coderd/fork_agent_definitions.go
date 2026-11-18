@@ -1,15 +1,18 @@
 package coderd
 
 // This file is fork code: it serves the stored agent definitions of the
-// fork-agent-definitions experiment. Writes are not audited, because auditing
-// a fork type needs edits to upstream's audit packages.
+// fork-agent-definitions experiment.
 
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
@@ -71,6 +74,8 @@ func (api *API) forkUserAgentDefinitions(rw http.ResponseWriter, r *http.Request
 func (api *API) postForkUserAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	member := httpmw.OrganizationMemberParam(r)
+	fa, commitAudit := api.initForkAudit(rw, r, "user_agent_definition", forkAuditCreate)
+	defer commitAudit()
 	content, def, ok := readForkAgentDefinitionCreate(ctx, rw, r)
 	if !ok {
 		return
@@ -90,6 +95,8 @@ func (api *API) postForkUserAgentDefinition(rw http.ResponseWriter, r *http.Requ
 		writeForkAgentDefinitionWriteError(ctx, rw, err)
 		return
 	}
+	fa.target(api.forkAuditOrganization(ctx, member.OrganizationID), row.ID, row.Name)
+	fa.diff(nil, forkAuditUserAgentDefinition(row))
 	httpapi.Write(ctx, rw, http.StatusCreated, convertForkAgentDefinition(row))
 }
 
@@ -139,6 +146,8 @@ func (api *API) forkUserAgentDefinition(rw http.ResponseWriter, r *http.Request)
 func (api *API) patchForkUserAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	member := httpmw.OrganizationMemberParam(r)
+	fa, commitAudit := api.initForkAudit(rw, r, "user_agent_definition", forkAuditUpdate)
+	defer commitAudit()
 	update, ok := readForkAgentDefinitionUpdate(ctx, rw, r)
 	if !ok {
 		return
@@ -149,10 +158,45 @@ func (api *API) patchForkUserAgentDefinition(rw http.ResponseWriter, r *http.Req
 	}
 	update.OrganizationID = member.OrganizationID
 	update.UserID = member.UserID
+	// A denied read does not end the request: the update below authorizes
+	// the change, so a caller who cannot change the definition of another
+	// user still gets 403 from it and not 404 from this read.
+	current, err := fdb.GetUserAgentDefinitionByName(ctx, forkdb.GetUserAgentDefinitionByNameParams{
+		OrganizationID: member.OrganizationID,
+		UserID:         member.UserID,
+		Name:           update.Name,
+	})
+	readDenied := err != nil && httpapi.IsUnauthorizedError(err)
+	if err != nil && !readDenied && !errors.Is(err, sql.ErrNoRows) {
+		writeForkAgentDefinitionReadError(rw, err)
+		return
+	}
 	row, err := fdb.UpdateUserAgentDefinitionByName(ctx, update)
 	if err != nil {
 		writeForkAgentDefinitionWriteError(ctx, rw, err)
 		return
+	}
+	fa.target(api.forkAuditOrganization(ctx, member.OrganizationID), row.ID, row.Name)
+	if readDenied {
+		// The read was denied but the update is allowed, for example for
+		// an update-only scoped token. The old values are unknown, so the
+		// entry records that the requested fields changed without them.
+		if update.Content.Valid {
+			fa.secret("content")
+		}
+		if update.Description.Valid {
+			fa.change("description", forkAuditChange{New: json.RawMessage(fmt.Sprintf(`%q`, row.Description))})
+		}
+		if update.Enabled.Valid {
+			fa.change("enabled", forkAuditChange{New: json.RawMessage(fmt.Sprintf(`%t`, row.Enabled))})
+		}
+	} else if current.ID != (uuid.UUID{}) {
+		fa.diff(forkAuditUserAgentDefinition(current), forkAuditUserAgentDefinition(row))
+		if update.Content.Valid && update.Content.String != current.Content {
+			// The content is not in the audit view, so a changed prompt
+			// records that it changed without its values.
+			fa.secret("content")
+		}
 	}
 	httpapi.Write(ctx, rw, http.StatusOK, convertForkAgentDefinition(row))
 }
@@ -170,11 +214,13 @@ func (api *API) patchForkUserAgentDefinition(rw http.ResponseWriter, r *http.Req
 func (api *API) deleteForkUserAgentDefinition(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	member := httpmw.OrganizationMemberParam(r)
+	fa, commitAudit := api.initForkAudit(rw, r, "user_agent_definition", forkAuditDelete)
+	defer commitAudit()
 	fdb, ok := forkAgentDefinitionStore(rw, api.Database)
 	if !ok {
 		return
 	}
-	_, err := fdb.DeleteUserAgentDefinitionByName(ctx, forkdb.DeleteUserAgentDefinitionByNameParams{
+	deleted, err := fdb.DeleteUserAgentDefinitionByName(ctx, forkdb.DeleteUserAgentDefinitionByNameParams{
 		OrganizationID: member.OrganizationID,
 		UserID:         member.UserID,
 		Name:           chi.URLParam(r, "agentDefinition"),
@@ -183,6 +229,8 @@ func (api *API) deleteForkUserAgentDefinition(rw http.ResponseWriter, r *http.Re
 		writeForkAgentDefinitionWriteError(ctx, rw, err)
 		return
 	}
+	fa.target(api.forkAuditOrganization(ctx, member.OrganizationID), deleted.ID, deleted.Name)
+	fa.diff(forkAuditUserAgentDefinition(deleted), nil)
 	rw.WriteHeader(http.StatusNoContent)
 }
 

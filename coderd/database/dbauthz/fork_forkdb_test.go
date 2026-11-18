@@ -11,6 +11,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/brianvoe/gofakeit/v7"
 	"github.com/google/go-cmp/cmp"
@@ -463,6 +464,28 @@ func TestForkQuerier(t *testing.T) {
 			rows := []forkdb.ClaimDuePullRequestWatchesRow{testutil.Fake(t, faker, forkdb.ClaimDuePullRequestWatchesRow{})}
 			fdb.EXPECT().ClaimDuePullRequestWatches(gomock.Any(), arg).Return(rows, nil).AnyTimes()
 			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(rows)
+		},
+		"FireChatProcessWatches": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := testutil.Fake(t, faker, forkdb.FireChatProcessWatchesParams{})
+			chats := []uuid.UUID{uuid.New()}
+			fdb.EXPECT().FireChatProcessWatches(gomock.Any(), arg).Return(chats, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(chats)
+		},
+		"ChatProcessWatchTakesLines": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := testutil.Fake(t, faker, forkdb.ChatProcessWatchTakesLinesParams{})
+			fdb.EXPECT().ChatProcessWatchTakesLines(gomock.Any(), arg).Return(true, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(true)
+		},
+		"MarkChatProcessWatchesReported": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := testutil.Fake(t, faker, forkdb.MarkChatProcessWatchesReportedParams{})
+			fdb.EXPECT().MarkChatProcessWatchesReported(gomock.Any(), arg).Return(int64(1), nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(int64(1))
+		},
+		"MarkLostChatProcessWatches": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := testutil.Fake(t, faker, forkdb.MarkLostChatProcessWatchesParams{})
+			chats := []uuid.UUID{uuid.New()}
+			fdb.EXPECT().MarkLostChatProcessWatches(gomock.Any(), arg).Return(chats, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionUpdate).Returns(chats)
 		},
 		"RecordPullRequestWatchPoll": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -1153,12 +1176,43 @@ func TestForkQuerier(t *testing.T) {
 			arg := testutil.Fake(t, faker, forkdb.InsertWorkflowStepParams{RunID: run.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
-			fdb.EXPECT().InsertWorkflowStep(gomock.Any(), arg).Return(nil).AnyTimes()
-			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
+			fdb.EXPECT().InsertWorkflowStep(gomock.Any(), arg).Return(int64(1), nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(int64(1))
 		},
-		"MarkOpenWorkflowRunsInterrupted": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
-			fdb.EXPECT().MarkOpenWorkflowRunsInterrupted(gomock.Any(), "the coderd process restarted before the run ended").Return(int64(2), nil).AnyTimes()
-			check.Args("the coderd process restarted before the run ended").Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns(int64(2))
+		"MarkStaleWorkflowRunsInterrupted": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			arg := forkdb.MarkStaleWorkflowRunsInterruptedParams{
+				ErrText:     "the coderd process restarted before the run ended",
+				StaleBefore: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			}
+			fdb.EXPECT().MarkStaleWorkflowRunsInterrupted(gomock.Any(), arg).Return(int64(2), nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns(int64(2))
+		},
+		"HeartbeatWorkflowRuns": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			ids := []uuid.UUID{uuid.New()}
+			arg := forkdb.HeartbeatWorkflowRunsParams{
+				Now:     time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+				Ids:     ids,
+				OwnerID: uuid.NullUUID{UUID: uuid.New(), Valid: true},
+			}
+			fdb.EXPECT().HeartbeatWorkflowRuns(gomock.Any(), arg).Return(ids, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns(ids)
+		},
+		"ReleaseWorkflowRuns": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			arg := forkdb.ReleaseWorkflowRunsParams{
+				ErrText: "the coderd process restarted before the run ended",
+				OwnerID: uuid.NullUUID{UUID: uuid.New(), Valid: true},
+			}
+			fdb.EXPECT().ReleaseWorkflowRuns(gomock.Any(), arg).Return(int64(1), nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns(int64(1))
+		},
+		"ClaimWorkflowRun": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			chat := testutil.Fake(t, faker, database.Chat{})
+			run := testutil.Fake(t, faker, forkdb.WorkflowRun{ChatID: chat.ID})
+			arg := testutil.Fake(t, faker, forkdb.ClaimWorkflowRunParams{ID: run.ID})
+			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
+			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
+			fdb.EXPECT().ClaimWorkflowRun(gomock.Any(), arg).Return(run, nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(run)
 		},
 		"UpdateWorkflowRunPhases": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -1175,8 +1229,8 @@ func TestForkQuerier(t *testing.T) {
 			arg := testutil.Fake(t, faker, forkdb.UpdateWorkflowRunStatusParams{ID: run.ID})
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
-			fdb.EXPECT().UpdateWorkflowRunStatus(gomock.Any(), arg).Return(nil).AnyTimes()
-			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
+			fdb.EXPECT().UpdateWorkflowRunStatus(gomock.Any(), arg).Return(int64(1), nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(int64(1))
 		},
 		"MarkWorkflowStepReused": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -1213,8 +1267,8 @@ func TestForkQuerier(t *testing.T) {
 			db.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 			fdb.EXPECT().GetWorkflowStep(gomock.Any(), step.ID).Return(step, nil).AnyTimes()
 			fdb.EXPECT().GetWorkflowRun(gomock.Any(), run.ID).Return(run, nil).AnyTimes()
-			fdb.EXPECT().UpdateWorkflowStep(gomock.Any(), arg).Return(nil).AnyTimes()
-			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns()
+			fdb.EXPECT().UpdateWorkflowStep(gomock.Any(), arg).Return(int64(1), nil).AnyTimes()
+			check.Args(arg).Asserts(chat, policy.ActionUpdate).Returns(int64(1))
 		},
 		"GetWorkflowRunsByChat": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			chat := testutil.Fake(t, faker, database.Chat{})
@@ -1702,16 +1756,23 @@ func TestForkQuerierChatdSkipsChatPreReads(t *testing.T) {
 			return err
 		}},
 		{name: "InsertWorkflowStep", run: func(ctx context.Context, fdb forkdb.Store) error {
-			return fdb.InsertWorkflowStep(ctx, forkdb.InsertWorkflowStepParams{RunID: run.ID})
+			_, err := fdb.InsertWorkflowStep(ctx, forkdb.InsertWorkflowStepParams{RunID: run.ID})
+			return err
+		}},
+		{name: "ClaimWorkflowRun", run: func(ctx context.Context, fdb forkdb.Store) error {
+			_, err := fdb.ClaimWorkflowRun(ctx, forkdb.ClaimWorkflowRunParams{ID: run.ID})
+			return err
 		}},
 		{name: "UpdateWorkflowRunPhases", run: func(ctx context.Context, fdb forkdb.Store) error {
 			return fdb.UpdateWorkflowRunPhases(ctx, forkdb.UpdateWorkflowRunPhasesParams{ID: run.ID})
 		}},
 		{name: "UpdateWorkflowRunStatus", run: func(ctx context.Context, fdb forkdb.Store) error {
-			return fdb.UpdateWorkflowRunStatus(ctx, forkdb.UpdateWorkflowRunStatusParams{ID: run.ID})
+			_, err := fdb.UpdateWorkflowRunStatus(ctx, forkdb.UpdateWorkflowRunStatusParams{ID: run.ID})
+			return err
 		}},
 		{name: "UpdateWorkflowStep", run: func(ctx context.Context, fdb forkdb.Store) error {
-			return fdb.UpdateWorkflowStep(ctx, forkdb.UpdateWorkflowStepParams{ID: step.ID})
+			_, err := fdb.UpdateWorkflowStep(ctx, forkdb.UpdateWorkflowStepParams{ID: step.ID})
+			return err
 		}},
 		{name: "FailOpenWorkflowStepsOfRun", run: func(ctx context.Context, fdb forkdb.Store) error {
 			_, err := fdb.FailOpenWorkflowStepsOfRun(ctx, forkdb.FailOpenWorkflowStepsOfRunParams{RunID: run.ID})
@@ -1805,7 +1866,7 @@ func TestForkQuerierChatdSkipsChatPreReads(t *testing.T) {
 					require.Zero(t, counts.get("GetWorkflowStep"))
 				case "GetWorkflowRun", "GetWorkflowStepsByRun",
 					"InsertWorkflowStep", "UpdateWorkflowRunPhases",
-					"UpdateWorkflowRunStatus",
+					"UpdateWorkflowRunStatus", "ClaimWorkflowRun",
 					"FailOpenWorkflowStepsOfRun":
 					require.Zero(t, counts.get("GetChatWakeupByID"))
 					require.Equal(t, int64(1), counts.get("GetWorkflowRun"))
@@ -1815,11 +1876,11 @@ func TestForkQuerierChatdSkipsChatPreReads(t *testing.T) {
 					require.Equal(t, int64(1), counts.get("GetWorkflowRun"))
 					require.Equal(t, int64(1), counts.get("GetWorkflowStep"))
 				case "UpdateWorkflowStep":
-					// The step read survives the fast path on purpose: the
-					// UPDATE is a :exec query, so a deleted step would
-					// otherwise vanish silently. The member still pays the
-					// run read to find the chat; the chatd fast path skips
-					// it.
+					// The step read survives the fast path on purpose: a
+					// deleted step must answer an error, not 0 rows, which
+					// means the row kept its report. The member still pays
+					// the run read to find the chat; the chatd fast path
+					// skips it.
 					require.Zero(t, counts.get("GetChatWakeupByID"))
 					require.Equal(t, int64(1), counts.get("GetWorkflowRun"))
 					require.Equal(t, int64(1), counts.get("GetWorkflowStep"))
@@ -1876,10 +1937,11 @@ func countingForkStores(t *testing.T, chat database.Chat, wakeup forkdb.ChatWake
 	fdbMock.EXPECT().MarkChatWakeupWatchDelivered(gomock.Any(), gomock.Any()).Return(forkdb.ChatWakeupWatch{}, nil).AnyTimes()
 	fdbMock.EXPECT().ListChildChatIDsWithOpenWakeupWatches(gomock.Any(), chat.ID).Return(nil, nil).AnyTimes()
 	fdbMock.EXPECT().GetWorkflowStepsByRun(gomock.Any(), run.ID).Return(nil, nil).AnyTimes()
-	fdbMock.EXPECT().InsertWorkflowStep(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	fdbMock.EXPECT().InsertWorkflowStep(gomock.Any(), gomock.Any()).Return(int64(1), nil).AnyTimes()
+	fdbMock.EXPECT().ClaimWorkflowRun(gomock.Any(), gomock.Any()).Return(run, nil).AnyTimes()
 	fdbMock.EXPECT().UpdateWorkflowRunPhases(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
-	fdbMock.EXPECT().UpdateWorkflowRunStatus(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
-	fdbMock.EXPECT().UpdateWorkflowStep(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	fdbMock.EXPECT().UpdateWorkflowRunStatus(gomock.Any(), gomock.Any()).Return(int64(1), nil).AnyTimes()
+	fdbMock.EXPECT().UpdateWorkflowStep(gomock.Any(), gomock.Any()).Return(int64(1), nil).AnyTimes()
 	fdbMock.EXPECT().FailOpenWorkflowStepsOfRun(gomock.Any(), gomock.Any()).Return(int64(0), nil).AnyTimes()
 
 	az := dbauthz.New(mDB, rbac.NewAuthorizer(prometheus.NewRegistry()), slog.Make(), coderdtest.AccessControlStorePointer())

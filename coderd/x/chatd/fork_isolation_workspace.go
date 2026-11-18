@@ -130,7 +130,7 @@ func (p *Server) createSubagentWorkspace(ctx context.Context, child database.Cha
 	}
 
 	var started database.Chat
-	err = p.newChatMachine(child.ID).Update(ctx, func(tx *chatstate.Tx, store database.Store) error {
+	_, err = p.newChatMachine(child.ID).Update(ctx, func(tx *chatstate.Tx, store database.Store, _ *chatstate.ChatSnapshot) error {
 		chat, err := store.GetChatByID(ctx, child.ID)
 		if err != nil {
 			return xerrors.Errorf("get child chat: %w", err)
@@ -193,7 +193,7 @@ func (p *Server) discardSubagentUnless(ctx context.Context, chatID uuid.UUID, ke
 		kept     bool
 		newly    bool
 	)
-	err := p.newChatMachine(chatID).Update(ctx, func(tx *chatstate.Tx, store database.Store) error {
+	_, err := p.newChatMachine(chatID).Update(ctx, func(tx *chatstate.Tx, store database.Store, _ *chatstate.ChatSnapshot) error {
 		if keep != nil {
 			var err error
 			if kept, err = keep(ctx, store); err != nil || kept {

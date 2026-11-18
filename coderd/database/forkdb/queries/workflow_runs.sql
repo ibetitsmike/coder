@@ -4,8 +4,10 @@
 -- phases. The ::text[] cast makes sqlc emit []string wrapped in pq.Array; a
 -- bare COALESCE(@phases, ...) leaves it interface{}. COALESCE keeps a nil
 -- slice out of the NOT NULL column: pq encodes a nil []string as NULL.
-INSERT INTO workflow_runs (id, chat_id, model_config_id, script, args, status, phases, current_phase)
-VALUES (@id, @chat_id, @model_config_id, @script, sqlc.arg(args)::jsonb, @status, COALESCE(@phases::text[], '{}'::text[]), @current_phase);
+-- owner_id and heartbeat_at name the chatd process that runs the script.
+INSERT INTO workflow_runs (id, chat_id, model_config_id, script, args, status, phases, current_phase, owner_id, heartbeat_at)
+VALUES (@id, @chat_id, @model_config_id, @script, sqlc.arg(args)::jsonb, @status, COALESCE(@phases::text[], '{}'::text[]), @current_phase,
+    sqlc.narg('owner_id')::uuid, sqlc.narg('heartbeat_at')::timestamptz);
 
 -- name: GetWorkflowRun :one
 SELECT * FROM workflow_runs WHERE id = @id;
@@ -20,39 +22,93 @@ SELECT * FROM workflow_steps WHERE run_id = @run_id ORDER BY ordinal;
 -- overwrite each other's columns.
 UPDATE workflow_runs
 SET phases = COALESCE(@phases::text[], '{}'::text[]), current_phase = @current_phase, updated_at = now()
-WHERE id = @id;
+WHERE id = @id
+    AND (sqlc.narg('owner_id')::uuid IS NULL OR (owner_id = sqlc.narg('owner_id')::uuid AND status = 'running'));
 
--- name: UpdateWorkflowRunStatus :exec
+-- name: UpdateWorkflowRunStatus :execrows
 -- result is the full terminal snapshot of the run, or NULL for interrupted.
 -- A terminal status stamps finished_at; interrupted keeps the run open, so
 -- a resume can end it later. The param stays uncast so sqlc ties it to the
 -- nullable column and applies the NullRawMessage override: a plain
 -- json.RawMessage would reach pq as a zero-length string, which Postgres
--- rejects on jsonb.
+-- rejects on jsonb. owner_id fences the write of a live run: only the
+-- process that owns a running run writes it, so a process that lost the run
+-- to a sweep or a claim cannot overwrite the state of the new owner. A NULL
+-- owner_id skips the fence. The same fence guards every engine write below.
 UPDATE workflow_runs
 SET status = @status, error = @error, result = @result,
     phases = COALESCE(@phases::text[], '{}'::text[]), current_phase = @current_phase,
     updated_at = now(),
     finished_at = CASE WHEN @status::text IN ('completed', 'failed', 'stopped') THEN now() ELSE NULL END
-WHERE id = @id;
+WHERE id = @id
+    AND (sqlc.narg('owner_id')::uuid IS NULL OR (owner_id = sqlc.narg('owner_id')::uuid AND status = 'running'));
 
--- name: MarkOpenWorkflowRunsInterrupted :execrows
--- chatd runs this once at startup: runs owned by a dead process stay open.
--- The parameter is err_text, not error: it becomes a mock parameter name.
+-- name: MarkStaleWorkflowRunsInterrupted :execrows
+-- chatd runs this at startup and on every heartbeat tick: a running run
+-- whose owner stopped its heartbeat belongs to a dead process. A NULL
+-- heartbeat is a row written before owners existed. The parameter is
+-- err_text, not error: it becomes a mock parameter name.
 UPDATE workflow_runs SET status = 'interrupted', error = @err_text, updated_at = now()
-WHERE status = 'running';
+WHERE status = 'running'
+    AND (heartbeat_at IS NULL OR heartbeat_at < @stale_before::timestamptz);
 
--- name: InsertWorkflowStep :exec
+-- name: HeartbeatWorkflowRuns :many
+-- The owner of the runs ids says it still executes them. It returns the IDs
+-- that it still owns: a run that is missing was swept or claimed by another
+-- process. The heartbeat leaves updated_at alone, which tells the UI that a
+-- run changed.
+UPDATE workflow_runs SET heartbeat_at = @now::timestamptz
+WHERE id = ANY(@ids::uuid[])
+    AND owner_id = @owner_id
+    AND status = 'running'
+RETURNING id;
+
+-- name: ClaimWorkflowRun :one
+-- A resume takes over a run: an interrupted run, a running run whose owner
+-- stopped its heartbeat, or a run this process already owns. A running run
+-- of a live owner returns no row, so two resumes of one run cannot both
+-- execute it.
+UPDATE workflow_runs
+SET owner_id = @owner_id, heartbeat_at = @now::timestamptz, status = 'running', error = '', updated_at = now()
+WHERE id = @id
+    AND (
+        status = 'interrupted'
+        OR (status = 'running' AND (
+            owner_id = @owner_id
+            OR heartbeat_at IS NULL
+            OR heartbeat_at < @stale_before::timestamptz
+        ))
+    )
+RETURNING *;
+
+-- name: ReleaseWorkflowRuns :execrows
+-- chatd runs this when it closes: the runs it still owns stay open as
+-- interrupted at once, so the next process can resume them without waiting
+-- for the stale window. err_text, not error: it becomes a mock parameter
+-- name.
+UPDATE workflow_runs SET status = 'interrupted', error = @err_text, updated_at = now()
+WHERE owner_id = @owner_id AND status = 'running';
+
+-- name: InsertWorkflowStep :execrows
 -- phase is the name that was current when the step started, or '' when the
--- script called no phase() before it.
+-- script called no phase() before it. owner_id fences the insert like
+-- UpdateWorkflowRunStatus: a run this process does not own inserts nothing.
 INSERT INTO workflow_steps (id, run_id, spec_key, occurrence, ordinal, title, status, value, reused, phase)
-VALUES (@id, @run_id, @spec_key, @occurrence, @ordinal, @title, @status, @value, @reused, @phase);
+SELECT @id::uuid, @run_id::uuid, @spec_key::text, @occurrence::int, @ordinal::int, @title::text, @status::text,
+    sqlc.narg('value')::jsonb, @reused::bool, @phase::text
+WHERE sqlc.narg('owner_id')::uuid IS NULL
+    OR EXISTS (
+        SELECT 1 FROM workflow_runs
+        WHERE workflow_runs.id = @run_id::uuid
+            AND workflow_runs.owner_id = sqlc.narg('owner_id')::uuid
+            AND workflow_runs.status = 'running'
+    );
 
 -- name: GetWorkflowStep :one
 -- The authorizer of UpdateWorkflowStep reads the step to find its run.
 SELECT * FROM workflow_steps WHERE id = @id;
 
--- name: UpdateWorkflowStep :exec
+-- name: UpdateWorkflowStep :execrows
 -- A reported or failed step stamps finished_at; started_at is set once, at
 -- the insert. The param stays uncast so sqlc ties it to the nullable column
 -- and applies the NullRawMessage override. reused only sets the flag: a
@@ -61,12 +117,20 @@ SELECT * FROM workflow_steps WHERE id = @id;
 -- run's retention clock in DeleteOldWorkflowRuns. The step update joins the
 -- run update, so the run row is locked before the step row, the same order
 -- as the purge's cascade. Without the join Postgres may run the two updates
--- in any order, and a report racing the purge could deadlock.
+-- in any order, and a report racing the purge could deadlock. owner_id
+-- fences the write of the engine; the workflow_report tool passes NULL, so a
+-- report reaches the row whoever owns the run. A reported row keeps its
+-- value against every engine write, and against a later report while the
+-- run is running, because the owner wakes the step on the first report. A
+-- report to an interrupted run replaces it. A write that changes nothing
+-- returns 0 rows.
 WITH run AS (
     UPDATE workflow_runs
     SET updated_at = now()
     WHERE workflow_runs.id = (SELECT run_id FROM workflow_steps WHERE workflow_steps.id = @id)
-    RETURNING workflow_runs.id
+        AND (sqlc.narg('owner_id')::uuid IS NULL
+            OR (workflow_runs.owner_id = sqlc.narg('owner_id')::uuid AND workflow_runs.status = 'running'))
+    RETURNING workflow_runs.id, workflow_runs.status
 )
 UPDATE workflow_steps
 SET status = @status, value = @value, error = @error,
@@ -74,7 +138,9 @@ SET status = @status, value = @value, error = @error,
     finished_at = CASE WHEN @status::text IN ('reported', 'failed') THEN now() ELSE NULL END
 FROM run
 WHERE workflow_steps.id = @id
-    AND workflow_steps.run_id = run.id;
+    AND workflow_steps.run_id = run.id
+    AND (workflow_steps.status <> 'reported'
+        OR (sqlc.narg('owner_id')::uuid IS NULL AND run.status <> 'running'));
 
 -- name: GetWorkflowRunsByChat :many
 -- The run list of a chat, newest first, one keyset page. after_created_at
@@ -114,7 +180,13 @@ WHERE run_id = @run_id AND NOT reused;
 -- stop_workflow fails the open steps of a run that it stops. err_text, not
 -- error: it becomes a mock parameter name.
 UPDATE workflow_steps SET status = 'failed', error = @err_text, finished_at = now()
-WHERE run_id = @run_id AND status IN ('running', 'reminded');
+WHERE run_id = @run_id AND status IN ('running', 'reminded')
+    AND (sqlc.narg('owner_id')::uuid IS NULL OR EXISTS (
+        SELECT 1 FROM workflow_runs
+        WHERE workflow_runs.id = @run_id
+            AND workflow_runs.owner_id = sqlc.narg('owner_id')::uuid
+            AND workflow_runs.status = 'running'
+    ));
 
 -- name: DeleteOldWorkflowRuns :execrows
 -- Deletes a batch of terminal and interrupted runs whose last journal write
@@ -141,10 +213,13 @@ WHERE workflow_runs.id = old.id
 -- to the last maxWorkflowLogs lines. lines replaces the retained lines when
 -- it is at least as new as the stored sequence, so a stalled write of an
 -- older snapshot cannot replace newer lines. The caller keeps the sequence in
--- the lines payload under the fork_seq key.
+-- the lines payload under the fork_seq key. owner_id fences the write to
+-- the owner without the running check: the terminal flush follows the
+-- terminal status write of the same owner.
 UPDATE workflow_runs
 SET logs = sqlc.arg(lines)::jsonb, updated_at = now()
 WHERE id = @id
+	AND (sqlc.narg('owner_id')::uuid IS NULL OR owner_id = sqlc.narg('owner_id')::uuid)
 	AND (
 		logs IS NULL
 		OR logs = 'null'::jsonb

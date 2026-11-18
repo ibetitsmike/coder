@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -29,7 +30,6 @@ import (
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
-	coderdpubsub "github.com/coder/coder/v2/coderd/pubsub"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
@@ -38,12 +38,13 @@ const (
 	runWorkflowToolName   = "run_workflow"
 	awaitWorkflowToolName = "await_workflow"
 
-	maxWorkflowSteps   = 50         // child chats per run, reused ones included
-	maxScriptBytes     = 64 << 10   // the script in the tool input
-	maxScriptSteps     = 10_000_000 // Starlark execution steps per run
-	maxResultBytes     = 64 << 10   // the JSON that main(args) returns
-	maxWorkflowLogs    = 50         // log() lines that a result keeps
-	maxWorkflowLogLine = 4 << 10    // bytes of one log() line that a result keeps
+	maxWorkflowSteps     = 50         // child chats per run, reused ones included
+	maxScriptBytes       = 64 << 10   // the script in the tool input
+	maxWorkflowArgsBytes = 64 << 10   // the args in the tool input, inline or by name
+	maxScriptSteps       = 10_000_000 // Starlark execution steps per run
+	maxResultBytes       = 64 << 10   // the JSON that main(args) returns
+	maxWorkflowLogs      = 50         // log() lines that a result keeps
+	maxWorkflowLogLine   = 4 << 10    // bytes of one log() line that a result keeps
 	// The result encodes the retained logs on every snapshot, so the line
 	// and byte caps below bound that encoding to maxResultBytes too.
 	defaultWorkflowWait = 600 * time.Second
@@ -92,7 +93,7 @@ type is "general" or "explore". schema is a JSON Schema dict with "type": "objec
 	`The step must call its workflow_report tool with a value that matches the schema. That value is the step value. Without a schema the value is {"text": "..."}.
 
 Rules: the script has no load(), no clock, no file access and no network. while loops are allowed. Recursion is not allowed. ` +
-	`Limits: script 64 KiB, 50 steps per run, 10,000,000 execution steps, result 64 KiB, step value 256 KiB. ` +
+	`Limits: script 64 KiB, args 64 KiB, 50 steps per run, 10,000,000 execution steps, result 64 KiB, step value 256 KiB. ` +
 	`Each step is a child chat of this chat. chatd limits how many sub-agent chats run at the same time. Extra steps wait in a queue.
 
 Resume: a run is journaled in the deployment database, so it survives a restart. ` +
@@ -115,8 +116,8 @@ const workflowNotFoundHelp = `The run is not found on this coderd replica, for e
 	`Call run_workflow again with the same script (or script_path or name), the same args and resume_run_id set to this run_id. Finished steps are reused.`
 
 type runWorkflowArgs struct {
-	Script      string `json:"script,omitempty" description:"Starlark source that defines main(args). Send this or script_path."`
-	ScriptPath  string `json:"script_path,omitempty" description:"Absolute path of a file in the workspace that holds the Starlark source. Send this or script."`
+	Script      string `json:"script,omitempty" description:"Starlark source that defines main(args). Send this, script_path or name."`
+	ScriptPath  string `json:"script_path,omitempty" description:"Absolute path of a file in the workspace that holds the Starlark source. Send this, script or name."`
 	Args        any    `json:"args,omitempty" description:"A JSON object. main(args) receives it."`
 	ResumeRunID string `json:"resume_run_id,omitempty" description:"Continue this run, for example after a restart. The script and args can be omitted; chatd replays them from the journal."`
 	Name        string `json:"name,omitempty" description:"The name of a saved workflow to run instead of script or script_path. list_workflows lists them."`
@@ -219,6 +220,11 @@ func (p *Server) forkWorkflowTools(
 				}
 				args.Script = script
 				run, err := p.startWorkflowRun(ctx, chat, modelConfigID, args, callID)
+				if elsewhere, ok := errors.AsType[*workflowRunElsewhereError](err); ok {
+					// Another chatd process executes the run; its journal
+					// state is the answer.
+					return workflowJSON(elsewhere.result), nil
+				}
 				if err != nil {
 					return fantasy.NewTextErrorResponse(err.Error()), nil
 				}
@@ -263,6 +269,27 @@ func (p *Server) forkWorkflowTools(
 type serialWorkflowTool struct{ fantasy.AgentTool }
 
 func (serialWorkflowTool) SerialToolCalls() bool { return true }
+
+// checkWorkflowArgsSize bounds the args input at maxWorkflowArgsBytes, the
+// script cap, for an inline and a named run alike. rawArgs is args as the
+// caller sent them; a call that skips the tool decode, such as a test,
+// marshals the Go value instead. Fresh runs only: a journal row belongs to
+// a run that already passed this check when it started, so a legacy row
+// written by an older version replays its args unexamined.
+func checkWorkflowArgsSize(args runWorkflowArgs) error {
+	data := args.rawArgs
+	if len(data) == 0 && args.Args != nil {
+		raw, err := json.Marshal(args.Args)
+		if err != nil {
+			return xerrors.Errorf("marshal args: %w", err)
+		}
+		data = raw
+	}
+	if len(data) > maxWorkflowArgsBytes {
+		return xerrors.Errorf("the args are %d bytes; at most %d bytes are allowed", len(data), maxWorkflowArgsBytes)
+	}
+	return nil
+}
 
 // workflowScript returns args.Script, or the content of the workspace file
 // at args.ScriptPath. The run compiles this text one time, so a later edit
@@ -310,10 +337,15 @@ func workflowJSON(res runWorkflowResult) fantasy.ToolResponse {
 	return fantasy.NewTextResponse(string(out))
 }
 
-// workflowRegistry holds the runs of this replica.
+// workflowRegistry holds the runs of this replica and its owner identity.
 type workflowRegistry struct {
-	mu   sync.Mutex
-	runs map[uuid.UUID]*workflowRun
+	mu    sync.Mutex
+	runs  map[uuid.UUID]*workflowRun
+	owner workflowOwnership
+	// reserved holds the runs that a resume of this process claims and
+	// rehydrates, or a journal-only stop claims and stops. Each channel
+	// closes when its reservation ends. It is guarded by mu.
+	reserved map[uuid.UUID]chan struct{}
 }
 
 func (g *workflowRegistry) get(id uuid.UUID) *workflowRun {
@@ -361,9 +393,15 @@ type workflowStep struct {
 	value  json.RawMessage
 	err    string
 	// sentReminder records that this run sent the one retry reminder. The
-	// scan in workflowStepReport also detects a reminder, but it matches the
+	// history scan of a resume also detects a reminder, but it matches the
 	// message text, which a user_prompt_submit hook can rewrite.
 	sentReminder bool
+	// historyPending records that the history scan of a resumed open step
+	// failed, so waitStep reads the history again before it reminds or
+	// fails the step.
+	historyPending bool
+	// signals wakes waitStep when the step gets its report.
+	signals stepSignals
 }
 
 type workflowRun struct {
@@ -442,6 +480,17 @@ type workflowRun struct {
 	stopRequested bool
 	cancel        context.CancelFunc
 	queuedNotice  int64 // the queued end message, 0 if none
+	// lost marks a run that another process took over or a sweep
+	// interrupted (fork_workflow_owner.go). Its script is canceled, and
+	// finish ends it without a journal write or an end message.
+	lost bool
+	// terminalPending marks a run whose terminal journal write failed. The
+	// heartbeat keeps its row alive and retries the write
+	// (fork_workflow_owner.go). mu guards the field.
+	terminalPending bool
+	// earlyReports holds reports whose step the run has not added yet, by
+	// child chat ID (fork_workflow_signal.go). mu guards the field.
+	earlyReports map[uuid.UUID]json.RawMessage
 }
 
 func (p *Server) startWorkflowRun(
@@ -489,6 +538,13 @@ func (p *Server) startWorkflowRun(
 		}
 		return p.resumeWorkflowRun(ctx, chat, row)
 	}
+	// Only a fresh run reads new args, so the cap sits after the journal
+	// lookup: a journaled run replays the args it holds, which passed the
+	// cap when it started, and a legacy row from an older version replays
+	// unexamined instead of failing an otherwise resumable run.
+	if err := checkWorkflowArgsSize(args); err != nil {
+		return nil, err
+	}
 	if name := strings.TrimSpace(args.Name); name != "" {
 		if args.Script != "" {
 			return nil, xerrors.New("send name or script, not both")
@@ -504,7 +560,7 @@ func (p *Server) startWorkflowRun(
 		savedPhases = saved.Phases
 	}
 	if strings.TrimSpace(args.Script) == "" {
-		return nil, xerrors.New("script is required")
+		return nil, xerrors.New("script is required: send script, script_path or the name of a saved workflow")
 	}
 	parent, err := p.loadSubagentSpawnParentChat(ctx, func() database.Chat { return chat })
 	if err != nil {
@@ -661,6 +717,10 @@ func (r *workflowRun) isStopRequested() bool {
 // finish stores the result. If no await_workflow call waits, it tells the
 // parent that the run ended.
 func (r *workflowRun) finish(ctx context.Context, res runWorkflowResult) {
+	if r.isLost() {
+		r.finishLost()
+		return
+	}
 	// The journal keeps the result for the resumes and awaits of a later
 	// process, best effort like every journal update of a live run. A
 	// canceled context would fail the write, so a user stop journals on a
@@ -694,10 +754,22 @@ func (r *workflowRun) finish(ctx context.Context, res runWorkflowResult) {
 	}
 	// finish runs on the script goroutine, so the phase state it snapshots
 	// cannot change while the write starts: phase() runs on this goroutine.
-	r.p.workflowJournal().updateRunStatus(jctx, r.id, res.Status, res.Error, &res, r.phasesSnapshot())
+	// A fenced write means another process owns the run now. A failed
+	// write leaves the row running: the heartbeat keeps it alive and
+	// retries the write, so a sweep cannot reopen a run that ended.
+	fenced, err := r.p.workflowJournal().writeRunStatus(jctx, r.id, res.Status, res.Error, &res, r.phasesSnapshot())
+	if fenced {
+		r.markLost()
+		r.finishLost()
+		return
+	}
+	if err != nil {
+		r.p.logger.Warn(ctx, "journal the end of a workflow run", slog.F("workflow_id", r.id), slog.Error(err))
+	}
 
 	r.mu.Lock()
 	r.result = &res
+	r.terminalPending = err != nil && jctx.Err() == nil
 	waiting := r.awaiters > 0
 	r.notified = !waiting
 	r.mu.Unlock()
@@ -1198,6 +1270,7 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 		r.mu.Unlock()
 		r.p.workflowJournal().markStepReused(ctx, journaled.id)
 		r.failJournaledStep(ctx, journaled)
+		_ = r.scanJournaledStepHistory(ctx, journaled)
 		return journaled, nil
 	}
 
@@ -1220,23 +1293,37 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 		if database.IsUniqueViolation(err, workflowStepsPkey) {
 			return r.adoptJournaledStep(ctx, id)
 		}
+		if errors.Is(err, errWorkflowRunLost) {
+			// The new owner of the run adopts the child chat.
+			r.markLost()
+			return nil, err
+		}
 		// The child chat runs without a journal row. Stop it: a step that
 		// the script never reads again must not consume model capacity.
 		r.interruptStepChild(ctx, step)
 		return nil, xerrors.Errorf("journal the workflow step: %w", err)
 	}
 	r.mu.Lock()
-	r.steps = append(r.steps, step)
+	early := r.addStepLocked(step)
 	r.mu.Unlock()
+	if early {
+		r.journalEarlyReport(ctx, step)
+	}
+	if reused {
+		// A reused child without a journal row (a crash between the child
+		// and the row, or a purged run) may have reported into its
+		// history already.
+		_ = r.scanJournaledStepHistory(ctx, step)
+	}
 	return step, nil
 }
 
 // adoptJournaledStep takes over the journal row of a step that another
-// runner of the same run inserted after this run was rehydrated. The
-// startup sweep marks every open run interrupted, so a run can be resumed
-// while the process that started it still runs the script, for example
-// during a rolling restart or on another replica. Both runners derive the
-// same step ID, so the later insert hits the primary key. The step is the
+// runner of the same run inserted after this run was rehydrated. The claim
+// of a resume fences the inserts of the previous owner, but an insert that
+// started before the claim committed can still land after the rehydration
+// read the steps. Both runners derive the same step ID, so the later insert
+// hits the primary key. The step is the
 // journaled one from here on and replays the way startStep replays a
 // rehydrated step. Its child chat belongs to that row and keeps running.
 func (r *workflowRun) adoptJournaledStep(ctx context.Context, id uuid.UUID) (*workflowStep, error) {
@@ -1249,15 +1336,22 @@ func (r *workflowRun) adoptJournaledStep(ctx context.Context, id uuid.UUID) (*wo
 	}
 	step := journaledWorkflowStep(row)
 	r.mu.Lock()
-	r.steps = append(r.steps, step)
+	early := r.addStepLocked(step)
 	r.mu.Unlock()
+	if early {
+		r.journalEarlyReport(ctx, step)
+	}
 	r.p.workflowJournal().markStepReused(ctx, step.id)
 	r.failJournaledStep(ctx, step)
+	// The old runner's child may have reported into its history before
+	// the report reached the row, as for a step the rehydration found.
+	_ = r.scanJournaledStepHistory(ctx, step)
 	return step, nil
 }
 
-// waitStep blocks until the step has a value or fails. A child that stops
-// without a value gets one reminder.
+// waitStep blocks until the step has a value or fails. The report tool
+// wakes it (fork_workflow_signal.go); a child that stops without a value
+// gets one reminder.
 func (r *workflowRun) waitStep(ctx context.Context, step *workflowStep) error {
 	deadline := r.p.clock.Now().Add(workflowStepTimeout)
 	for {
@@ -1275,12 +1369,20 @@ func (r *workflowRun) waitStep(ctx context.Context, step *workflowStep) error {
 			r.interruptStepChild(ctx, step)
 			return nil
 		}
-		err := r.awaitStepChild(ctx, step.chatID, deadline)
+		stopped, err := r.awaitStepChild(ctx, step, deadline)
 		if errors.Is(err, ErrSubagentWaitTimeout) {
 			continue
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if (stopped || err != nil) && r.stepHistoryPending(step) {
+			// The resume could not read the history, which may hold the
+			// report. Read it before the child counts as unreported.
+			if err := r.retryStepHistory(ctx, step, deadline); err != nil {
+				return err
+			}
+			continue
 		}
 		if statusErr, ok := errors.AsType[*subagentStatusError](err); ok {
 			r.failStep(ctx, step, "the child chat failed: "+statusErr.reason)
@@ -1290,93 +1392,54 @@ func (r *workflowRun) waitStep(ctx context.Context, step *workflowStep) error {
 			r.failStep(ctx, step, err.Error())
 			return nil
 		}
-		value, reminded, err := workflowStepReport(ctx, r.p.db, step.chatID)
-		if err != nil {
-			return err
+		if !stopped {
+			continue
 		}
+		// The child stopped. A report another process accepted is in the
+		// journal; the owner event can lag the child's status.
+		if r.readJournaledReport(ctx, step) {
+			continue
+		}
+		r.mu.Lock()
+		remind := !step.sentReminder
+		r.mu.Unlock()
 		switch {
-		case value != nil:
-			r.mu.Lock()
-			step.status, step.value = stepStatusReported, value
-			r.mu.Unlock()
-			r.p.workflowJournal().updateStep(ctx, step)
-		case !reminded && !step.sentReminder:
+		case remind:
 			if _, err := r.p.sendSubagentMessage(ctx, r.parent.ID, step.chatID,
 				workflowReminder); err != nil {
 				r.failStep(ctx, step, "send reminder: "+err.Error())
 				return nil
 			}
 			r.mu.Lock()
-			step.status, step.sentReminder = stepStatusReminded, true
+			step.sentReminder = true
+			if step.status == stepStatusRunning {
+				step.status = stepStatusReminded
+			}
 			r.mu.Unlock()
-			r.p.workflowJournal().updateStep(ctx, step)
+			_ = r.journalStepState(ctx, step, func(ctx context.Context, s *workflowStep) error {
+				r.p.workflowJournal().updateStep(ctx, s)
+				return nil
+			})
 		default:
 			r.failStep(ctx, step, "the step stopped without a "+workflowReportToolName+" call")
 		}
 	}
 }
 
-// awaitStepChild waits for the step's child chat like
-// awaitSubagentCompletion. That function reads the child before it
-// subscribes, so a child that ends its turn in between is seen only at the
-// fallback tick. This subscribes first and restarts the wait when the
-// child's state changes, and the restarted wait reads the child at once.
-// No wait runs past deadline, so a child that changes state often still
-// returns control to waitStep, which enforces the step timeout.
-func (r *workflowRun) awaitStepChild(ctx context.Context, chatID uuid.UUID, deadline time.Time) error {
-	waitTimeout := func() time.Duration {
-		return min(defaultSubagentWaitTimeout, deadline.Sub(r.p.clock.Now()))
-	}
-	changed := make(chan struct{}, 1)
-	unsubscribe, err := r.p.pubsub.SubscribeWithErr(coderdpubsub.ChatStateUpdateChannel(chatID),
-		func(context.Context, []byte, error) {
-			select {
-			case changed <- struct{}{}:
-			default:
-			}
-		})
-	if err != nil {
-		timeout := waitTimeout()
-		if timeout <= 0 {
-			return ErrSubagentWaitTimeout
-		}
-		// Without a subscription awaitSubagentCompletion polls fast itself.
-		_, _, err = r.p.awaitSubagentCompletion(ctx, r.parent.ID, chatID, timeout)
-		return err
-	}
-	defer unsubscribe()
-	for {
-		timeout := waitTimeout()
-		if timeout <= 0 {
-			return ErrSubagentWaitTimeout
-		}
-		waitCtx, cancel := context.WithCancel(ctx)
-		restart := make(chan struct{})
-		go func() {
-			select {
-			case <-changed:
-				close(restart)
-				cancel()
-			case <-waitCtx.Done():
-			}
-		}()
-		_, _, err := r.p.awaitSubagentCompletion(waitCtx, r.parent.ID, chatID, timeout)
-		cancel()
-		select {
-		case <-restart:
-			// The cancel may surface as any error of the read it stopped.
-			// The restarted wait reports a real error again.
-			if err != nil && ctx.Err() == nil {
-				continue
-			}
-		default:
-		}
-		return err
-	}
-}
-
+// failStep fails an open step. A report that another process journaled
+// wins: its owner event can lag the timeout or the child's stop, so the
+// step reads its row first, and the journal keeps a reported row against
+// the failed write of a report that lands after that read.
 func (r *workflowRun) failStep(ctx context.Context, step *workflowStep, reason string) {
+	if r.readJournaledReport(ctx, step) {
+		return
+	}
 	r.mu.Lock()
+	if step.status == stepStatusReported {
+		// The report came in while waitStep decided to fail the step.
+		r.mu.Unlock()
+		return
+	}
 	step.status, step.err = stepStatusFailed, reason
 	r.appendEngineLogLocked(fmt.Sprintf("step %q failed: %s", step.title, reason))
 	r.mu.Unlock()
@@ -1393,14 +1456,15 @@ func (r *workflowRun) failStep(ctx context.Context, step *workflowStep, reason s
 // suppresses this copy: the re-emit keeps the line count aligned with the
 // baseline, which a plain replay that never prints the failure line would
 // break. A step failed after the baseline was taken logs its line live, the
-// way failStep does.
+// way failStep does. A recovered child may report while the replay runs,
+// so the step fields are read under the lock.
 func (r *workflowRun) failJournaledStep(_ context.Context, step *workflowStep) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if step.status != stepStatusFailed || step.err == "" {
 		return
 	}
-	r.mu.Lock()
 	r.appendLogLocked(fmt.Sprintf("step %q failed: %s", step.title, step.err))
-	r.mu.Unlock()
 }
 
 // interruptOpenSteps stops the child chats of steps that the script left
@@ -1409,7 +1473,20 @@ func (r *workflowRun) failJournaledStep(_ context.Context, step *workflowStep) {
 // step timeout. waitStep has already returned when this runs, so the step
 // fields have no other writer. It returns the steps it failed, which finish
 // logs: the failure lines of steps failed earlier already sit in the logs.
+// A run that this process lost leaves the steps alone: their child chats
+// belong to the new owner.
 func (r *workflowRun) interruptOpenSteps(ctx context.Context, reason string) []*workflowStep {
+	if r.isLost() {
+		return nil
+	}
+	r.mu.Lock()
+	hasOpen := slices.ContainsFunc(r.steps, func(s *workflowStep) bool {
+		return s.status == stepStatusRunning || s.status == stepStatusReminded
+	})
+	r.mu.Unlock()
+	if hasOpen && !r.awaitOwnership(ctx) {
+		return nil
+	}
 	r.mu.Lock()
 	var open []*workflowStep
 	for _, s := range r.steps {

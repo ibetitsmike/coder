@@ -77,14 +77,29 @@ func (f forkQueryMetricsStore) InsertWorkflowRun(ctx context.Context, arg forkdb
 	return f.s.InsertWorkflowRun(ctx, arg)
 }
 
-func (f forkQueryMetricsStore) InsertWorkflowStep(ctx context.Context, arg forkdb.InsertWorkflowStepParams) error {
+func (f forkQueryMetricsStore) InsertWorkflowStep(ctx context.Context, arg forkdb.InsertWorkflowStepParams) (int64, error) {
 	defer f.observe(ctx, "InsertWorkflowStep", time.Now())
 	return f.s.InsertWorkflowStep(ctx, arg)
 }
 
-func (f forkQueryMetricsStore) MarkOpenWorkflowRunsInterrupted(ctx context.Context, errText string) (int64, error) {
-	defer f.observe(ctx, "MarkOpenWorkflowRunsInterrupted", time.Now())
-	return f.s.MarkOpenWorkflowRunsInterrupted(ctx, errText)
+func (f forkQueryMetricsStore) MarkStaleWorkflowRunsInterrupted(ctx context.Context, arg forkdb.MarkStaleWorkflowRunsInterruptedParams) (int64, error) {
+	defer f.observe(ctx, "MarkStaleWorkflowRunsInterrupted", time.Now())
+	return f.s.MarkStaleWorkflowRunsInterrupted(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) HeartbeatWorkflowRuns(ctx context.Context, arg forkdb.HeartbeatWorkflowRunsParams) ([]uuid.UUID, error) {
+	defer f.observe(ctx, "HeartbeatWorkflowRuns", time.Now())
+	return f.s.HeartbeatWorkflowRuns(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) ReleaseWorkflowRuns(ctx context.Context, arg forkdb.ReleaseWorkflowRunsParams) (int64, error) {
+	defer f.observe(ctx, "ReleaseWorkflowRuns", time.Now())
+	return f.s.ReleaseWorkflowRuns(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) ClaimWorkflowRun(ctx context.Context, arg forkdb.ClaimWorkflowRunParams) (forkdb.WorkflowRun, error) {
+	defer f.observe(ctx, "ClaimWorkflowRun", time.Now())
+	return f.s.ClaimWorkflowRun(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) UpdateWorkflowRunPhases(ctx context.Context, arg forkdb.UpdateWorkflowRunPhasesParams) error {
@@ -92,7 +107,7 @@ func (f forkQueryMetricsStore) UpdateWorkflowRunPhases(ctx context.Context, arg 
 	return f.s.UpdateWorkflowRunPhases(ctx, arg)
 }
 
-func (f forkQueryMetricsStore) UpdateWorkflowRunStatus(ctx context.Context, arg forkdb.UpdateWorkflowRunStatusParams) error {
+func (f forkQueryMetricsStore) UpdateWorkflowRunStatus(ctx context.Context, arg forkdb.UpdateWorkflowRunStatusParams) (int64, error) {
 	defer f.observe(ctx, "UpdateWorkflowRunStatus", time.Now())
 	return f.s.UpdateWorkflowRunStatus(ctx, arg)
 }
@@ -112,7 +127,7 @@ func (f forkQueryMetricsStore) SetWorkflowRunLogs(ctx context.Context, arg forkd
 	return f.s.SetWorkflowRunLogs(ctx, arg)
 }
 
-func (f forkQueryMetricsStore) UpdateWorkflowStep(ctx context.Context, arg forkdb.UpdateWorkflowStepParams) error {
+func (f forkQueryMetricsStore) UpdateWorkflowStep(ctx context.Context, arg forkdb.UpdateWorkflowStepParams) (int64, error) {
 	defer f.observe(ctx, "UpdateWorkflowStep", time.Now())
 	return f.s.UpdateWorkflowStep(ctx, arg)
 }
@@ -615,6 +630,26 @@ func (f forkQueryMetricsStore) MarkChatWakeupWatchFailed(ctx context.Context, ar
 func (f forkQueryMetricsStore) ClaimDuePullRequestWatches(ctx context.Context, arg forkdb.ClaimDuePullRequestWatchesParams) ([]forkdb.ClaimDuePullRequestWatchesRow, error) {
 	defer f.observe(ctx, "ClaimDuePullRequestWatches", time.Now())
 	return f.s.ClaimDuePullRequestWatches(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) FireChatProcessWatches(ctx context.Context, arg forkdb.FireChatProcessWatchesParams) ([]uuid.UUID, error) {
+	defer f.observe(ctx, "FireChatProcessWatches", time.Now())
+	return f.s.FireChatProcessWatches(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) ChatProcessWatchTakesLines(ctx context.Context, arg forkdb.ChatProcessWatchTakesLinesParams) (bool, error) {
+	defer f.observe(ctx, "ChatProcessWatchTakesLines", time.Now())
+	return f.s.ChatProcessWatchTakesLines(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) MarkChatProcessWatchesReported(ctx context.Context, arg forkdb.MarkChatProcessWatchesReportedParams) (int64, error) {
+	defer f.observe(ctx, "MarkChatProcessWatchesReported", time.Now())
+	return f.s.MarkChatProcessWatchesReported(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) MarkLostChatProcessWatches(ctx context.Context, arg forkdb.MarkLostChatProcessWatchesParams) ([]uuid.UUID, error) {
+	defer f.observe(ctx, "MarkLostChatProcessWatches", time.Now())
+	return f.s.MarkLostChatProcessWatches(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) RecordPullRequestWatchPoll(ctx context.Context, arg forkdb.RecordPullRequestWatchPollParams) (int64, error) {
