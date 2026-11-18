@@ -4,10 +4,14 @@ import {
 	updateChatWakeup as updateChatWakeupApi,
 } from "#/api/forkChatWakeups";
 import type { ChatWakeup, ChatWakeupStatus } from "#/api/typesGenerated";
+import { forkPanelResyncInterval } from "./forkPanelResync";
+
+/** The key prefix shared by every wake-ups query. */
+export const chatWakeupsRootKey = ["chats", "fork-wakeups"] as const;
 
 /** Query key for a chat's wake-ups. */
 export const chatWakeupsKey = (chatId: string) =>
-	["chats", "fork-wakeups", chatId] as const;
+	[...chatWakeupsRootKey, chatId] as const;
 
 /**
  * The states the wake-ups pill shows. The server filters on them, so a chat
@@ -24,8 +28,7 @@ export const chatWakeups = (chatId: string) =>
 		queryKey: chatWakeupsKey(chatId),
 		queryFn: ({ signal }) =>
 			getChatWakeups(chatId, signal, openChatWakeupStatuses),
-		// Wake-ups have no watch socket, so poll to see worker-made changes.
-		refetchInterval: 30_000,
+		refetchInterval: forkPanelResyncInterval,
 		// A revisited chat must read again instead of showing cached
 		// wake-ups: access may be gone.
 		gcTime: 0,

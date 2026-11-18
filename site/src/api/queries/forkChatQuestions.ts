@@ -10,18 +10,24 @@ import {
 	invalidateChatEntity,
 	invalidateChatPrompts,
 } from "./chats";
+import { forkPanelResyncInterval } from "./forkPanelResync";
+
+/** The key prefix shared by every descendant questions query. */
+export const chatDescendantQuestionsRootKey = [
+	"chats",
+	"fork-descendant-questions",
+] as const;
 
 /** Query key for the pending descendant questions of a root chat's family. */
 export const chatDescendantQuestionsKey = (rootChatId: string) =>
-	["chats", "fork-descendant-questions", rootChatId] as const;
+	[...chatDescendantQuestionsRootKey, rootChatId] as const;
 
 /** Query options for the pending descendant questions of a root chat's family. */
 export const chatDescendantQuestions = (rootChatId: string) =>
 	queryOptions({
 		queryKey: chatDescendantQuestionsKey(rootChatId),
 		queryFn: ({ signal }) => getChatDescendantQuestions(rootChatId, signal),
-		// A descendant's question raises no event on the root chat's stream.
-		refetchInterval: 5_000,
+		refetchInterval: forkPanelResyncInterval,
 	});
 
 // The root page does not watch the descendant's stream, so it refreshes the

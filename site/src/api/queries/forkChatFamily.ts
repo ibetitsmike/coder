@@ -1,19 +1,23 @@
 import { queryOptions } from "react-query";
 import { getForkChatFamilyCapacity } from "#/api/forkChatFamily";
 
+/** The key prefix shared by every family capacity query. */
+export const forkChatFamilyRootKey = ["chats", "fork-family"] as const;
+
 /**
  * Keyed by the family root, never a descendant, so every row of a family
  * shares one cache entry.
  */
 export const forkChatFamilyCapacityKey = (rootChatId: string) =>
-	["chats", "fork-family", rootChatId] as const;
+	[...forkChatFamilyRootKey, rootChatId] as const;
 
-/** No event announces a capacity change, so the query polls. */
+/**
+ * Admitting a subagent held for capacity and freeing a slot in another
+ * family raise no watch event, so this query polls.
+ */
 export const forkChatFamilyCapacity = (rootChatId: string) =>
 	queryOptions({
 		queryKey: forkChatFamilyCapacityKey(rootChatId),
 		queryFn: ({ signal }) => getForkChatFamilyCapacity(rootChatId, signal),
-		// A failing read backs off instead of stopping, so a transient error
-		// does not hide capacity until the row remounts.
-		refetchInterval: ({ state }) => (state.status === "error" ? 30_000 : 5_000),
+		refetchInterval: 30_000,
 	});
