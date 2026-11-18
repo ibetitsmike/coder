@@ -120,7 +120,10 @@ describe("ForkWorkflowsPanel", () => {
 		);
 		const logs = await screen.findByRole("log", { name: "Logs" });
 		expect(logs).toHaveAttribute("aria-live", "polite");
-		expect(logs).toHaveAttribute("aria-relevant", "additions");
+		// aria-relevant stays unset on purpose: role="log" defaults to
+		// "additions text", and the appended text node counts as a text
+		// change, which an additions-only value would suppress.
+		expect(logs).not.toHaveAttribute("aria-relevant");
 	});
 
 	it("reports a failed stop and refreshes the runs", async () => {

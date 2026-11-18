@@ -754,7 +754,7 @@ describe("runListHasRunningRun", () => {
 					pageParams: [{ after: "" }, { after: "c" }],
 				}),
 			),
-		).toBe(120_000);
-		expect(refetchInterval(queryOf(undefined))).toBe(120_000);
+		).toBe(30_000);
+		expect(refetchInterval(queryOf(undefined))).toBe(30_000);
 	});
 });

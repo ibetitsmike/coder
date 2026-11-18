@@ -59,7 +59,6 @@ export const ForkWorkflowLongText: React.FC<ForkWorkflowLongTextProps> = ({
 			className="mt-1.5 flex min-w-0 flex-col gap-0.5"
 			role={isLive ? "log" : undefined}
 			aria-live={isLive ? "polite" : undefined}
-			aria-relevant={isLive ? "additions" : undefined}
 		>
 			<div className="text-xs font-medium text-content-secondary">{label}</div>
 			{preview === null ? (

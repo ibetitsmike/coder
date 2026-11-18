@@ -38,23 +38,51 @@ export const isUnsafeInteger = (value: unknown): value is UnsafeInteger =>
 /** The third argument V8 hands the JSON.parse reviver for literals. */
 type ReviverContext = { source?: string };
 
+/**
+ * Wraps text as raw JSON, so JSON.stringify prints it without quotes.
+ * JSON.rawJSON ships with the same V8 feature as the reviver's
+ * context.source; the type does not declare it yet, so it is reached
+ * through a feature check and the quoted string is the fallback.
+ */
+const rawJSON = (text: string): unknown => {
+	const f = (JSON as { rawJSON?: (raw: string) => unknown }).rawJSON;
+	return typeof f === "function" ? f.call(JSON, text) : text;
+};
+
+/**
+ * The exact text of an unsafe integer for display: bare digits where the
+ * runtime can stringify them as raw JSON, a quoted string where it
+ * cannot, so the digits still show.
+ */
+export const unsafeIntegerText = (value: UnsafeInteger): unknown =>
+	rawJSON(value.forkUnsafeInteger);
+
+/**
+ * The reviver parseForkWorkflowJson hands JSON.parse. It wraps only
+ * integer literals outside the safe range, so a decimal source that
+ * rounds to an unsafe integer, such as 9007199254740993.5, stays a
+ * plain rounded number and the wrapper never holds a fractional text.
+ */
+export const forkWorkflowReviver = (
+	_key: string,
+	value: unknown,
+	context?: ReviverContext,
+): unknown => {
+	if (
+		typeof value === "number" &&
+		Number.isInteger(value) &&
+		!Number.isSafeInteger(value)
+	) {
+		const source = context?.source;
+		if (typeof source === "string" && /^-?\d+$/.test(source)) {
+			return { forkUnsafeInteger: source } satisfies UnsafeInteger;
+		}
+	}
+	return value;
+};
+
 export const parseForkWorkflowJson = (text: string): unknown =>
-	JSON.parse(
-		text,
-		(_key: string, value: unknown, context?: ReviverContext): unknown => {
-			if (
-				typeof value === "number" &&
-				Number.isInteger(value) &&
-				!Number.isSafeInteger(value)
-			) {
-				const source = context?.source;
-				if (typeof source === "string" && Number(source) === value) {
-					return { forkUnsafeInteger: source } satisfies UnsafeInteger;
-				}
-			}
-			return value;
-		},
-	);
+	JSON.parse(text, forkWorkflowReviver);
 
 /** Fetches the chat's workflow runs, newest first. */
 export const getChatWorkflowRuns = async (
@@ -72,9 +100,11 @@ export const getChatWorkflowRuns = async (
 
 /**
  * Fetches one workflow run with its script, logs and steps. The detail's
- * args, result and step values can hold integers outside the safe range,
- * so the response parses with a lossless reviver instead of the axios
- * default, which would round them before display.
+ * args, result and step values can hold integers outside the safe
+ * range, so the response parses through a lossless reviver, handed to
+ * axios as parseReviver. That keeps axios's error-path parsing (a
+ * proxy error page or an empty body must still surface as an
+ * AxiosError) and only changes how success bodies decode.
  */
 export const getChatWorkflowRun = async (
 	chatId: string,
@@ -85,7 +115,7 @@ export const getChatWorkflowRun = async (
 		`/api/v2/chats/fork/${chatId}/workflow-runs/${runId}`,
 		{
 			signal,
-			transformResponse: [(data: string) => parseForkWorkflowJson(data)],
+			parseReviver: parseForkWorkflowJson,
 		},
 	);
 	return response.data;

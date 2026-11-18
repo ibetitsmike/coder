@@ -133,11 +133,12 @@ export const chatWorkflowRuns = (chatId: string) =>
 			return { after: `${last.created_at}/${last.id}` };
 		},
 		// Runs have no watch socket: poll faster while any loaded page has a
-		// run going, slowly otherwise so a run the agent starts shows up, and
-		// slowly still so a loaded page that went all-terminal reconciles
-		// with the server and drops runs the retention has purged.
+		// run going. The slow tick keeps going even once every loaded page is
+		// all-terminal, so each page refetches and reconciles with the
+		// server, dropping runs the retention has purged and picking up new
+		// ones the agent starts.
 		refetchInterval: ({ state }) =>
-			runListHasRunningRun(state.data) ? 5_000 : 120_000,
+			runListHasRunningRun(state.data) ? 5_000 : 30_000,
 	});
 
 /** Keys one run's detail under its chat's runs. */
