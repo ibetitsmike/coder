@@ -304,6 +304,16 @@ describe("fork panel polling", () => {
 			interval: 60_000,
 		},
 		{
+			name: "wake-ups with an active events wake-up",
+			mount: (queryClient, queryFn) =>
+				new QueryObserver(queryClient, {
+					...chatWakeups("chat-1"),
+					queryFn,
+				}).subscribe(() => {}),
+			data: [{ kind: "events", status: "active" }],
+			interval: 30_000,
+		},
+		{
 			name: "workflow runs with a running run",
 			mount: (queryClient, queryFn) =>
 				new QueryObserver(queryClient, {

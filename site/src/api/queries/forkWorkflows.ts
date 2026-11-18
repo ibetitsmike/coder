@@ -7,7 +7,6 @@ import {
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import { forkPanelResyncInterval } from "./forkPanelResync";
 
-/** The key prefix shared by every workflow run query. */
 export const chatWorkflowRunsRootKey = ["chats", "fork-workflow-runs"] as const;
 
 /** Also prefixes each run's key, so invalidating it refetches the details. */

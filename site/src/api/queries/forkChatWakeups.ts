@@ -6,7 +6,6 @@ import {
 import type { ChatWakeup, ChatWakeupStatus } from "#/api/typesGenerated";
 import { forkPanelResyncInterval } from "./forkPanelResync";
 
-/** The key prefix shared by every wake-ups query. */
 export const chatWakeupsRootKey = ["chats", "fork-wakeups"] as const;
 
 /** Query key for a chat's wake-ups. */
@@ -28,7 +27,14 @@ export const chatWakeups = (chatId: string) =>
 		queryKey: chatWakeupsKey(chatId),
 		queryFn: ({ signal }) =>
 			getChatWakeups(chatId, signal, openChatWakeupStatuses),
-		refetchInterval: forkPanelResyncInterval,
+		refetchInterval: ({ state }) =>
+			// An empty poll of an events wake-up moves its next_run_at and
+			// publishes nothing, so poll at 30 s while one is active.
+			state.data?.some(
+				(wakeup) => wakeup.kind === "events" && wakeup.status === "active",
+			)
+				? 30_000
+				: forkPanelResyncInterval,
 		// A revisited chat must read again instead of showing cached
 		// wake-ups: access may be gone.
 		gcTime: 0,

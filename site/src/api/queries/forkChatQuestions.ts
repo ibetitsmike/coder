@@ -12,7 +12,6 @@ import {
 } from "./chats";
 import { forkPanelResyncInterval } from "./forkPanelResync";
 
-/** The key prefix shared by every descendant questions query. */
 export const chatDescendantQuestionsRootKey = [
 	"chats",
 	"fork-descendant-questions",

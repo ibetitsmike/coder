@@ -1,7 +1,6 @@
 import { queryOptions } from "react-query";
 import { getForkChatFamilyCapacity } from "#/api/forkChatFamily";
 
-/** The key prefix shared by every family capacity query. */
 export const forkChatFamilyRootKey = ["chats", "fork-family"] as const;
 
 /**
