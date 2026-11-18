@@ -25,13 +25,18 @@ type ForkWorkflowRunListProps = {
 	hasOlderRuns?: boolean;
 	isLoadingOlderRuns?: boolean;
 	disabled?: boolean;
-	/** Absent while the first page has not loaded. */
+	/**
+	 * Present only while more pages exist, so while it is absent the user
+	 * cannot load another page: either no page has loaded yet or every
+	 * loaded page is fetched through the end.
+	 */
 	onLoadOlderRuns?: () => void;
 };
 
 type ForkWorkflowRunRowProps = {
 	run: WorkflowRun;
 	onSelectRun: (runId: string) => void;
+	buttonRef?: (button: HTMLButtonElement | null) => void;
 };
 
 // The clock lives on the row so only rows with a running run tick every
@@ -39,6 +44,7 @@ type ForkWorkflowRunRowProps = {
 const ForkWorkflowRunRow: React.FC<ForkWorkflowRunRowProps> = ({
 	run,
 	onSelectRun,
+	buttonRef,
 }) => {
 	const now = useTime(() => Date.now(), {
 		interval: run.status === "running" ? 1_000 : 30_000,
@@ -46,6 +52,7 @@ const ForkWorkflowRunRow: React.FC<ForkWorkflowRunRowProps> = ({
 	return (
 		<button
 			type="button"
+			ref={buttonRef}
 			className="flex w-full cursor-pointer flex-col gap-1 rounded-md border border-solid border-border bg-transparent p-2 text-left hover:bg-surface-secondary"
 			onClick={() => onSelectRun(run.id)}
 		>
@@ -82,6 +89,9 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 	onLoadOlderRuns,
 }) => {
 	const listRef = useRef<HTMLUListElement>(null);
+	// The row buttons by run id, so focus restoration targets the actual
+	// control and cannot land on a button a row grows later.
+	const rowButtons = useRef(new Map<string, HTMLButtonElement>());
 	// "Load older runs" holds focus while the last page loads. When that
 	// page ends the paging, the button unmounts, so keep focus moving
 	// through the runs instead of dropping it to the body.
@@ -104,19 +114,17 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 			listRef.current
 		) {
 			hadLoadOlder.current = false;
-			const rows = listRef.current.children;
+			loadOlderHadFocus.current = false;
 			const index = runs
 				? runs.findIndex((run) => run.id === lastOlderRunId.current)
 				: -1;
 			// Focus continues on the row after the last one the user saw;
 			// an empty last page leaves that row as the last one visible.
 			// Without that run the row is unknown, so the list takes focus.
+			const nextRunId =
+				index >= 0 ? (runs?.[index + 1]?.id ?? runs?.[index]?.id) : undefined;
 			const nextButton =
-				index >= 0
-					? (rows[index + 1]?.querySelector("button") ??
-						rows[index]?.querySelector("button") ??
-						null)
-					: null;
+				(nextRunId && rowButtons.current.get(nextRunId)) || null;
 			if (nextButton) {
 				nextButton.focus({ preventScroll: true });
 			} else {
@@ -161,7 +169,17 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 			>
 				{runs.map((run) => (
 					<li key={run.id}>
-						<ForkWorkflowRunRow run={run} onSelectRun={onSelectRun} />
+						<ForkWorkflowRunRow
+							run={run}
+							onSelectRun={onSelectRun}
+							buttonRef={(button) => {
+								if (button) {
+									rowButtons.current.set(run.id, button);
+								} else {
+									rowButtons.current.delete(run.id);
+								}
+							}}
+						/>
 					</li>
 				))}
 			</ul>

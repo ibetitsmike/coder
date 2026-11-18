@@ -20,12 +20,12 @@ export type UnsafeInteger = {
 	forkUnsafeInteger: string;
 };
 
-/** Whether a value came from parseForkWorkflowJson as an unsafe integer. */
+/** Whether a value came from the lossless parse as an unsafe integer. */
 export const isUnsafeInteger = (value: unknown): value is UnsafeInteger =>
 	typeof value === "object" &&
 	value !== null &&
 	"forkUnsafeInteger" in value &&
-	typeof (value as UnsafeInteger).forkUnsafeInteger === "string" &&
+	typeof value.forkUnsafeInteger === "string" &&
 	Object.keys(value).length === 1;
 
 /**
@@ -65,31 +65,29 @@ export const unsafeIntegerText = (value: UnsafeInteger): unknown =>
 	rawJSON(value.forkUnsafeInteger);
 
 /**
- * The reviver parseForkWorkflowJson hands JSON.parse. It wraps only
- * integer literals outside the safe range, so a decimal source that
- * rounds to an unsafe integer, such as 9007199254740993.5, stays a
- * plain rounded number and the wrapper never holds a fractional text.
+ * The reviver axios hands to JSON.parse for the run detail body. It wraps
+ * every integer literal outside the safe range, including one that
+ * overflows the number format to +-Infinity, whose digits stay exact. A
+ * decimal source, such as 9007199254740993.5, rounds like plain JSON and
+ * the wrapper never holds a fractional text.
  */
 export const forkWorkflowReviver = (
 	_key: string,
 	value: unknown,
 	context?: ReviverContext,
 ): unknown => {
-	if (
-		typeof value === "number" &&
-		Number.isInteger(value) &&
-		!Number.isSafeInteger(value)
-	) {
-		const source = context?.source;
-		if (typeof source === "string" && /^-?\d+$/.test(source)) {
-			return { forkUnsafeInteger: source } satisfies UnsafeInteger;
-		}
+	if (typeof value !== "number") {
+		return value;
 	}
-	return value;
+	const source = context?.source;
+	if (typeof source !== "string" || !/^-?\d+$/.test(source)) {
+		return value;
+	}
+	if (Number.isSafeInteger(value)) {
+		return value;
+	}
+	return { forkUnsafeInteger: source } satisfies UnsafeInteger;
 };
-
-export const parseForkWorkflowJson = (text: string): unknown =>
-	JSON.parse(text, forkWorkflowReviver);
 
 /** Fetches the chat's workflow runs, newest first. */
 export const getChatWorkflowRuns = async (
@@ -123,8 +121,8 @@ export const getChatWorkflowRun = async (
 		{
 			signal,
 			// Axios calls the reviver itself for every value of the body;
-			// handing it parseForkWorkflowJson, which parses the whole
-			// document, breaks the first value it visits.
+			// handing it a wrapper that parses the whole document breaks
+			// the first value it visits.
 			parseReviver: forkWorkflowReviver,
 		},
 	);

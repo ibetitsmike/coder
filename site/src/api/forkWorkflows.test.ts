@@ -10,27 +10,31 @@ import { formatForkWorkflowValue } from "#/pages/AgentsPage/components/ForkWorkf
 import {
 	forkWorkflowReviver,
 	isUnsafeInteger,
-	parseForkWorkflowJson,
 	unsafeIntegerText,
 } from "./forkWorkflows";
 
-describe("parseForkWorkflowJson", () => {
+// Production parses through axios's parseReviver, which is
+// forkWorkflowReviver itself, so the tests call JSON.parse with it the
+// same way.
+const parse = (text: string): unknown => JSON.parse(text, forkWorkflowReviver);
+
+describe("the lossless JSON parse", () => {
 	it("keeps an unsafe integer exactly as the server sent it", () => {
-		const parsed = parseForkWorkflowJson('{"args":{"count":9007199254740993}}');
+		const parsed = parse('{"args":{"count":9007199254740993}}');
 		const value = (parsed as { args: { count: unknown } }).args.count;
 		expect(isUnsafeInteger(value)).toBe(true);
 		expect(value).toEqual({ forkUnsafeInteger: "9007199254740993" });
 	});
 
 	it("wraps a negative integer outside the safe range", () => {
-		const parsed = parseForkWorkflowJson('{"n":-9007199254740993}');
+		const parsed = parse('{"n":-9007199254740993}');
 		expect((parsed as { n: unknown }).n).toEqual({
 			forkUnsafeInteger: "-9007199254740993",
 		});
 	});
 
 	it("keeps an integer just inside the safe range a plain number", () => {
-		const parsed = parseForkWorkflowJson('{"n":9007199254740991}');
+		const parsed = parse('{"n":9007199254740991}');
 		expect((parsed as { n: unknown }).n).toBe(9007199254740991);
 	});
 
@@ -48,30 +52,35 @@ describe("parseForkWorkflowJson", () => {
 	it("does not wrap floats, strings or decimal sources", () => {
 		// 9007199254740993.5 rounds to an unsafe integer, but its source is
 		// a decimal literal, so it stays a plain rounded number.
-		const parsed = parseForkWorkflowJson(
-			'{"f":9007199254740993.5,"s":"9007199254740993"}',
-		);
+		const parsed = parse('{"f":9007199254740993.5,"s":"9007199254740993"}');
 		const body = parsed as { f: unknown; s: unknown };
 		expect(body.f).toBe(9007199254740994);
 		expect(body.s).toBe("9007199254740993");
 	});
 
 	it("wraps unsafe integers nested in objects and arrays", () => {
-		const parsed = parseForkWorkflowJson(
-			'{"steps":[{"value":[9007199254740993]}]}',
-		);
+		const parsed = parse('{"steps":[{"value":[9007199254740993]}]}');
 		const step = (parsed as { steps: { value: unknown[] }[] }).steps[0]
 			.value[0];
 		expect(step).toEqual({ forkUnsafeInteger: "9007199254740993" });
 	});
 
 	it("wraps an unsafe integer used as an object key's value only", () => {
-		const parsed = parseForkWorkflowJson(
+		const parsed = parse(
 			'{"result":{"output":{"total":18446744073709551615}}}',
 		);
 		const total = (parsed as { result: { output: { total: unknown } } }).result
 			.output.total;
 		expect(total).toEqual({ forkUnsafeInteger: "18446744073709551615" });
+	});
+
+	it("wraps an integer literal that overflows the number format", () => {
+		// JSON.parse hands the reviver +-Infinity for a literal this large,
+		// but the source text still holds the exact digits.
+		const parsed = parse('{"n":123456789012345678901234567890}');
+		expect((parsed as { n: unknown }).n).toEqual({
+			forkUnsafeInteger: "123456789012345678901234567890",
+		});
 	});
 });
 

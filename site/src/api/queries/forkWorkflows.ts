@@ -13,6 +13,7 @@ import {
 	workflowRunsPageSize,
 } from "#/api/forkWorkflows";
 import type { WorkflowRun, WorkflowRunDetail } from "#/api/typesGenerated";
+import { compareUpdatedAtInstants } from "./chats";
 import { forkPanelResyncInterval } from "./forkPanelResync";
 
 export const chatWorkflowRunsRootKey = ["chats", "fork-workflow-runs"] as const;
@@ -23,24 +24,11 @@ export const chatWorkflowRunsKey = (chatId: string) =>
 
 export type WorkflowRunPageParam = { after: string };
 
-/**
- * An RFC 3339 timestamp as whole seconds and nanosecond digits. The server
- * trims trailing zeros and may use an offset, so the text does not sort.
- */
-const keysetTime = (stamp: string) => ({
-	seconds: Date.parse(stamp.replace(/\.\d+/, "")),
-	fraction: (/\.(\d+)/.exec(stamp)?.[1] ?? "").padEnd(9, "0"),
-});
-
 /** The keyset order of the run list: newest first, created_at then id. */
 const isNewerRun = (run: WorkflowRun, than: WorkflowRun) => {
-	const a = keysetTime(run.created_at);
-	const b = keysetTime(than.created_at);
-	if (a.seconds !== b.seconds) {
-		return a.seconds > b.seconds;
-	}
-	if (a.fraction !== b.fraction) {
-		return a.fraction > b.fraction;
+	const byTime = compareUpdatedAtInstants(run.created_at, than.created_at);
+	if (byTime !== 0) {
+		return byTime > 0;
 	}
 	return run.id > than.id;
 };

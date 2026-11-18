@@ -1,5 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { HttpResponse, http } from "msw";
 import {
 	focusManager,
 	type InfiniteData,
@@ -8,13 +9,16 @@ import {
 } from "react-query";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { describe, expect, it, vi } from "vitest";
+import { API } from "#/api/api";
 import * as forkWorkflowsApi from "#/api/forkWorkflows";
 import {
+	chatWorkflowRunKey,
 	chatWorkflowRuns,
 	chatWorkflowRunsKey,
 } from "#/api/queries/forkWorkflows";
 import type { WorkflowRun, WorkflowRunDetail } from "#/api/typesGenerated";
 import { toast } from "#/components/Toaster/toast";
+import { MockChat } from "#/testHelpers/chatEntities";
 import { mockApiError } from "#/testHelpers/entities";
 import {
 	MockChatWorkflowRun,
@@ -25,8 +29,14 @@ import {
 	createTestQueryClient,
 	renderComponent,
 } from "#/testHelpers/renderHelpers";
+import { server } from "#/testHelpers/server";
 import { generateUUID } from "#/utils/random";
 import { ForkWorkflowsPanel } from "./ForkWorkflowsPanel";
+
+// Captured before any test spies on the module: the integer test below
+// needs the real fetch, and clearAllMocks keeps earlier mock
+// implementations alive across tests in this file.
+const realGetChatWorkflowRun = forkWorkflowsApi.getChatWorkflowRun;
 
 // The panel remembers the open run per chat, so each test uses its own chat.
 const renderPanel = (chatId: string) => {
@@ -105,25 +115,48 @@ describe("ForkWorkflowsPanel", () => {
 		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockResolvedValue([
 			{ ...MockChatWorkflowRun, status: "running" },
 		]);
-		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue({
+		const runningDetail: WorkflowRunDetail = {
 			...MockChatWorkflowRunDetail,
 			chat_id: chatId,
 			status: "running",
+			logs: [],
 			result: undefined,
 			finished_at: undefined,
-		});
-		renderPanel(chatId);
+		};
+		const getRun = vi
+			.spyOn(forkWorkflowsApi, "getChatWorkflowRun")
+			.mockResolvedValue(runningDetail);
+		const { queryClient } = renderPanel(chatId);
 		const user = userEvent.setup();
 
 		await user.click(
 			await screen.findByRole("button", { name: /review changed files/i }),
 		);
+		// A live run with no logs yet still mounts the region, so the
+		// first lines land in a live region that already exists.
 		const logs = await screen.findByRole("log", { name: "Logs" });
+		expect(logs.querySelector("pre")?.textContent ?? "").toBe("");
 		expect(logs).toHaveAttribute("aria-live", "polite");
 		// aria-relevant stays unset on purpose: role="log" defaults to
 		// "additions text", and the appended text node counts as a text
 		// change, which an additions-only value would suppress.
 		expect(logs).not.toHaveAttribute("aria-relevant");
+
+		// The poll appends a line and the same region announces it. The
+		// append must reach the mounted live region, not remount it.
+		getRun.mockResolvedValue({
+			...runningDetail,
+			logs: ["step 1 started"],
+		});
+		await queryClient.refetchQueries({
+			queryKey: chatWorkflowRunKey(chatId, runningDetail.id),
+		});
+		await waitFor(() =>
+			expect(screen.getByRole("log", { name: "Logs" })).toHaveTextContent(
+				"step 1 started",
+			),
+		);
+		expect(screen.getByRole("log", { name: "Logs" })).toBe(logs);
 	});
 
 	it("reports a failed stop and refreshes the runs", async () => {
@@ -569,17 +602,39 @@ describe("ForkWorkflowsPanel", () => {
 
 	it("shows a large integer in Arguments exactly as the server sent it", async () => {
 		const chatId = generateUUID();
+		// Earlier tests in this file spy getChatWorkflowRun, and
+		// clearAllMocks keeps their implementations, so restore the real
+		// function: the detail must come from the wire below.
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockImplementation(
+			realGetChatWorkflowRun,
+		);
 		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockResolvedValue([
 			MockChatWorkflowRun,
 		]);
-		// The axios default parse would round 9007199254740993 to
-		// ...992 before the formatter saw it, so this pins the lossless
-		// path end to end, from the response text to the rendered block.
-		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue({
-			...MockChatWorkflowRunDetail,
-			chat_id: chatId,
-			args: { count: { forkUnsafeInteger: "9007199254740993" } },
-		});
+		// The detail comes from the wire, so the response text must carry
+		// the exact digits: the axios default parse would round
+		// 9007199254740993 to ...992 before the formatter saw it. This
+		// pins the lossless path end to end, from the response text
+		// through the reviver axios uses to the rendered block.
+		vi.spyOn(API.experimental, "getChat").mockResolvedValue({
+			...MockChat,
+			id: chatId,
+		} as never);
+		server.use(
+			http.get("**/chats/fork/:chatId/workflow-runs/:runId", () => {
+				// The digits are spliced into the response bytes, so the
+				// test exercises the JSON.parse reviver axios calls, not a
+				// fixture that already holds the wrapped value.
+				const body = JSON.stringify({
+					...MockChatWorkflowRunDetail,
+					chat_id: chatId,
+					args: null,
+				}).replace('"args":null', '"args":{"count":9007199254740993}');
+				return new HttpResponse(body, {
+					headers: { "content-type": "application/json" },
+				});
+			}),
+		);
 		renderPanel(chatId);
 		const user = userEvent.setup();
 
