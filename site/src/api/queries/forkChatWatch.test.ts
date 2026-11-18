@@ -60,16 +60,13 @@ const mockGrandchildChat: Chat = {
 };
 
 // A fork_change event carries the zero chat; MockChat stands in for it.
-const forkChange = (change: ChatWatchForkChange): ChatWatchEvent => ({
-	kind: "fork_change",
-	chat: MockChat,
-	fork_change: change,
-});
-
 const childForkChange = (
 	change: Omit<ChatWatchForkChange, "chat_id" | "root_chat_id">,
-): ChatWatchEvent =>
-	forkChange({ chat_id: "child-1", root_chat_id: "root-1", ...change });
+): ChatWatchEvent => ({
+	kind: "fork_change",
+	chat: MockChat,
+	fork_change: { chat_id: "child-1", root_chat_id: "root-1", ...change },
+});
 
 // Every fork panel query of two families, so a test can tell which ones an
 // event touched.
@@ -207,9 +204,11 @@ describe("createForkChatWatch", () => {
 			queryKey: chatWorkflowRunKey("child-1", "run-1"),
 		});
 
-		// A quiet gap ends the throttle, so the next event refetches at once.
+		// A quiet gap ends the throttle and drops its timer, so the next
+		// event refetches at once.
 		vi.advanceTimersByTime(forkWatchInvalidateGap);
 		expect(invalidate).toHaveBeenCalledTimes(2);
+		expect(vi.getTimerCount()).toBe(0);
 		watch.onEvent(logs);
 		expect(invalidate).toHaveBeenCalledTimes(3);
 		watch.dispose();
@@ -280,8 +279,6 @@ describe("fork panel polling", () => {
 		interval: number;
 	};
 
-	// Each panel used to poll every 3 to 30 seconds. Counts the requests a
-	// mounted panel makes over the interval it polls at now.
 	it.each<PanelCase>([
 		{
 			name: "descendant questions",

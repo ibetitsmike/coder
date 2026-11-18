@@ -1,7 +1,6 @@
 // This file is fork code: it refreshes the fork panels from the chat watch
 // stream.
 
-import throttle from "lodash/throttle";
 import type { QueryClient, QueryKey } from "react-query";
 import type { ChatWatchEvent } from "#/api/typesGenerated";
 import {
@@ -119,18 +118,37 @@ const forkPanelRootKeys: readonly QueryKey[] = [
 export const createForkChatWatch = (
 	queryClient: QueryClient,
 ): ForkChatWatch => {
-	const throttled = new Map<string, ReturnType<typeof throttle>>();
+	// One entry per query in its gap. An entry leaves the map when its gap
+	// ends with no event, so the map holds only recently changed panels.
+	const gaps = new Map<
+		string,
+		{ timer: ReturnType<typeof setTimeout>; trailing: boolean }
+	>();
+
+	const startGap = (id: string, invalidation: ForkInvalidation) => {
+		const gap = {
+			trailing: false,
+			timer: setTimeout(() => {
+				if (!gap.trailing) {
+					gaps.delete(id);
+					return;
+				}
+				void queryClient.invalidateQueries(invalidation);
+				startGap(id, invalidation);
+			}, forkWatchInvalidateGap),
+		};
+		gaps.set(id, gap);
+	};
 
 	const invalidate = (invalidation: ForkInvalidation) => {
 		const id = JSON.stringify([invalidation.queryKey, invalidation.exact]);
-		let refetch = throttled.get(id);
-		if (!refetch) {
-			refetch = throttle(() => {
-				void queryClient.invalidateQueries(invalidation);
-			}, forkWatchInvalidateGap);
-			throttled.set(id, refetch);
+		const gap = gaps.get(id);
+		if (gap) {
+			gap.trailing = true;
+			return;
 		}
-		refetch();
+		void queryClient.invalidateQueries(invalidation);
+		startGap(id, invalidation);
 	};
 
 	return {
@@ -146,10 +164,10 @@ export const createForkChatWatch = (
 			}
 		},
 		dispose: () => {
-			for (const refetch of throttled.values()) {
-				refetch.cancel();
+			for (const gap of gaps.values()) {
+				clearTimeout(gap.timer);
 			}
-			throttled.clear();
+			gaps.clear();
 		},
 	};
 };
