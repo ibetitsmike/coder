@@ -107,7 +107,8 @@ const confirmCreated = async (
 /**
  * Each editor stays bound to the scope it opened in and closes when the
  * selected scope changes. A request whose response is lost counts as
- * successful when the refetched workflow shows the submitted script.
+ * successful when the refetched workflow holds every field the form
+ * submitted.
  */
 export const useForkSavedWorkflowEditor = (scope: SavedWorkflowScope) => {
 	const queryClient = useQueryClient();
@@ -273,11 +274,7 @@ export const useForkSavedWorkflowEditor = (scope: SavedWorkflowScope) => {
 									saved.script === request.script &&
 									saved.description === request.description &&
 									saved.phases.join("\n") ===
-										formValues.phases
-											.split("\n")
-											.map((phase) => phase.trim())
-											.filter((phase) => phase !== "")
-											.join("\n") &&
+										(request.phases ?? []).join("\n") &&
 									equalsSavedWorkflowArgsSchema(
 										saved.args_schema,
 										request.args_schema,

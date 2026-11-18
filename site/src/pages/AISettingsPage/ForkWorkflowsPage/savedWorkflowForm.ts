@@ -2,10 +2,7 @@
 // editor (fork-workflows experiment).
 
 import type { UpdateSavedWorkflowRequest } from "#/api/forkSavedWorkflows";
-import type {
-	CreateForkSavedWorkflowRequest,
-	ForkSavedWorkflow,
-} from "#/api/typesGenerated";
+import type { CreateForkSavedWorkflowRequest } from "#/api/typesGenerated";
 import { getSkillContentSizeBytes } from "#/pages/AgentsPage/utils/skills";
 
 // The backend limits, from coderd/fork_saved_workflows.go, except the
@@ -146,31 +143,35 @@ export const savedWorkflowFormErrors = (
 
 /**
  * Whether two args schemas hold the same JSON object, so a lost update
- * response can be checked against the submitted schema. Key order and
- * whitespace do not matter.
+ * response can be checked against the submitted schema. The server stores
+ * a missing schema as an absent field, so undefined and null mean the
+ * same, and it re-encodes the JSON, so the comparison is on canonical
+ * serialized forms, not references.
  */
 export const equalsSavedWorkflowArgsSchema = (
-	a: ForkSavedWorkflow["args_schema"] | null,
-	b: ForkSavedWorkflow["args_schema"] | null,
+	a: unknown,
+	b: unknown,
 ): boolean => {
-	if (a === b) {
-		return true;
-	}
 	if (a == null || b == null) {
-		return false;
+		return (a ?? null) === (b ?? null);
 	}
-	const keysA = Object.keys(a).sort();
-	const keysB = Object.keys(b).sort();
-	return (
-		keysA.length === keysB.length &&
-		keysA.every((key, index) => key === keysB[index] && a[key] === b[key])
-	);
+	return canonicalJSON(a) === canonicalJSON(b);
 };
 
-/**
- * Builds a create request from the form values. Empty optional fields are
- * left out, so the server stores no schema and no phases.
- */
+// Key-sorted serialization, so two JSON objects that differ only in key
+// order or whitespace compare equal.
+const canonicalJSON = (value: unknown): string => {
+	if (Array.isArray(value)) {
+		return `[${value.map(canonicalJSON).join(",")}]`;
+	}
+	if (typeof value === "object" && value !== null) {
+		const entries = Object.entries(value)
+			.sort(([a], [b]) => (a < b ? -1 : 1))
+			.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJSON(item)}`);
+		return `{${entries.join(",")}}`;
+	}
+	return JSON.stringify(value);
+};
 
 /**
  * Builds a create request from the form values. Empty optional fields are

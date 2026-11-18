@@ -3,6 +3,7 @@ import { MockForkWorkflowScript } from "#/testHelpers/forkWorkflows";
 import {
 	buildCreateSavedWorkflowRequest,
 	buildUpdateSavedWorkflowRequest,
+	equalsSavedWorkflowArgsSchema,
 	savedWorkflowFormErrors,
 } from "./savedWorkflowForm";
 
@@ -56,6 +57,22 @@ describe("buildUpdateSavedWorkflowRequest", () => {
 		expect(buildUpdateSavedWorkflowRequest(validValues).args_schema).toEqual({
 			type: "object",
 		});
+	});
+});
+
+describe("equalsSavedWorkflowArgsSchema", () => {
+	it("treats a missing schema and null as the same", () => {
+		expect(equalsSavedWorkflowArgsSchema(undefined, null)).toBe(true);
+		expect(equalsSavedWorkflowArgsSchema(null, undefined)).toBe(true);
+	});
+
+	it("compares nested values, so key order and references do not matter", () => {
+		const a = { type: "object", properties: { files: { type: "array" } } };
+		const b = { properties: { files: { type: "array" } }, type: "object" };
+		expect(equalsSavedWorkflowArgsSchema(a, b)).toBe(true);
+		expect(equalsSavedWorkflowArgsSchema(a, { ...a, type: "string" })).toBe(
+			false,
+		);
 	});
 });
 
