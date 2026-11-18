@@ -42,9 +42,14 @@ type ReviverContext = { source?: string };
  * Wraps text as raw JSON, so JSON.stringify prints it without quotes.
  * JSON.rawJSON ships with the same V8 feature as the reviver's
  * context.source; the type does not declare it yet, so it is reached
- * through a feature check and the quoted string is the fallback.
+ * through a feature check and the quoted string is the fallback. The
+ * JSON.rawJSON constructor throws on text that is not valid JSON, so
+ * the guard only feeds it digits.
  */
 const rawJSON = (text: string): unknown => {
+	if (!/^-?\d+$/.test(text)) {
+		return text;
+	}
 	const f = (JSON as { rawJSON?: (raw: string) => unknown }).rawJSON;
 	return typeof f === "function" ? f.call(JSON, text) : text;
 };
@@ -52,7 +57,9 @@ const rawJSON = (text: string): unknown => {
 /**
  * The exact text of an unsafe integer for display: bare digits where the
  * runtime can stringify them as raw JSON, a quoted string where it
- * cannot, so the digits still show.
+ * cannot, so the digits still show. A forkUnsafeInteger text is always
+ * the digits the reviver copied from context.source, which the reviver
+ * guards to integer literals.
  */
 export const unsafeIntegerText = (value: UnsafeInteger): unknown =>
 	rawJSON(value.forkUnsafeInteger);
@@ -115,7 +122,10 @@ export const getChatWorkflowRun = async (
 		`/api/v2/chats/fork/${chatId}/workflow-runs/${runId}`,
 		{
 			signal,
-			parseReviver: parseForkWorkflowJson,
+			// Axios calls the reviver itself for every value of the body;
+			// handing it parseForkWorkflowJson, which parses the whole
+			// document, breaks the first value it visits.
+			parseReviver: forkWorkflowReviver,
 		},
 	);
 	return response.data;
@@ -128,6 +138,11 @@ export const stopChatWorkflowRun = async (
 ): Promise<WorkflowRunDetail> => {
 	const response = await API.getAxiosInstance().post<WorkflowRunDetail>(
 		`/api/v2/chats/fork/${chatId}/workflow-runs/${runId}/stop`,
+		undefined,
+		// The stop response carries the run's args and step values, so it
+		// needs the same lossless parsing as the detail before it lands in
+		// the detail cache.
+		{ parseReviver: forkWorkflowReviver },
 	);
 	return response.data;
 };

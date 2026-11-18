@@ -84,6 +84,27 @@ describe("unsafeIntegerText", () => {
 	});
 });
 
+describe("forkWorkflowReviver as axios parseReviver", () => {
+	it("parses a whole body through the reviver the way axios calls it", () => {
+		// axios hands the reviver straight to JSON.parse, so the first
+		// value it visits is a property value, not a document.
+		const parsed = JSON.parse(
+			'{"id":"run-1","args":{"count":9007199254740993},"steps":[{"value":[18446744073709551615]}]}',
+			forkWorkflowReviver,
+		);
+		const body = parsed as {
+			id: string;
+			args: { count: unknown };
+			steps: { value: unknown[] }[];
+		};
+		expect(body.id).toBe("run-1");
+		expect(body.args.count).toEqual({ forkUnsafeInteger: "9007199254740993" });
+		expect(body.steps[0].value[0]).toEqual({
+			forkUnsafeInteger: "18446744073709551615",
+		});
+	});
+});
+
 describe("formatForkWorkflowValue", () => {
 	it("prints an unsafe integer as bare digits", () => {
 		const text = formatForkWorkflowValue({
