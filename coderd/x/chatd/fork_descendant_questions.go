@@ -24,6 +24,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	coderdpubsub "github.com/coder/coder/v2/coderd/pubsub"
 	"github.com/coder/coder/v2/coderd/x/chatd/chattool"
+	"github.com/coder/coder/v2/codersdk"
 )
 
 const (
@@ -233,8 +234,10 @@ var errSecretAnswerQueued = xerrors.New("the user answered your secret question,
 // of an answer can reach the queue while a secret question is pending, so a
 // queued message then refuses any new question.
 func (p *Server) recordDescendantQuestion(ctx context.Context, chatID uuid.UUID, callID string, questions json.RawMessage, secret bool) error {
-	return forkdb.InTx(p.db, func(tx database.Store, ftx forkdb.Store) error {
-		if _, err := tx.GetChatByIDForUpdate(ctx, chatID); err != nil {
+	var chat database.Chat
+	err := forkdb.InTx(p.db, func(tx database.Store, ftx forkdb.Store) error {
+		var err error
+		if chat, err = tx.GetChatByIDForUpdate(ctx, chatID); err != nil {
 			return xerrors.Errorf("lock chat: %w", err)
 		}
 		queued, err := tx.CountChatQueuedMessages(ctx, chatID)
@@ -260,6 +263,10 @@ func (p *Server) recordDescendantQuestion(ctx context.Context, chatID uuid.UUID,
 		})
 		return err
 	}, nil)
+	if err == nil {
+		p.publishForkChange(chat, codersdk.ChatWatchForkFacetQuestions, nil)
+	}
+	return err
 }
 
 // pendingDescendantQuestionRow returns the unanswered question of chatID, or

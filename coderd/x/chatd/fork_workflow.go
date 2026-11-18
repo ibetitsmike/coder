@@ -1268,7 +1268,7 @@ func (r *workflowRun) startStep(ctx context.Context, spec stepSpec) (*workflowSt
 		r.mu.Lock()
 		journaled.reused = true
 		r.mu.Unlock()
-		r.p.workflowJournal().markStepReused(ctx, journaled.id)
+		r.p.workflowJournal().markStepReused(ctx, r.id, journaled.id)
 		r.failJournaledStep(ctx, journaled)
 		_ = r.scanJournaledStepHistory(ctx, journaled)
 		return journaled, nil
@@ -1341,7 +1341,7 @@ func (r *workflowRun) adoptJournaledStep(ctx context.Context, id uuid.UUID) (*wo
 	if early {
 		r.journalEarlyReport(ctx, step)
 	}
-	r.p.workflowJournal().markStepReused(ctx, step.id)
+	r.p.workflowJournal().markStepReused(ctx, r.id, step.id)
 	r.failJournaledStep(ctx, step)
 	// The old runner's child may have reported into its history before
 	// the report reached the row, as for a step the rehydration found.
@@ -1417,7 +1417,7 @@ func (r *workflowRun) waitStep(ctx context.Context, step *workflowStep) error {
 			}
 			r.mu.Unlock()
 			_ = r.journalStepState(ctx, step, func(ctx context.Context, s *workflowStep) error {
-				r.p.workflowJournal().updateStep(ctx, s)
+				r.p.workflowJournal().updateStep(ctx, r.id, s)
 				return nil
 			})
 		default:
@@ -1448,7 +1448,7 @@ func (r *workflowRun) failStep(ctx context.Context, step *workflowStep, reason s
 	// terminal flush, because the failure line must land before the step
 	// row that reports the failure.
 	r.flushLogs(true)
-	r.p.workflowJournal().updateStep(ctx, step)
+	r.p.workflowJournal().updateStep(ctx, r.id, step)
 }
 
 // failJournaledStep re-emits the failure line of a journaled failed step
@@ -1498,7 +1498,7 @@ func (r *workflowRun) interruptOpenSteps(ctx context.Context, reason string) []*
 	r.mu.Unlock()
 	for _, step := range open {
 		r.interruptStepChild(ctx, step)
-		r.p.workflowJournal().updateStep(ctx, step)
+		r.p.workflowJournal().updateStep(ctx, r.id, step)
 	}
 	return open
 }

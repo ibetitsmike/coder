@@ -18,6 +18,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
 )
 
@@ -98,6 +99,7 @@ func (p *Server) scheduleWakeupTool(chat database.Chat) fantasy.AgentTool {
 			// The wake-up committed. The poke arms the timer for its run
 			// time now, not at the next commit of the chat or the sweep.
 			p.forkWaker().poke(chat.ID)
+			p.publishForkChange(chat, codersdk.ChatWatchForkFacetWakeups, nil)
 			result := scheduleWakeupResult{
 				ID:        wakeup.ID,
 				Kind:      wakeup.Kind,

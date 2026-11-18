@@ -906,6 +906,19 @@ There are 2 notification channels:
 - The current pubsub API is not assumed to provide transaction atomicity or commit-order delivery. Receivers must tolerate duplicates, drops, and reordering.
 - Every receiver tracks the highest `snapshot_version` it has processed per chat. Notifications with `snapshot_version` less than or equal to that watermark are discarded.
 
+### Fork panel events
+
+The fork panels of the agents page (descendant questions, wake-ups, workflow runs and run details, family capacity) read fork tables that no chat state transition covers. Instead of polling them every few seconds, the web UI refetches a panel when chatd publishes a `fork_change` event on the chat watch channel of the chat's owner, `chat:owner:{owner_id}` (`fork_panel_events.go`). The event reuses the watch event shape with an empty `chat`, so a client that does not know the kind merges nothing. Its `fork_change` payload names the chat whose state changed, the root of its family, the facets that changed and, for the workflow facets, the run.
+
+chatd publishes after the write commits, from the code that owns the write:
+
+- `questions`: a descendant's blocking `ask_user_question` recorded its question (`recordDescendantQuestion`).
+- `wakeups`: a wake-up was created by `schedule_wakeup`, `wait_for_events` or a `/loop` message, paused, resumed or canceled through the API, or a delivery sent its prompt, failed, or finished. A poll of an events wake-up that finds nothing changes no state the panel shows and publishes nothing.
+- `workflows`: a workflow journal write changed a run or a step: the run insert, a status, phase, claim, step insert, step update, step report, step reuse, or the close of open steps on a failure. A write that matched no row publishes nothing.
+- `workflow_logs`: the journal stored a run's logs, at most every two seconds while the run writes them.
+
+The watch channel carries only the owner's chats, so another user who can read a chat sees its panels through their resync poll. Bulk writes that no single chat owns, such as the stale run sweep and the archive cascade of wake-ups, publish nothing. The client also refetches a family's capacity and its root's questions on every `status_change`, `created` or `deleted` event of a descendant, since a descendant that starts, ends or is archived changes the family's live count and answers or drops its question, and a chat's wake-ups on its `deleted` event. It refetches each panel at most once per three seconds, with one trailing refetch for a burst, and refetches every fork panel when the stream opens, so an event published before the subscription is not lost. The panel polls remain as a resync: every 60 seconds, and every 30 seconds for family capacity, because admitting a subagent held for capacity and freeing a slot in another family raise no event.
+
 # Chat worker
 
 A chat worker lives inside every coderd replica. It acquires chats, calls the LLM API, executes tools, handles interrupts and tool-result waits, and commits completed outcomes through the core state machine.

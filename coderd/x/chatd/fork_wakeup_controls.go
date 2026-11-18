@@ -15,6 +15,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/codersdk"
 )
 
 // ErrChatWakeupFinished reports a change to a wake-up that already completed
@@ -79,6 +80,7 @@ func (p *Server) SetChatWakeupStatus(ctx context.Context, chat database.Chat, wa
 	if after.Status != before.Status {
 		// A resumed wake-up may be due now, or earlier than the timer.
 		p.forkWaker().poke(chat.ID)
+		p.publishForkChange(chat, codersdk.ChatWatchForkFacetWakeups, nil)
 	}
 	return before, after, nil
 }

@@ -2388,7 +2388,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
         "resources": [
           {
             "error": "string",
-            "kind": "subagent",
+            "kind": "instruction_file",
             "size_bytes": 0,
             "skill_description": "string",
             "skill_name": "string",
@@ -2535,7 +2535,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     "resources": [
       {
         "error": "string",
-        "kind": "subagent",
+        "kind": "instruction_file",
         "size_bytes": 0,
         "skill_description": "string",
         "skill_name": "string",
@@ -3002,7 +3002,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "resources": [
     {
       "error": "string",
-      "kind": "subagent",
+      "kind": "instruction_file",
       "size_bytes": 0,
       "skill_description": "string",
       "skill_name": "string",
@@ -3036,7 +3036,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ```json
 {
   "error": "string",
-  "kind": "subagent",
+  "kind": "instruction_file",
   "size_bytes": 0,
   "skill_description": "string",
   "skill_name": "string",
@@ -3073,7 +3073,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ## codersdk.ChatContextResourceKind
 
 ```json
-"subagent"
+"instruction_file"
 ```
 
 ### Properties
@@ -6346,7 +6346,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
       "resources": [
         {
           "error": "string",
-          "kind": "subagent",
+          "kind": "instruction_file",
           "size_bytes": 0,
           "skill_description": "string",
           "skill_name": "string",
@@ -6484,7 +6484,15 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     ],
     "workspace_id": "0967198e-ec7b-4c6b-b4d3-f71244cadbe9"
   },
-  "kind": "status_change",
+  "fork_change": {
+    "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
+    "facets": [
+      "questions"
+    ],
+    "root_chat_id": "2898031c-fdce-4e3e-8c53-4481dd42fcd7",
+    "workflow_run_id": "5e5ef678-2347-491b-a579-798b0d4ed952"
+  },
+  "kind": "fork_change",
   "tool_calls": [
     {
       "args": "string",
@@ -6501,22 +6509,59 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 |-----------------------|---------------------------------------------------------------------|----------|--------------|-----------------------------------------------------------------------------------------------------------------|
 | `changed_diff_status` | [codersdk.ChangedDiffStatus](#codersdkchangeddiffstatus)            | false    |              | Changed diff status is set when Kind is ChatWatchEventKindDiffStatusChange. It identifies the ref that changed. |
 | `chat`                | [codersdk.Chat](#codersdkchat)                                      | false    |              |                                                                                                                 |
+| `fork_change`         | [codersdk.ChatWatchForkChange](#codersdkchatwatchforkchange)        | false    |              | Fork change is set when Kind is ChatWatchEventKindForkChange.                                                   |
 | `kind`                | [codersdk.ChatWatchEventKind](#codersdkchatwatcheventkind)          | false    |              |                                                                                                                 |
 | `tool_calls`          | array of [codersdk.ChatStreamToolCall](#codersdkchatstreamtoolcall) | false    |              |                                                                                                                 |
 
 ## codersdk.ChatWatchEventKind
 
 ```json
-"status_change"
+"fork_change"
 ```
 
 ### Properties
 
 #### Enumerated Values
 
-| Value(s)                                                                                                                                                                   |
-|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `action_required`, `chat_summary_change`, `context_dirty`, `created`, `deleted`, `diff_status_change`, `project_change`, `status_change`, `summary_change`, `title_change` |
+| Value(s)                                                                                                                                                                                  |
+|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `action_required`, `chat_summary_change`, `context_dirty`, `created`, `deleted`, `diff_status_change`, `fork_change`, `project_change`, `status_change`, `summary_change`, `title_change` |
+
+## codersdk.ChatWatchForkChange
+
+```json
+{
+  "chat_id": "efc9fe20-a1e5-4a8c-9c48-f1b30c1e4f86",
+  "facets": [
+    "questions"
+  ],
+  "root_chat_id": "2898031c-fdce-4e3e-8c53-4481dd42fcd7",
+  "workflow_run_id": "5e5ef678-2347-491b-a579-798b0d4ed952"
+}
+```
+
+### Properties
+
+| Name              | Type                                                                | Required | Restrictions | Description                                                                                                      |
+|-------------------|---------------------------------------------------------------------|----------|--------------|------------------------------------------------------------------------------------------------------------------|
+| `chat_id`         | string                                                              | false    |              | Chat ID is the chat whose state changed: the chat that asked the question, owns the wake-up or ran the workflow. |
+| `facets`          | array of [codersdk.ChatWatchForkFacet](#codersdkchatwatchforkfacet) | false    |              |                                                                                                                  |
+| `root_chat_id`    | string                                                              | false    |              | Root chat ID is the root of ChatID's family, ChatID itself for a root.                                           |
+| `workflow_run_id` | string                                                              | false    |              | Workflow run ID is set for the workflow facets.                                                                  |
+
+## codersdk.ChatWatchForkFacet
+
+```json
+"questions"
+```
+
+### Properties
+
+#### Enumerated Values
+
+| Value(s)                                             |
+|------------------------------------------------------|
+| `questions`, `wakeups`, `workflow_logs`, `workflows` |
 
 ## codersdk.ChatWorkspaceTTLResponse
 
@@ -10429,7 +10474,7 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
 ## codersdk.Experiment
 
 ```json
-"example"
+"fork-chat-todos"
 ```
 
 ### Properties

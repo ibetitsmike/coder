@@ -27,6 +27,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
+	"github.com/coder/coder/v2/codersdk"
 )
 
 // workflowInterruptedError is the error that the startup sweep writes on the
@@ -84,7 +85,7 @@ func (j workflowJournal) insertRun(ctx context.Context, run *workflowRun) error 
 	if err != nil {
 		return err
 	}
-	return fdb.InsertWorkflowRun(journalCtx(ctx), forkdb.InsertWorkflowRunParams{
+	err = fdb.InsertWorkflowRun(journalCtx(ctx), forkdb.InsertWorkflowRunParams{
 		ID:            run.id,
 		ChatID:        run.parent.ID,
 		ModelConfigID: run.modelConfigID,
@@ -96,6 +97,10 @@ func (j workflowJournal) insertRun(ctx context.Context, run *workflowRun) error 
 		OwnerID:       j.owner(),
 		HeartbeatAt:   sql.NullTime{Time: j.p.clock.Now(), Valid: true},
 	})
+	if err == nil {
+		j.p.publishForkChange(run.parent, codersdk.ChatWatchForkFacetWorkflows, &run.id)
+	}
+	return err
 }
 
 // getRun reads one journal row. found is false when the run was never
@@ -168,6 +173,9 @@ func (j workflowJournal) writeRunStatus(
 	if err != nil {
 		return false, err
 	}
+	if rows > 0 {
+		j.changed(ctx, id, codersdk.ChatWatchForkFacetWorkflows)
+	}
 	return rows == 0, nil
 }
 
@@ -190,7 +198,9 @@ func (j workflowJournal) updateRunPhases(ctx context.Context, id uuid.UUID, phas
 		OwnerID:      j.owner(),
 	}); err != nil {
 		j.warn(ctx, "journal workflow run phases", id, err)
+		return
 	}
+	j.changed(ctx, id, codersdk.ChatWatchForkFacetWorkflows)
 }
 
 // workflowPhases is the journaled phase state of a run: the display list
@@ -257,6 +267,7 @@ func (j workflowJournal) claimRun(ctx context.Context, id uuid.UUID) (forkdb.Wor
 	if err != nil {
 		return forkdb.WorkflowRun{}, false, err
 	}
+	j.changed(ctx, id, codersdk.ChatWatchForkFacetWorkflows)
 	return row, true, nil
 }
 
@@ -306,6 +317,7 @@ func (j workflowJournal) insertStep(ctx context.Context, runID uuid.UUID, step *
 	if rows == 0 {
 		return errWorkflowRunLost
 	}
+	j.changed(ctx, runID, codersdk.ChatWatchForkFacetWorkflows)
 	return nil
 }
 
@@ -317,29 +329,38 @@ func (j workflowJournal) failOpenSteps(ctx context.Context, runID uuid.UUID) (in
 	if err != nil {
 		return 0, err
 	}
-	return fdb.FailOpenWorkflowStepsOfRun(journalCtx(ctx), forkdb.FailOpenWorkflowStepsOfRunParams{
+	rows, err := fdb.FailOpenWorkflowStepsOfRun(journalCtx(ctx), forkdb.FailOpenWorkflowStepsOfRunParams{
 		RunID:   runID,
 		ErrText: workflowStopError,
 		OwnerID: j.owner(),
 	})
+	if err == nil && rows > 0 {
+		j.changed(ctx, runID, codersdk.ChatWatchForkFacetWorkflows)
+	}
+	return rows, err
 }
 
 // updateStep journals a step transition, best effort like updateRunStatus.
-func (j workflowJournal) updateStep(ctx context.Context, step *workflowStep) {
+func (j workflowJournal) updateStep(ctx context.Context, runID uuid.UUID, step *workflowStep) {
 	fdb, err := j.store(ctx)
 	if err != nil {
 		j.warn(ctx, "open workflow journal store", step.id, err)
 		return
 	}
-	if _, err := fdb.UpdateWorkflowStep(journalCtx(ctx), forkdb.UpdateWorkflowStepParams{
+	rows, err := fdb.UpdateWorkflowStep(journalCtx(ctx), forkdb.UpdateWorkflowStepParams{
 		ID:      step.id,
 		Status:  step.status,
 		Value:   jsonbValue(step.value),
 		Error:   step.err,
 		Reused:  step.reused,
 		OwnerID: j.owner(),
-	}); err != nil {
+	})
+	if err != nil {
 		j.warn(ctx, "journal workflow step status", step.id, err)
+		return
+	}
+	if rows > 0 {
+		j.changed(ctx, runID, codersdk.ChatWatchForkFacetWorkflows)
 	}
 }
 
@@ -347,7 +368,7 @@ func (j workflowJournal) updateStep(ctx context.Context, step *workflowStep) {
 // keeps its status, value and finished_at; only the flag flips. Best effort
 // like updateStep. The flag only records that a resume replayed the step,
 // so the write carries no owner fence.
-func (j workflowJournal) markStepReused(ctx context.Context, id uuid.UUID) {
+func (j workflowJournal) markStepReused(ctx context.Context, runID, id uuid.UUID) {
 	fdb, err := j.store(ctx)
 	if err != nil {
 		j.warn(ctx, "open workflow journal store", id, err)
@@ -355,7 +376,9 @@ func (j workflowJournal) markStepReused(ctx context.Context, id uuid.UUID) {
 	}
 	if err := fdb.MarkWorkflowStepReused(journalCtx(ctx), id); err != nil {
 		j.warn(ctx, "journal workflow step reused", id, err)
+		return
 	}
+	j.changed(ctx, runID, codersdk.ChatWatchForkFacetWorkflows)
 }
 
 // markStepsReused journals the reused flag of every step of a run. The
@@ -369,7 +392,9 @@ func (j workflowJournal) markStepsReused(ctx context.Context, runID uuid.UUID) {
 	}
 	if err := fdb.MarkWorkflowStepsReusedByRun(journalCtx(ctx), runID); err != nil {
 		j.warn(ctx, "journal workflow steps reused", runID, err)
+		return
 	}
+	j.changed(ctx, runID, codersdk.ChatWatchForkFacetWorkflows)
 }
 
 // getStep loads one journaled step. The authorizer of GetWorkflowStep reads
@@ -390,7 +415,7 @@ func (j workflowJournal) getStep(ctx context.Context, id uuid.UUID) (forkdb.Work
 // that only the next report's retry can save. It carries no owner fence:
 // a report reaches the row whichever process owns the run. landed is false
 // when the row already holds a report of a running run, which wins.
-func (j workflowJournal) reportStep(ctx context.Context, step *workflowStep) (landed bool, err error) {
+func (j workflowJournal) reportStep(ctx context.Context, runID uuid.UUID, step *workflowStep) (landed bool, err error) {
 	fdb, err := j.store(ctx)
 	if err != nil {
 		return false, err
@@ -402,13 +427,16 @@ func (j workflowJournal) reportStep(ctx context.Context, step *workflowStep) (la
 		Error:  step.err,
 		Reused: step.reused,
 	})
+	if err == nil && n > 0 {
+		j.changed(ctx, runID, codersdk.ChatWatchForkFacetWorkflows)
+	}
 	return n > 0, err
 }
 
-// writeReport journals the report of step for journalStepState, which only
-// needs to know that the write ran.
-func (j workflowJournal) writeReport(ctx context.Context, step *workflowStep) error {
-	_, err := j.reportStep(ctx, step)
+// writeReport journals the report of step of run r for journalStepState,
+// which only needs to know that the write ran.
+func (r *workflowRun) writeReport(ctx context.Context, step *workflowStep) error {
+	_, err := r.p.workflowJournal().reportStep(ctx, r.id, step)
 	return err
 }
 
@@ -439,7 +467,9 @@ func (j workflowJournal) setLogs(ctx context.Context, runID uuid.UUID, seq int64
 		OwnerID: j.owner(),
 	}); err != nil {
 		j.warn(ctx, "journal workflow run logs", runID, err)
+		return
 	}
+	j.changed(ctx, runID, codersdk.ChatWatchForkFacetWorkflowLogs)
 }
 
 // RestoreWorkflowRunLogs decodes the retained lines of a live run for
