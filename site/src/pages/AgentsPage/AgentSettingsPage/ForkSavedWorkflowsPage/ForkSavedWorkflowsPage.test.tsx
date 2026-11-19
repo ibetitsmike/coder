@@ -130,7 +130,6 @@ describe("ForkSavedWorkflowsPage", () => {
 				name: `Organization ${MockDefaultOrganization.display_name}`,
 			}),
 		);
-		// MockOrganization3 is listed but the member does not belong to it.
 		expect(screen.getAllByRole("option")).toHaveLength(2);
 		await user.click(
 			screen.getByRole("option", {
