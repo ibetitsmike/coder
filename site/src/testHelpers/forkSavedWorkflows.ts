@@ -39,5 +39,6 @@ export const MockForkOrganizationSavedWorkflowMetadata: ForkSavedWorkflowMetadat
 		description: "Rotates the API keys of a deployment.",
 		user_id: undefined,
 		created_by: undefined,
+		args_schema: undefined,
 		phases: [],
 	};

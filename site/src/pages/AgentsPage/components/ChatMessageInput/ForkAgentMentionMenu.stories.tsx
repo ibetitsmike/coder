@@ -2,8 +2,14 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
 import { fn } from "storybook/test";
 import {
+	MockForkOrganizationSavedWorkflowMetadata,
+	MockForkSavedWorkflowMetadata,
+} from "#/testHelpers/forkSavedWorkflows";
+import {
 	AgentMentionOption,
 	ForkAgentMentionMenu,
+	type WorkflowMention,
+	WorkflowMentionOption,
 } from "./ForkAgentMentionMenu";
 
 const mockAgentMentions = [
@@ -37,6 +43,42 @@ type Story = StoryObj<typeof ForkAgentMentionMenu>;
 
 export const AgentList: Story = {};
 
+const mockWorkflowMentions = [
+	{
+		name: MockForkSavedWorkflowMetadata.name,
+		tier: "personal",
+		description: MockForkSavedWorkflowMetadata.description,
+		argsSummary: "files (required)",
+	},
+	{
+		name: MockForkOrganizationSavedWorkflowMetadata.name,
+		tier: "org",
+		description: MockForkOrganizationSavedWorkflowMetadata.description,
+		argsSummary: "",
+	},
+] as const satisfies readonly WorkflowMention[];
+
+export const AgentsAndWorkflows: Story = {
+	args: {
+		options: [
+			...mockAgentMentions.map((agent) => new AgentMentionOption(agent)),
+			...mockWorkflowMentions.map(
+				(workflow) => new WorkflowMentionOption(workflow),
+			),
+		],
+		workflowStartIndex: mockAgentMentions.length,
+	},
+};
+
+export const WorkflowsOnly: Story = {
+	args: {
+		options: mockWorkflowMentions.map(
+			(workflow) => new WorkflowMentionOption(workflow),
+		),
+		workflowStartIndex: 0,
+	},
+};
+
 export const Empty: Story = {
 	args: { options: [] },
 };
@@ -48,5 +90,18 @@ export const Loading: Story = {
 export const LoadError: Story = {
 	args: {
 		status: "Could not load some agents. Close and type @ again to retry.",
+	},
+};
+
+export const WorkflowLoadError: Story = {
+	args: {
+		status: "Could not load some workflows. Close and type @ again to retry.",
+	},
+};
+
+export const AgentsAndWorkflowsLoadError: Story = {
+	args: {
+		status:
+			"Could not load some agents and workflows. Close and type @ again to retry.",
 	},
 };
