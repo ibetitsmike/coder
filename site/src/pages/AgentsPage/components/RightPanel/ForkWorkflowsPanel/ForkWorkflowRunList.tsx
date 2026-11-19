@@ -2,7 +2,7 @@
 // (fork-workflows experiment).
 
 import type React from "react";
-import { createContext, useContext, useEffect, useRef } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { getErrorMessage } from "#/api/errors";
 import type { WorkflowRun } from "#/api/typesGenerated";
 import { Alert } from "#/components/Alert/Alert";
@@ -54,7 +54,20 @@ const ForkWorkflowRunRow: React.FC<ForkWorkflowRunRowProps> = ({
 }) => {
 	const isRunning = run.status === "running";
 	const sharedNow = useContext(ListNowContext);
-	const runningNow = useTime(() => Date.now(), { disabled: !isRunning });
+	// The fast clock's interval runs only while the run is live, and
+	// resetting it on each running render keeps the value fresh the
+	// moment the interval turns on: a row that sat mounted while
+	// interrupted can resume, and a stale capture would show the wrong
+	// age until the first tick.
+	const [runningNow, setRunningNow] = useState(() => Date.now());
+	useEffect(() => {
+		if (!isRunning) {
+			return;
+		}
+		setRunningNow(Date.now());
+		const handle = setInterval(() => setRunningNow(Date.now()), 1_000);
+		return () => clearInterval(handle);
+	}, [isRunning]);
 	const now = isRunning ? runningNow : sharedNow;
 	return (
 		<button

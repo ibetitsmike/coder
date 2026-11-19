@@ -82,6 +82,8 @@ export const ForkWorkflowLongText: React.FC<ForkWorkflowLongTextProps> = ({
 						// scrollable height instead of swapped for a scroll
 						// area, so the live region keeps announcing additions.
 						<pre
+							role="region"
+							aria-label={`Full ${label.toLowerCase()}`}
 							// oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrolling region must be keyboard reachable.
 							tabIndex={0}
 							className={cn(textClassName, "max-h-96 overflow-y-auto")}
