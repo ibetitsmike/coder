@@ -7,6 +7,7 @@ import * as forkSavedWorkflowsApi from "#/api/forkSavedWorkflows";
 import {
 	organizationSavedWorkflowACLKey,
 	savedWorkflowKey,
+	savedWorkflowsKey,
 } from "#/api/queries/forkSavedWorkflows";
 import type { ForkSavedWorkflowMetadata } from "#/api/typesGenerated";
 import { toast } from "#/components/Toaster/toast";
@@ -646,4 +647,67 @@ it("opens the read-only detail dialog with the script", async () => {
 		MockOrganization2.id,
 		MockForkSavedWorkflowMetadata.name,
 	);
+});
+
+it("does not show a cached detail of an earlier workflow with the same name", async () => {
+	const user = userEvent.setup();
+	const earlier = {
+		...MockForkSavedWorkflow,
+		description: "Deleted in another tab.",
+	};
+	const { script: _script, ...earlierMetadata } = earlier;
+	const recreatedMetadata = {
+		...MockForkSavedWorkflowMetadata,
+		id: "saved-workflow-recreated",
+	};
+	// Another tab deletes the workflow and creates one of the same name.
+	let recreated = false;
+	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflows").mockImplementation(
+		async () => [recreated ? recreatedMetadata : earlierMetadata],
+	);
+	vi.spyOn(
+		forkSavedWorkflowsApi,
+		"getOrganizationSavedWorkflows",
+	).mockResolvedValue([]);
+	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow").mockImplementation(
+		async () => {
+			if (recreated) {
+				throw mockApiError({ message: "Server unavailable.", status: 500 });
+			}
+			return earlier;
+		},
+	);
+	const scope = { tier: "user", organizationId: MockOrganization2.id } as const;
+	const { queryClient } = renderPage(`?org=${MockOrganization2.name}`);
+	queryClient.setQueryDefaults(
+		savedWorkflowKey(scope, MockForkSavedWorkflowMetadata.name),
+		{ gcTime: Number.POSITIVE_INFINITY, retry: false },
+	);
+
+	const earlierButton = await screen.findByRole("button", {
+		name: MockForkSavedWorkflowMetadata.name,
+	});
+	await user.click(earlierButton);
+	await within(await screen.findByRole("dialog")).findByText(
+		"Deleted in another tab.",
+	);
+	await user.keyboard("{Escape}");
+	await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+	recreated = true;
+	await queryClient.refetchQueries({
+		queryKey: savedWorkflowsKey(scope),
+		exact: true,
+	});
+	// The recreated workflow has a new id, so its row replaces the old one.
+	await waitFor(() => expect(earlierButton).not.toBeInTheDocument());
+	await user.click(
+		screen.getByRole("button", {
+			name: MockForkSavedWorkflowMetadata.name,
+		}),
+	);
+
+	const dialog = await screen.findByRole("dialog");
+	await within(dialog).findByText("Server unavailable.");
+	expect(within(dialog).queryByText("Deleted in another tab.")).toBeNull();
 });

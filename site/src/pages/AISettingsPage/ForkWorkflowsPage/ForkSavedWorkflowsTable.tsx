@@ -10,9 +10,13 @@ import {
 	SavedWorkflowChangedError,
 	type SavedWorkflowScope,
 	savedWorkflow,
+	savedWorkflowKey,
 	savedWorkflows,
 } from "#/api/queries/forkSavedWorkflows";
-import type { ForkSavedWorkflowMetadata } from "#/api/typesGenerated";
+import type {
+	ForkSavedWorkflow,
+	ForkSavedWorkflowMetadata,
+} from "#/api/typesGenerated";
 import { toast } from "#/components/Toaster/toast";
 import type { SkillAccess } from "#/pages/AgentsPage/utils/skills";
 import {
@@ -156,7 +160,16 @@ export const ForkSavedWorkflowsTable: React.FC<
 				void workflowsQuery.refetch();
 			}}
 			onCreate={openCreate}
-			onView={(workflow) => setDetailTarget({ name: workflow.name, scope })}
+			onView={(workflow) => {
+				// The detail cache is keyed by name, so it may hold an earlier
+				// workflow of that name, which must not show for this row.
+				const detailKey = savedWorkflowKey(scope, workflow.name);
+				const cached = queryClient.getQueryData<ForkSavedWorkflow>(detailKey);
+				if (cached && cached.id !== workflow.id) {
+					queryClient.removeQueries({ queryKey: detailKey, exact: true });
+				}
+				setDetailTarget({ name: workflow.name, scope });
+			}}
 			onEdit={openEdit}
 			onDelete={(workflow) => {
 				deleteMutation.reset();
