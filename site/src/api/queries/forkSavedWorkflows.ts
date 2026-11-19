@@ -254,14 +254,17 @@ export const deleteSavedWorkflow = (queryClient: QueryClient) =>
 				throw error;
 			}
 		},
-		onSuccess: (_data, { scope, name }) => {
+		// Match by id, so a same-name workflow cached after the delete started
+		// stays.
+		onSuccess: (_data, { scope, name, id }) => {
 			queryClient.setQueryData(savedWorkflows(scope).queryKey, (workflows) =>
-				workflows?.filter((workflow) => workflow.name !== name),
+				workflows?.filter((workflow) => workflow.id !== id),
 			);
-			queryClient.removeQueries({
-				queryKey: savedWorkflowKey(scope, name),
-				exact: true,
-			});
+			const detailKey = savedWorkflowKey(scope, name);
+			const cached = queryClient.getQueryData<ForkSavedWorkflow>(detailKey);
+			if (cached === undefined || cached.id === id) {
+				queryClient.removeQueries({ queryKey: detailKey, exact: true });
+			}
 		},
 		onSettled: (_data, _error, { scope }) => {
 			void queryClient.invalidateQueries({

@@ -291,6 +291,39 @@ describe("deleteSavedWorkflow", () => {
 		});
 	});
 
+	it("keeps a same-name workflow cached while the delete was in flight", async () => {
+		const queryClient = createQueryClient();
+		const listKey = savedWorkflowsKey(scope);
+		const detailKey = savedWorkflowKey(scope, name);
+		queryClient.setQueryData(listKey, [
+			metadataOf(MockForkSavedWorkflowCreated),
+		]);
+		vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow").mockResolvedValue(
+			MockForkSavedWorkflowCreated,
+		);
+		vi.spyOn(
+			forkSavedWorkflowsApi,
+			"deleteUserSavedWorkflow",
+		).mockImplementation(async () => {
+			queryClient.setQueryData(listKey, [
+				metadataOf(MockForkSavedWorkflowRecreated),
+			]);
+			queryClient.setQueryData(detailKey, MockForkSavedWorkflowRecreated);
+		});
+
+		await new MutationObserver(
+			queryClient,
+			deleteSavedWorkflow(queryClient),
+		).mutate({ scope, name, id: MockForkSavedWorkflowCreated.id });
+
+		expect(queryClient.getQueryData(listKey)).toEqual([
+			metadataOf(MockForkSavedWorkflowRecreated),
+		]);
+		expect(queryClient.getQueryData(detailKey)).toEqual(
+			MockForkSavedWorkflowRecreated,
+		);
+	});
+
 	it("reports a change when the workflow is gone by the time of the delete", async () => {
 		const queryClient = createQueryClient();
 		const listKey = savedWorkflowsKey(scope);
