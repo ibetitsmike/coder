@@ -28,6 +28,7 @@ import {
 	SAVED_WORKFLOW_MAX_ARGS_SCHEMA_BYTES,
 	SAVED_WORKFLOW_MAX_SCRIPT_BYTES,
 	type SavedWorkflowFormValues,
+	savedWorkflowArgsSchemaSizeBytes,
 	savedWorkflowFormErrors,
 } from "./savedWorkflowForm";
 import type { ForkSavedWorkflowEditorState } from "./useForkSavedWorkflowEditor";
@@ -179,10 +180,13 @@ const SavedWorkflowEditorForm: React.FC<SavedWorkflowEditorFormProps> = ({
 						onChange={(name) => setValues((current) => ({ ...current, name }))}
 					/>
 				)}
-				<SavedWorkflowDescriptionField
+				<SavedWorkflowTextArea
+					label="Description"
+					placeholder="What the workflow does and when a chat should run it"
 					value={values.description}
 					error={errors.description}
 					disabled={isSubmitting}
+					minRows={2}
 					onChange={(description) =>
 						setValues((current) => ({ ...current, description }))
 					}
@@ -208,7 +212,7 @@ const SavedWorkflowEditorForm: React.FC<SavedWorkflowEditorFormProps> = ({
 					value={values.argsSchema}
 					error={errors.argsSchema}
 					disabled={isSubmitting}
-					size={getSkillContentSizeBytes(values.argsSchema)}
+					size={savedWorkflowArgsSchemaSizeBytes(values.argsSchema)}
 					sizeLimit={SAVED_WORKFLOW_MAX_ARGS_SCHEMA_BYTES}
 					minRows={4}
 					mono
@@ -282,42 +286,6 @@ const SavedWorkflowNameField: React.FC<SavedWorkflowNameFieldProps> = ({
 				<p className="m-0 text-xs text-content-secondary">
 					Use lowercase letters, numbers, and hyphens. Names cannot be changed
 					after creation.
-				</p>
-			)}
-		</div>
-	);
-};
-
-type SavedWorkflowDescriptionFieldProps = {
-	value: string;
-	error: string | undefined;
-	disabled: boolean;
-	onChange: (description: string) => void;
-};
-
-const SavedWorkflowDescriptionField: React.FC<
-	SavedWorkflowDescriptionFieldProps
-> = ({ value, error, disabled, onChange }) => {
-	const descriptionId = useId();
-	const descriptionErrorId = useId();
-	return (
-		<div className="flex flex-col gap-2">
-			<Label htmlFor={descriptionId}>Description</Label>
-			<Input
-				id={descriptionId}
-				value={value}
-				onChange={(event) => onChange(event.target.value)}
-				placeholder="What the workflow does and when a chat should run it"
-				disabled={disabled}
-				aria-invalid={Boolean(error)}
-				aria-describedby={error ? descriptionErrorId : undefined}
-			/>
-			{error && (
-				<p
-					id={descriptionErrorId}
-					className="m-0 text-xs text-content-destructive"
-				>
-					{error}
 				</p>
 			)}
 		</div>

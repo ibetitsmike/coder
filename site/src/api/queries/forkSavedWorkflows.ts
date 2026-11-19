@@ -32,7 +32,7 @@ import type {
 	UpdateOrganizationSkillACLRequest,
 	UsersRequest,
 } from "#/api/typesGenerated";
-import { invalidateList, isNewer, isResponseLost } from "./forkListCache";
+import { isNewer } from "./forkListCache";
 
 /**
  * Where saved workflows live: a member's personal workflows in an
@@ -132,10 +132,7 @@ type CreateSavedWorkflowArgs = {
 	req: CreateForkSavedWorkflowRequest;
 };
 
-/**
- * The list is invalidated after failures too, because a lost response can
- * hide a created workflow.
- */
+/** Mutation options that create a saved workflow in a scope. */
 export const createSavedWorkflow = (queryClient: QueryClient) =>
 	mutationOptions({
 		mutationFn: ({ scope, req }: CreateSavedWorkflowArgs) =>
@@ -158,11 +155,12 @@ export const createSavedWorkflow = (queryClient: QueryClient) =>
 				].sort((a, b) => (a.name < b.name ? -1 : 1));
 			});
 		},
-		onSettled: (_data, error, { scope }) =>
-			invalidateList(queryClient, savedWorkflowsKey(scope), {
+		onSettled: (_data, _error, { scope }) => {
+			void queryClient.invalidateQueries({
+				queryKey: savedWorkflowsKey(scope),
 				exact: true,
-				awaitRefetch: isResponseLost(error),
-			}),
+			});
+		},
 	});
 
 type UpdateSavedWorkflowArgs = {
@@ -198,28 +196,56 @@ export const updateSavedWorkflow = (queryClient: QueryClient) =>
 			);
 		},
 		// Not exact, so a reopened editor refetches the workflow it saved.
-		onSettled: (_data, error, { scope }) =>
-			invalidateList(queryClient, savedWorkflowsKey(scope), {
-				exact: false,
-				awaitRefetch: isResponseLost(error),
-			}),
+		onSettled: (_data, _error, { scope }) => {
+			void queryClient.invalidateQueries({
+				queryKey: savedWorkflowsKey(scope),
+			});
+		},
 	});
 
 type DeleteSavedWorkflowArgs = {
 	scope: SavedWorkflowScope;
 	name: string;
+	/** The workflow the user picked, which the name must still resolve to. */
+	id: string;
 };
 
 /**
- * Mutation options that delete a saved workflow. The list is invalidated
- * after failures too, because a 404 or a lost response can mean the workflow
- * is already gone. A success also removes the row's detail query, so a
- * failed refetch cannot leave it actionable.
+ * Thrown when the name of a workflow picked for deletion no longer resolves
+ * to that workflow, because it was deleted or recreated meanwhile.
+ */
+export class SavedWorkflowChangedError extends Error {
+	constructor() {
+		super("The saved workflow was deleted or replaced.");
+		this.name = "SavedWorkflowChangedError";
+	}
+}
+
+/**
+ * Mutation options that delete a saved workflow. The API deletes by name, so
+ * the request first checks that the name still resolves to the picked
+ * workflow; otherwise it would delete one the user never chose. A success
+ * also removes the row's detail query, so a failed refetch cannot leave it
+ * actionable.
  */
 export const deleteSavedWorkflow = (queryClient: QueryClient) =>
 	mutationOptions({
-		mutationFn: ({ scope, name }: DeleteSavedWorkflowArgs) =>
-			scopeEndpoints(scope).remove(name),
+		mutationFn: async ({ scope, name, id }: DeleteSavedWorkflowArgs) => {
+			const endpoints = scopeEndpoints(scope);
+			let current: ForkSavedWorkflow;
+			try {
+				current = await endpoints.get(name);
+			} catch (error) {
+				if (isAxiosError(error) && error.response?.status === 404) {
+					throw new SavedWorkflowChangedError();
+				}
+				throw error;
+			}
+			if (current.id !== id) {
+				throw new SavedWorkflowChangedError();
+			}
+			await endpoints.remove(name);
+		},
 		onSuccess: (_data, { scope, name }) => {
 			queryClient.setQueryData(savedWorkflows(scope).queryKey, (workflows) =>
 				workflows?.filter((workflow) => workflow.name !== name),
@@ -229,13 +255,11 @@ export const deleteSavedWorkflow = (queryClient: QueryClient) =>
 				exact: true,
 			});
 		},
-		onSettled: (_data, error, { scope }) =>
-			invalidateList(queryClient, savedWorkflowsKey(scope), {
-				exact: true,
-				awaitRefetch:
-					isResponseLost(error) ||
-					(isAxiosError(error) && error.response?.status === 404),
-			}),
+		onSettled: (_data, _error, { scope }) => {
+			void queryClient.invalidateQueries({
+				queryKey: savedWorkflowsKey(scope),
+			});
+		},
 	});
 
 /** Query key for who can run one organization saved workflow. */

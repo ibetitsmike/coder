@@ -1,6 +1,7 @@
 // This file is fork code: the fork-workflows experiment's saved workflows
 // page in AI settings. It shows the personal tier of the selected
-// organization above the organization tier.
+// organization, when the user is a member of it, above the organization
+// tier.
 
 import { useState } from "react";
 import { useQuery } from "react-query";
@@ -19,7 +20,7 @@ import { ForkOrganizationSavedWorkflowSharingDialog } from "./ForkOrganizationSa
 import { ForkSavedWorkflowsTable } from "./ForkSavedWorkflowsTable";
 
 const ForkWorkflowsPage: React.FC = () => {
-	const { permissions } = useAuthenticated();
+	const { user, permissions } = useAuthenticated();
 	const { experiments, organizations } = useDashboard();
 	const isEnabled = experiments.includes("fork-workflows");
 	const organizationPermissionsQuery = useQuery({
@@ -50,6 +51,22 @@ const ForkWorkflowsPage: React.FC = () => {
 	const organizationPermissions = organization
 		? organizationPermissionsQuery.data?.[organization.id]
 		: undefined;
+	// Only members own personal workflows in an organization, so a user who
+	// reads an organization's workflows without membership sees that tier
+	// alone.
+	const isMember = organization
+		? user.organization_ids.includes(organization.id)
+		: false;
+	const organizationPicker = organization && (
+		<OrganizationPicker
+			id="workflows-organization"
+			className="w-full sm:w-60"
+			organizations={readableOrganizations}
+			organization={organization}
+			onChange={setOrganization}
+			showLabel={false}
+		/>
+	);
 	// Back and Forward can change the organization while the dialog is open,
 	// and a save must not land in an organization the page no longer shows.
 	if (sharing && sharing.organizationId !== organization?.id) {
@@ -73,27 +90,21 @@ const ForkWorkflowsPage: React.FC = () => {
 					)}
 					{organization && (
 						<div className="flex flex-col gap-10">
-							<ForkSavedWorkflowsTable
-								scope={{
-									tier: "user",
-									organizationId: organization.id,
-								}}
-								action={
-									<OrganizationPicker
-										id="workflows-organization"
-										className="w-full sm:w-60"
-										organizations={readableOrganizations}
-										organization={organization}
-										onChange={setOrganization}
-										showLabel={false}
-									/>
-								}
-							/>
+							{isMember && (
+								<ForkSavedWorkflowsTable
+									scope={{
+										tier: "user",
+										organizationId: organization.id,
+									}}
+									action={organizationPicker}
+								/>
+							)}
 							<ForkSavedWorkflowsTable
 								scope={{
 									tier: "organization",
 									organizationId: organization.id,
 								}}
+								action={isMember ? undefined : organizationPicker}
 								access={{
 									create: Boolean(
 										organizationPermissions?.createOrganizationSkill,

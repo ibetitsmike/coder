@@ -3,24 +3,20 @@
 
 import { isAxiosError } from "axios";
 import { useState } from "react";
-import {
-	type QueryClient,
-	useMutation,
-	useQuery,
-	useQueryClient,
-} from "react-query";
+import { useMutation, useQuery, useQueryClient } from "react-query";
 import { getErrorDetail, getErrorMessage } from "#/api/errors";
-import { isNewer, isResponseLost } from "#/api/queries/forkListCache";
+import { isNewer } from "#/api/queries/forkListCache";
 import {
 	createSavedWorkflow,
 	isSameScope,
 	type SavedWorkflowScope,
 	savedWorkflow,
+	savedWorkflowKey,
 	savedWorkflows,
+	savedWorkflowsKey,
 	updateSavedWorkflow,
 } from "#/api/queries/forkSavedWorkflows";
 import type {
-	CreateForkSavedWorkflowRequest,
 	ForkSavedWorkflow,
 	ForkSavedWorkflowMetadata,
 } from "#/api/typesGenerated";
@@ -33,7 +29,6 @@ import {
 	buildCreateSavedWorkflowRequest,
 	buildUpdateSavedWorkflowRequest,
 	emptySavedWorkflowFormValues,
-	equalsSavedWorkflowArgsSchema,
 	formatSavedWorkflowPhases,
 	type SavedWorkflowFormValues,
 } from "./savedWorkflowForm";
@@ -43,6 +38,8 @@ type EditorTarget = { scope: SavedWorkflowScope } & (
 	| {
 			mode: "edit";
 			name: string;
+			/** When the editor opened, so only data fetched since seeds it. */
+			openedAt: number;
 			values?: SavedWorkflowFormValues;
 			loadedFrom?: Pick<ForkSavedWorkflow, "id" | "updated_at">;
 	  }
@@ -71,49 +68,10 @@ const editFormValues = (
 	phases: formatSavedWorkflowPhases(workflow.phases),
 });
 
-// After a lost response, the create counts as done only when the name was
-// not listed before, is listed after the refetch, and the fetched workflow
-// holds every field the user submitted.
-const confirmCreated = async (
-	queryClient: QueryClient,
-	scope: SavedWorkflowScope,
-	request: CreateForkSavedWorkflowRequest,
-	existedBefore: boolean,
-	error: unknown,
-): Promise<boolean> => {
-	if (!error) {
-		return true;
-	}
-	if (!isResponseLost(error) || existedBefore) {
-		return false;
-	}
-	if (
-		!queryClient
-			.getQueryData(savedWorkflows(scope).queryKey)
-			?.some((workflow) => workflow.name === request.name)
-	) {
-		return false;
-	}
-	try {
-		const created = await queryClient.fetchQuery(
-			savedWorkflow(queryClient, scope, request.name),
-		);
-		return (
-			created.script === request.script &&
-			created.description === request.description &&
-			created.phases.join("\n") === (request.phases ?? []).join("\n") &&
-			equalsSavedWorkflowArgsSchema(created.args_schema, request.args_schema)
-		);
-	} catch {
-		return false;
-	}
-};
-
 /**
  * Each editor stays bound to the scope it opened in and closes when the
- * selected scope changes. A request whose response is lost counts as
- * successful when the refetched workflow holds every field the form
- * submitted.
+ * selected scope changes. A failed request keeps the editor open with its
+ * error and the user's draft, so the user can retry.
  */
 export const useForkSavedWorkflowEditor = (scope: SavedWorkflowScope) => {
 	const queryClient = useQueryClient();
@@ -146,6 +104,21 @@ export const useForkSavedWorkflowEditor = (scope: SavedWorkflowScope) => {
 	const closeEditorTarget = (target: EditorTarget) =>
 		setEditorTarget((current) => (current === target ? undefined : current));
 
+	// Cached rows and content can predate a change made elsewhere, so an
+	// editor opens on a fresh fetch of both.
+	const refetchForEdit = (name: string) =>
+		Promise.all([
+			queryClient.invalidateQueries({
+				queryKey: savedWorkflowsKey(scope),
+				exact: true,
+			}),
+			queryClient.invalidateQueries({
+				queryKey: savedWorkflowKey(scope, name),
+				exact: true,
+				refetchType: "all",
+			}),
+		]);
+
 	let editorState: ForkSavedWorkflowEditorState | undefined;
 	if (editorTarget?.mode === "create") {
 		editorState = {
@@ -157,28 +130,12 @@ export const useForkSavedWorkflowEditor = (scope: SavedWorkflowScope) => {
 			),
 			isSubmitting: createMutation.isPending,
 			onSubmit: (values) => {
-				const request = buildCreateSavedWorkflowRequest(values);
-				const existedBefore =
-					queryClient
-						.getQueryData(savedWorkflows(scope).queryKey)
-						?.some((workflow) => workflow.name === request.name) ?? false;
-
 				createMutation.mutate(
-					{ scope, req: request },
+					{ scope, req: buildCreateSavedWorkflowRequest(values) },
 					{
-						onSettled: async (_data, error) => {
-							if (
-								await confirmCreated(
-									queryClient,
-									scope,
-									request,
-									existedBefore,
-									error,
-								)
-							) {
-								closeEditorTarget(editorTarget);
-								toast.success("Workflow created.");
-							}
+						onSuccess: () => {
+							closeEditorTarget(editorTarget);
+							toast.success("Workflow created.");
 						},
 					},
 				);
@@ -186,45 +143,53 @@ export const useForkSavedWorkflowEditor = (scope: SavedWorkflowScope) => {
 			onClose: () => closeEditor(createMutation.isPending),
 		};
 	} else if (editorTarget?.mode === "edit") {
+		const { name, openedAt, values, loadedFrom } = editorTarget;
+		const isListFresh =
+			workflowsQuery.dataUpdatedAt >= openedAt && !workflowsQuery.isFetching;
+		const isDetailFresh =
+			workflowQuery.dataUpdatedAt >= openedAt && !workflowQuery.isFetching;
+		const listError =
+			workflowsQuery.isError &&
+			!workflowsQuery.isFetching &&
+			workflowsQuery.errorUpdatedAt >= openedAt
+				? workflowsQuery.error
+				: undefined;
+		const detailError =
+			workflowQuery.isError && !workflowQuery.isFetching
+				? workflowQuery.error
+				: undefined;
 		const detail = workflowQuery.data;
 		const listed = workflowsQuery.data?.find(
-			(workflow) => workflow.name === editorTarget.name,
+			(workflow) => workflow.name === name,
 		);
-		const isGone = workflowsQuery.data !== undefined && !listed;
-		// Content, cached or just fetched, can predate a save, delete, or
-		// recreate that the list already shows, so it seeds the editor only
-		// when it is as new as the listed workflow.
+		const isGone = isListFresh && !listed;
+		// Both fetches finished since the editor opened, but one can still
+		// see a change the other missed, so the content seeds the editor only
+		// when it is the listed workflow at its listed revision.
 		const isCurrent =
-			!isGone &&
+			isListFresh &&
+			isDetailFresh &&
 			detail !== undefined &&
-			(!listed ||
-				(detail.id === listed.id
-					? !isNewer(listed, detail)
-					: isNewer(detail, listed)));
-		const isOutdated =
-			detail !== undefined &&
-			!isGone &&
-			!isCurrent &&
-			workflowQuery.isSuccess &&
-			!workflowQuery.isFetching;
-		const loaded = isCurrent ? editFormValues(detail) : undefined;
-		// The editor keeps the first values it gets, cached or fetched, so a
-		// later refetch cannot reset the user's edits.
-		if (loaded && !editorTarget.values) {
+			listed !== undefined &&
+			detail.id === listed.id &&
+			!isNewer(listed, detail);
+		const isOutdated = isListFresh && isDetailFresh && !isGone && !isCurrent;
+		if (isCurrent && !values) {
 			setEditorTarget({
 				...editorTarget,
-				values: loaded,
+				values: editFormValues(detail),
 				loadedFrom: detail,
 			});
 		}
-		const { name, values, loadedFrom } = editorTarget;
 		// Saving by name would overwrite a workflow deleted, edited, or
 		// recreated since the editor loaded it, so the user keeps the draft.
 		const isChanged =
 			loadedFrom !== undefined &&
 			(isGone ||
 				[listed, detail].some(
-					(current) => current !== undefined && isNewer(current, loadedFrom),
+					(current) =>
+						current !== undefined &&
+						(current.id !== loadedFrom.id || isNewer(current, loadedFrom)),
 				));
 		let staleError: Error | undefined;
 		if (isGone) {
@@ -233,21 +198,22 @@ export const useForkSavedWorkflowEditor = (scope: SavedWorkflowScope) => {
 			staleError = new Error("The saved workflow changed while it loaded.");
 		}
 		const isNotFound =
-			isAxiosError(workflowQuery.error) &&
-			workflowQuery.error.response?.status === 404;
-		const loadError = values ? undefined : (workflowQuery.error ?? staleError);
+			isAxiosError(detailError) && detailError.response?.status === 404;
+		const loadError = values
+			? undefined
+			: (listError ?? detailError ?? staleError);
 		editorState = {
 			mode: "edit",
 			initialValues: values,
 			isLoading: !values && !loadError,
 			loadError,
 			onRetry:
-				(workflowQuery.error && !isNotFound) || isOutdated
+				(loadError && !isGone && !isNotFound) || isOutdated
 					? () => {
-							void workflowQuery.refetch();
+							void refetchForEdit(name);
 						}
 					: undefined,
-			isRetrying: workflowQuery.isFetching,
+			isRetrying: workflowsQuery.isFetching || workflowQuery.isFetching,
 			submitError: isChanged
 				? {
 						message:
@@ -261,33 +227,12 @@ export const useForkSavedWorkflowEditor = (scope: SavedWorkflowScope) => {
 				if (isChanged) {
 					return;
 				}
-				const request = buildUpdateSavedWorkflowRequest(formValues);
 				saveMutation.mutate(
-					{ scope, name, req: request },
+					{ scope, name, req: buildUpdateSavedWorkflowRequest(formValues) },
 					{
-						// A lost response can hide a save that committed, which the
-						// refetched workflow then shows. Every submitted field must
-						// match, because an older workflow can hold the script alone.
-						onSettled: (_data, error) => {
-							const saved = queryClient.getQueryData(
-								savedWorkflow(queryClient, scope, name).queryKey,
-							);
-							if (
-								!error ||
-								(isResponseLost(error) &&
-									saved !== undefined &&
-									saved.script === request.script &&
-									saved.description === request.description &&
-									saved.phases.join("\n") ===
-										(request.phases ?? []).join("\n") &&
-									equalsSavedWorkflowArgsSchema(
-										saved.args_schema,
-										request.args_schema,
-									))
-							) {
-								closeEditorTarget(editorTarget);
-								toast.success("Workflow saved.");
-							}
+						onSuccess: () => {
+							closeEditorTarget(editorTarget);
+							toast.success("Workflow saved.");
 						},
 					},
 				);
@@ -308,7 +253,9 @@ export const useForkSavedWorkflowEditor = (scope: SavedWorkflowScope) => {
 				mode: "edit",
 				scope,
 				name: workflow.name,
+				openedAt: Date.now(),
 			});
+			void refetchForEdit(workflow.name);
 		},
 	};
 };

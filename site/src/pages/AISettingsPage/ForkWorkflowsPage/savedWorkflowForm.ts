@@ -13,6 +13,8 @@ export const SAVED_WORKFLOW_MAX_SCRIPT_BYTES = 65536;
 export const SAVED_WORKFLOW_MAX_ARGS_SCHEMA_BYTES = 12 << 10;
 const SAVED_WORKFLOW_MAX_PHASES = 32;
 const SAVED_WORKFLOW_MAX_PHASE_BYTES = 128;
+/** The most saved workflows one user or one organization can hold. */
+export const SAVED_WORKFLOW_MAX_PER_SCOPE = 100;
 
 // Matches the saved_workflows_name_format constraint.
 const savedWorkflowNamePattern = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -76,6 +78,46 @@ const savedWorkflowScriptError = (script: string): string | undefined => {
 	return undefined;
 };
 
+// Matches JSON strings, so their contents are skipped, and JSON numbers.
+const jsonStringOrNumberPattern =
+	/"(?:[^"\\]|\\.)*"|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
+
+/**
+ * Whether valid JSON text holds a number that JSON.parse cannot keep
+ * exactly: an integer beyond Number.MAX_SAFE_INTEGER or a value out of
+ * range. The browser would send a rounded value, which is not what the
+ * user wrote.
+ */
+const hasUnsafeJSONNumber = (json: string): boolean => {
+	for (const [token] of json.matchAll(jsonStringOrNumberPattern)) {
+		if (token.startsWith('"')) {
+			continue;
+		}
+		const value = Number(token);
+		if (
+			!Number.isFinite(value) ||
+			(Number.isInteger(value) && !Number.isSafeInteger(value))
+		) {
+			return true;
+		}
+	}
+	return false;
+};
+
+/**
+ * The size the server counts for an args schema: its compact form, so
+ * whitespace does not count. Text that is not valid JSON counts as is.
+ */
+export const savedWorkflowArgsSchemaSizeBytes = (
+	argsSchema: string,
+): number => {
+	try {
+		return getSkillContentSizeBytes(JSON.stringify(JSON.parse(argsSchema)));
+	} catch {
+		return getSkillContentSizeBytes(argsSchema);
+	}
+};
+
 type SavedWorkflowFormErrors = Partial<
 	Record<keyof SavedWorkflowFormValues, string>
 >;
@@ -117,11 +159,13 @@ export const savedWorkflowFormErrors = (
 			Array.isArray(parsed)
 		) {
 			errors.argsSchema = "Args schema must be a JSON object.";
+		} else if (hasUnsafeJSONNumber(argsSchema)) {
+			errors.argsSchema = `Args schema integers must be between -${Number.MAX_SAFE_INTEGER} and ${Number.MAX_SAFE_INTEGER}. Write larger values as strings.`;
 		} else if (
-			getSkillContentSizeBytes(argsSchema) >
+			savedWorkflowArgsSchemaSizeBytes(argsSchema) >
 			SAVED_WORKFLOW_MAX_ARGS_SCHEMA_BYTES
 		) {
-			errors.argsSchema = `Args schema must be ${SAVED_WORKFLOW_MAX_ARGS_SCHEMA_BYTES} bytes or smaller.`;
+			errors.argsSchema = `Args schema must be ${SAVED_WORKFLOW_MAX_ARGS_SCHEMA_BYTES} bytes or smaller without whitespace.`;
 		}
 	}
 	const phases = parseSavedWorkflowPhases(values.phases);
@@ -139,38 +183,6 @@ export const savedWorkflowFormErrors = (
 		}
 	}
 	return errors;
-};
-
-/**
- * Whether two args schemas hold the same JSON object, so a lost update
- * response can be checked against the submitted schema. The server stores
- * a missing schema as an absent field, so undefined and null mean the
- * same, and it re-encodes the JSON, so the comparison is on canonical
- * serialized forms, not references.
- */
-export const equalsSavedWorkflowArgsSchema = (
-	a: unknown,
-	b: unknown,
-): boolean => {
-	if (a == null || b == null) {
-		return (a ?? null) === (b ?? null);
-	}
-	return canonicalJSON(a) === canonicalJSON(b);
-};
-
-// Key-sorted serialization, so two JSON objects that differ only in key
-// order or whitespace compare equal.
-const canonicalJSON = (value: unknown): string => {
-	if (Array.isArray(value)) {
-		return `[${value.map(canonicalJSON).join(",")}]`;
-	}
-	if (typeof value === "object" && value !== null) {
-		const entries = Object.entries(value)
-			.sort(([a], [b]) => (a < b ? -1 : 1))
-			.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJSON(item)}`);
-		return `{${entries.join(",")}}`;
-	}
-	return JSON.stringify(value);
 };
 
 /**

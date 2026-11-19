@@ -13,7 +13,7 @@ const meta = {
 	args: {
 		title: "Personal workflows",
 		description:
-			"Starlark workflows only you can see and run in this organization. Chats run one with run_workflow.",
+			"Starlark workflows you own in this organization. Your chats run one with run_workflow.",
 		emptyMessage: "No personal workflows in this organization yet.",
 		workflows: [MockForkSavedWorkflowMetadata],
 		error: undefined,
@@ -56,6 +56,22 @@ export const ReadOnly: Story = {
 
 export const Empty: Story = {
 	args: { workflows: [] },
+};
+
+export const AtLimit: Story = {
+	args: {
+		workflows: Array.from({ length: 100 }, (_, i) => ({
+			...MockForkSavedWorkflowMetadata,
+			id: `saved-workflow-${i}`,
+			name: `workflow-${i}`,
+		})),
+	},
+	play: async () => {
+		await userEvent.hover(
+			await screen.findByRole("button", { name: "New workflow" }),
+		);
+		await screen.findByRole("tooltip");
+	},
 };
 
 export const EmptyReadOnly: Story = {

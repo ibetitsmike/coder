@@ -7,9 +7,9 @@ import { useMutation, useQuery, useQueryClient } from "react-query";
 import {
 	deleteSavedWorkflow,
 	isSameScope,
+	SavedWorkflowChangedError,
 	type SavedWorkflowScope,
 	savedWorkflow,
-	savedWorkflowKey,
 	savedWorkflows,
 } from "#/api/queries/forkSavedWorkflows";
 import type { ForkSavedWorkflowMetadata } from "#/api/typesGenerated";
@@ -25,7 +25,7 @@ const copy = {
 	user: {
 		title: "Personal workflows",
 		description:
-			"Starlark workflows only you can see and run in this organization. Chats run one with run_workflow.",
+			"Starlark workflows you own in this organization. Your chats run one with run_workflow.",
 		emptyMessage: "No personal workflows in this organization yet.",
 		deleteMessage: (name: string) =>
 			`Your personal workflow ${name} will be deleted. Organization workflows with the same name are not affected. This action cannot be undone.`,
@@ -36,7 +36,7 @@ const copy = {
 			"Starlark workflows owned by this organization. Members can run one with run_workflow when its permissions allow.",
 		emptyMessage: "No organization workflows yet.",
 		deleteMessage: (name: string) =>
-			`The organization workflow ${name} will be deleted for everyone in the organization. Personal workflows with the same name are not affected. This action cannot be undone.`,
+			`The organization workflow ${name} will be deleted. Personal workflows with the same name are not affected. This action cannot be undone.`,
 	},
 } satisfies Record<
 	SavedWorkflowScope["tier"],
@@ -102,7 +102,7 @@ export const ForkSavedWorkflowsTable: React.FC<
 		const isTarget =
 			deleteMutation.variables !== undefined &&
 			isSameScope(deleteMutation.variables.scope, scope) &&
-			deleteMutation.variables.name === activeDeleteTarget.name;
+			deleteMutation.variables.id === activeDeleteTarget.id;
 		const isDeleting = isTarget && deleteMutation.isPending;
 		deleteState = {
 			workflow: activeDeleteTarget,
@@ -111,27 +111,24 @@ export const ForkSavedWorkflowsTable: React.FC<
 			isDeleting,
 			onConfirm: () =>
 				deleteMutation.mutate(
-					{ scope, name: activeDeleteTarget.name },
 					{
-						// A lost response can still have deleted the workflow, so
-						// the refetched list decides whether the delete is done.
-						onSettled: (_data, error, { scope: requestScope, name }) => {
-							const workflows = queryClient.getQueryData(
-								savedWorkflows(requestScope).queryKey,
-							);
-							const isGone =
-								workflows !== undefined &&
-								!workflows.some((workflow) => workflow.name === name);
-							if (!error || isGone) {
-								// A lost response or a 404 can mean the delete committed
-								// without the mutation's success path running, so the
-								// cached detail must not outlive it.
-								queryClient.removeQueries({
-									queryKey: savedWorkflowKey(requestScope, name),
-									exact: true,
-								});
+						scope,
+						name: activeDeleteTarget.name,
+						id: activeDeleteTarget.id,
+					},
+					{
+						onSuccess: () => {
+							setDeleteTarget(undefined);
+							toast.success("Workflow deleted.");
+						},
+						// The list refetch the mutation starts shows the user what
+						// the name holds now, so the stale confirmation closes.
+						onError: (error) => {
+							if (error instanceof SavedWorkflowChangedError) {
 								setDeleteTarget(undefined);
-								toast.success("Workflow deleted.");
+								toast.info(
+									`${activeDeleteTarget.name} was deleted or replaced since you picked it, so nothing was deleted.`,
+								);
 							}
 						},
 					},

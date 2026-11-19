@@ -4,7 +4,12 @@ import { createMemoryRouter } from "react-router";
 import { beforeEach, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkSavedWorkflowsApi from "#/api/forkSavedWorkflows";
-import { organizationSavedWorkflowACLKey } from "#/api/queries/forkSavedWorkflows";
+import {
+	organizationSavedWorkflowACLKey,
+	savedWorkflowKey,
+} from "#/api/queries/forkSavedWorkflows";
+import type { ForkSavedWorkflowMetadata } from "#/api/typesGenerated";
+import { toast } from "#/components/Toaster/toast";
 import {
 	MockNoPermissions,
 	MockOrganization,
@@ -22,9 +27,12 @@ import { MockForkWorkflowScript } from "#/testHelpers/forkWorkflows";
 import { renderWithRouter } from "#/testHelpers/renderHelpers";
 import ForkWorkflowsPage from "./ForkWorkflowsPage";
 
+const auth = vi.hoisted((): { organizationIds: string[] } => ({
+	organizationIds: [],
+}));
 vi.mock("#/hooks/useAuthenticated", () => ({
 	useAuthenticated: () => ({
-		user: MockUserOwner,
+		user: { ...MockUserOwner, organization_ids: auth.organizationIds },
 		permissions: { ...MockNoPermissions, viewAnyOrganizationSkills: true },
 	}),
 }));
@@ -57,6 +65,7 @@ const renderPage = (search: string) => {
 
 beforeEach(() => {
 	dashboard.experiments = ["fork-workflows"];
+	auth.organizationIds = [MockOrganization.id, MockOrganization2.id];
 	vi.spyOn(API, "checkAuthorization").mockImplementation(async ({ checks }) =>
 		Object.fromEntries(Object.keys(checks).map((key) => [key, true])),
 	);
@@ -315,7 +324,7 @@ it("shows a server validation error in the editor", async () => {
 	await within(dialog).findByText("Invalid saved workflow.");
 });
 
-it("keeps the editor open when a lost response did not save the edit", async () => {
+it("keeps the editor open with the draft after a failed save", async () => {
 	const user = userEvent.setup();
 	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflows").mockResolvedValue([
 		MockForkSavedWorkflowMetadata,
@@ -324,17 +333,15 @@ it("keeps the editor open when a lost response did not save the edit", async () 
 		forkSavedWorkflowsApi,
 		"getOrganizationSavedWorkflows",
 	).mockResolvedValue([]);
-	// The refetched workflow holds the submitted script, so a script-only
-	// check would count this lost-response save as committed.
-	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow").mockResolvedValue({
-		...MockForkSavedWorkflow,
-		script: MockForkWorkflowScript.trimEnd(),
-	});
-	// An axios error without a response, which the editor treats as an
-	// unknown outcome that the refetched workflow must prove committed.
+	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow").mockResolvedValue(
+		MockForkSavedWorkflow,
+	);
+	// An axios error without a response: the outcome is unknown, so the
+	// editor reports a failure and the user retries.
 	const update = vi
 		.spyOn(forkSavedWorkflowsApi, "updateUserSavedWorkflow")
-		.mockRejectedValue({ isAxiosError: true });
+		.mockRejectedValueOnce({ isAxiosError: true })
+		.mockResolvedValue(MockForkSavedWorkflow);
 	renderPage(`?org=${MockOrganization2.name}`);
 
 	await user.click(
@@ -344,23 +351,79 @@ it("keeps the editor open when a lost response did not save the edit", async () 
 	);
 	await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
 	const dialog = await screen.findByRole("dialog");
-	// Only the description changes, so the refetched workflow holds the
-	// submitted script and must not count as a committed save.
-	await user.type(
-		await within(dialog).findByLabelText("Description"),
-		" even harder",
-	);
+	const description = await within(dialog).findByLabelText("Description");
+	await user.type(description, " even harder");
 	await user.click(
 		within(dialog).getByRole("button", { name: "Save workflow" }),
 	);
-
 	await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
 
-	// The editor stays open with the draft, so the user can retry the save.
+	expect(description).toHaveValue(
+		`${MockForkSavedWorkflowMetadata.description} even harder`,
+	);
 	await user.click(
 		within(dialog).getByRole("button", { name: "Save workflow" }),
 	);
 	await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+	await waitFor(() => expect(dialog).not.toBeInTheDocument());
+});
+
+it("seeds the editor from a fresh fetch, not the cached workflow", async () => {
+	const user = userEvent.setup();
+	const newer = {
+		...MockForkSavedWorkflow,
+		description: "Changed in another tab.",
+		updated_at: "2030-01-01T00:00:00Z",
+	};
+	const { script: _script, ...newerMetadata } = newer;
+	// Another tab saves the change after this page cached the old version.
+	let serverHasNewer = false;
+	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflows").mockImplementation(
+		async () => [
+			serverHasNewer ? newerMetadata : MockForkSavedWorkflowMetadata,
+		],
+	);
+	vi.spyOn(
+		forkSavedWorkflowsApi,
+		"getOrganizationSavedWorkflows",
+	).mockResolvedValue([]);
+	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow").mockImplementation(
+		async () => (serverHasNewer ? newer : MockForkSavedWorkflow),
+	);
+	const { queryClient } = renderPage(`?org=${MockOrganization2.name}`);
+	// Keep the viewed workflow cached after its dialog closes, as the app's
+	// query client does.
+	queryClient.setQueryDefaults(
+		savedWorkflowKey(
+			{ tier: "user", organizationId: MockOrganization2.id },
+			MockForkSavedWorkflowMetadata.name,
+		),
+		{ gcTime: Number.POSITIVE_INFINITY },
+	);
+
+	// Viewing the workflow caches the version the list showed.
+	await user.click(
+		await screen.findByRole("button", {
+			name: MockForkSavedWorkflowMetadata.name,
+		}),
+	);
+	await screen.findByLabelText("Script");
+	await user.keyboard("{Escape}");
+	await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+	await user.click(
+		await screen.findByRole("button", {
+			name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
+		}),
+	);
+	const edit = await screen.findByRole("menuitem", { name: "Edit" });
+	serverHasNewer = true;
+	await user.click(edit);
+	const dialog = await screen.findByRole("dialog");
+
+	expect(await within(dialog).findByLabelText("Description")).toHaveValue(
+		newer.description,
+	);
 });
 
 it("deletes a workflow after confirmation", async () => {
@@ -372,6 +435,9 @@ it("deletes a workflow after confirmation", async () => {
 		forkSavedWorkflowsApi,
 		"getOrganizationSavedWorkflows",
 	).mockResolvedValue([]);
+	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow").mockResolvedValue(
+		MockForkSavedWorkflow,
+	);
 	const remove = vi
 		.spyOn(forkSavedWorkflowsApi, "deleteUserSavedWorkflow")
 		.mockResolvedValue();
@@ -390,6 +456,144 @@ it("deletes a workflow after confirmation", async () => {
 			MockOrganization2.id,
 			MockForkSavedWorkflowMetadata.name,
 		),
+	);
+});
+
+it("deletes nothing when the name now holds another workflow", async () => {
+	const user = userEvent.setup();
+	const info = vi.spyOn(toast, "info");
+	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflows").mockResolvedValue([
+		MockForkSavedWorkflowMetadata,
+	]);
+	vi.spyOn(
+		forkSavedWorkflowsApi,
+		"getOrganizationSavedWorkflows",
+	).mockResolvedValue([]);
+	// Another tab deleted the workflow and created one with the same name.
+	const get = vi
+		.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow")
+		.mockResolvedValue({ ...MockForkSavedWorkflow, id: "saved-workflow-2" });
+	const remove = vi
+		.spyOn(forkSavedWorkflowsApi, "deleteUserSavedWorkflow")
+		.mockResolvedValue();
+	renderPage(`?org=${MockOrganization2.name}`);
+
+	await user.click(
+		await screen.findByRole("button", {
+			name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
+		}),
+	);
+	await user.click(await screen.findByRole("menuitem", { name: "Delete…" }));
+	await user.click(await screen.findByRole("button", { name: "Delete" }));
+
+	await waitFor(() => expect(info).toHaveBeenCalled());
+	expect(get).toHaveBeenCalledWith(
+		MockOrganization2.id,
+		MockForkSavedWorkflowMetadata.name,
+	);
+	expect(remove).not.toHaveBeenCalled();
+	await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+it("disables New workflow at the limit and says why", async () => {
+	const user = userEvent.setup();
+	const workflows: ForkSavedWorkflowMetadata[] = Array.from(
+		{ length: 100 },
+		(_, i) => ({
+			...MockForkSavedWorkflowMetadata,
+			id: `saved-workflow-${i}`,
+			name: `workflow-${i}`,
+		}),
+	);
+	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflows").mockResolvedValue(
+		workflows,
+	);
+	vi.spyOn(
+		forkSavedWorkflowsApi,
+		"getOrganizationSavedWorkflows",
+	).mockResolvedValue([]);
+	const create = vi.spyOn(forkSavedWorkflowsApi, "createUserSavedWorkflow");
+	renderPage(`?org=${MockOrganization2.name}`);
+
+	await screen.findByRole("button", { name: "workflow-99" });
+	const disabled = screen
+		.getAllByRole("button", { name: "New workflow" })
+		.filter((button) => button.getAttribute("aria-disabled") === "true");
+	expect(disabled).toHaveLength(1);
+
+	await user.hover(disabled[0]);
+	expect(await screen.findByRole("tooltip")).toHaveTextContent(
+		/100 workflows, the limit/,
+	);
+	await user.click(disabled[0]);
+	expect(screen.queryByRole("dialog")).toBeNull();
+	expect(create).not.toHaveBeenCalled();
+});
+
+it("hides the personal tier in an organization the user is not a member of", async () => {
+	auth.organizationIds = [MockOrganization.id];
+	const listUser = vi
+		.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflows")
+		.mockResolvedValue([]);
+	const listOrganization = vi
+		.spyOn(forkSavedWorkflowsApi, "getOrganizationSavedWorkflows")
+		.mockResolvedValue([MockForkOrganizationSavedWorkflowMetadata]);
+	renderPage(`?org=${MockOrganization2.name}`);
+
+	await screen.findByText(MockForkOrganizationSavedWorkflowMetadata.name);
+	expect(listOrganization).toHaveBeenCalledWith(MockOrganization2.id);
+	expect(listUser).not.toHaveBeenCalled();
+	expect(screen.queryByText("Personal workflows")).toBeNull();
+	// The picker moves to the organization tier, so the user can switch.
+	expect(screen.getByRole("combobox")).toBeInTheDocument();
+});
+
+it("returns focus to a name button in a read-only table when the row is gone", async () => {
+	const user = userEvent.setup();
+	vi.spyOn(API, "checkAuthorization").mockImplementation(async ({ checks }) =>
+		Object.fromEntries(
+			Object.keys(checks).map((key) => [
+				key,
+				key.endsWith(".viewOrganizationSkills"),
+			]),
+		),
+	);
+	const second = {
+		...MockForkOrganizationSavedWorkflowMetadata,
+		id: "saved-workflow-org-2",
+		name: "summarize-logs",
+	};
+	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflows").mockResolvedValue(
+		[],
+	);
+	vi.spyOn(
+		forkSavedWorkflowsApi,
+		"getOrganizationSavedWorkflows",
+	).mockResolvedValue([MockForkOrganizationSavedWorkflowMetadata, second]);
+	// The first workflow was deleted elsewhere, so its detail 404s and the
+	// page drops its row.
+	vi.spyOn(
+		forkSavedWorkflowsApi,
+		"getOrganizationSavedWorkflow",
+	).mockRejectedValue(mockApiError({ message: "Not found.", status: 404 }));
+	renderPage(`?org=${MockOrganization2.name}`);
+
+	await user.click(
+		await screen.findByRole("button", {
+			name: MockForkOrganizationSavedWorkflowMetadata.name,
+		}),
+	);
+	await waitFor(() =>
+		expect(
+			screen.queryByRole("button", {
+				name: MockForkOrganizationSavedWorkflowMetadata.name,
+			}),
+		).toBeNull(),
+	);
+	await user.keyboard("{Escape}");
+
+	await waitFor(() =>
+		expect(screen.getByRole("button", { name: second.name })).toHaveFocus(),
 	);
 });
 

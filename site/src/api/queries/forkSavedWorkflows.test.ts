@@ -15,6 +15,7 @@ import {
 	deleteSavedWorkflow,
 	isSameScope,
 	organizationSavedWorkflowACLKey,
+	SavedWorkflowChangedError,
 	type SavedWorkflowScope,
 	savedWorkflow,
 	savedWorkflowKey,
@@ -233,6 +234,9 @@ describe("deleteSavedWorkflow", () => {
 			metadataOf(MockForkSavedWorkflowCreated),
 		]);
 		queryClient.setQueryData(detailKey, MockForkSavedWorkflowCreated);
+		vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow").mockResolvedValue(
+			MockForkSavedWorkflowCreated,
+		);
 		vi.spyOn(
 			forkSavedWorkflowsApi,
 			"deleteUserSavedWorkflow",
@@ -241,7 +245,7 @@ describe("deleteSavedWorkflow", () => {
 		await new MutationObserver(
 			queryClient,
 			deleteSavedWorkflow(queryClient),
-		).mutate({ scope, name });
+		).mutate({ scope, name, id: MockForkSavedWorkflowCreated.id });
 
 		expect(forkSavedWorkflowsApi.deleteUserSavedWorkflow).toHaveBeenCalledWith(
 			scope.organizationId,
@@ -249,6 +253,42 @@ describe("deleteSavedWorkflow", () => {
 		);
 		expect(queryClient.getQueryData(listKey)).toEqual([]);
 		expect(queryClient.getQueryData(detailKey)).toBeUndefined();
+	});
+
+	it.each([
+		[
+			"holds a recreated workflow",
+			() => Promise.resolve(MockForkSavedWorkflowRecreated),
+		],
+		[
+			"no longer exists",
+			() =>
+				Promise.reject(mockApiError({ message: "Not found.", status: 404 })),
+		],
+	])("deletes nothing when the name %s", async (_case, get) => {
+		const queryClient = createQueryClient();
+		const listKey = savedWorkflowsKey(scope);
+		const listed = [metadataOf(MockForkSavedWorkflowCreated)];
+		queryClient.setQueryData(listKey, listed);
+		vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow").mockImplementation(
+			get,
+		);
+		const remove = vi
+			.spyOn(forkSavedWorkflowsApi, "deleteUserSavedWorkflow")
+			.mockResolvedValue();
+
+		await expect(
+			new MutationObserver(
+				queryClient,
+				deleteSavedWorkflow(queryClient),
+			).mutate({ scope, name, id: MockForkSavedWorkflowCreated.id }),
+		).rejects.toBeInstanceOf(SavedWorkflowChangedError);
+
+		expect(remove).not.toHaveBeenCalled();
+		expect(queryClient.getQueryData(listKey)).toEqual(listed);
+		expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
+			queryKey: listKey,
+		});
 	});
 });
 

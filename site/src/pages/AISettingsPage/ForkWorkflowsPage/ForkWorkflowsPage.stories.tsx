@@ -127,6 +127,10 @@ export const ReadOnly: Story = {
 
 export const MultipleOrganizations: Story = {
 	parameters: {
+		user: {
+			...MockUserOwner,
+			organization_ids: [MockDefaultOrganization.id, MockOrganization2.id],
+		},
 		organizations: [MockDefaultOrganization, MockOrganization2],
 		reactRouter: reactRouterParameters({
 			location: { path, searchParams: { org: MockOrganization2.name } },
@@ -156,6 +160,34 @@ export const MultipleOrganizations: Story = {
 					organizationId: MockOrganization2.id,
 				}),
 				data: [],
+			},
+		],
+	},
+};
+
+// A user who reads another organization's workflows without being a member
+// owns no personal workflows there, so only the organization tier shows.
+export const NonMemberOrganization: Story = {
+	parameters: {
+		...MultipleOrganizations.parameters,
+		user: MockUserOwner,
+		queries: [
+			{
+				key: organizationsPermissions([
+					MockDefaultOrganization.id,
+					MockOrganization2.id,
+				]).queryKey,
+				data: {
+					[MockDefaultOrganization.id]: MockOrganizationPermissions,
+					[MockOrganization2.id]: MockOrganizationPermissions,
+				},
+			},
+			{
+				key: savedWorkflowsKey({
+					tier: "organization",
+					organizationId: MockOrganization2.id,
+				}),
+				data: [MockForkOrganizationSavedWorkflowMetadata],
 			},
 		],
 	},

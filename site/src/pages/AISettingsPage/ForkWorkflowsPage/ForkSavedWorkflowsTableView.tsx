@@ -27,6 +27,11 @@ import {
 } from "#/components/Table/Table";
 import { TableEmpty } from "#/components/TableEmpty/TableEmpty";
 import { TableLoader } from "#/components/TableLoader/TableLoader";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "#/components/Tooltip/Tooltip";
 import { RetryButton } from "#/pages/AgentsPage/components/RetryButton";
 import { SectionHeader } from "#/pages/AgentsPage/components/SectionHeader";
 import { formatUpdatedAt } from "#/pages/AgentsPage/components/SkillsTableView";
@@ -37,6 +42,7 @@ import {
 } from "#/pages/AgentsPage/utils/skills";
 import { ForkSavedWorkflowDetailDialog } from "./ForkSavedWorkflowDetailDialog";
 import { ForkSavedWorkflowEditorDialog } from "./ForkSavedWorkflowEditorDialog";
+import { SAVED_WORKFLOW_MAX_PER_SCOPE } from "./savedWorkflowForm";
 import type { ForkSavedWorkflowEditorState } from "./useForkSavedWorkflowEditor";
 
 /**
@@ -101,19 +107,48 @@ type ForkSavedWorkflowsTableViewProps = {
 
 type NewWorkflowButtonProps = {
 	ref?: React.Ref<HTMLButtonElement>;
+	/** The list holds the most workflows the server allows. */
+	atLimit?: boolean;
 	onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
 };
 
-/** The button that opens the create dialog, with a fallback ref for focus. */
+/**
+ * The button that opens the create dialog, with a fallback ref for focus.
+ * At the limit it stays focusable but inert, so its tooltip can say why.
+ */
 const NewWorkflowButton: React.FC<NewWorkflowButtonProps> = ({
 	ref,
+	atLimit = false,
 	onClick,
-}) => (
-	<Button ref={ref} variant="outline" onClick={onClick}>
-		<PlusIcon aria-hidden="true" />
-		New workflow
-	</Button>
-);
+}) => {
+	const button = (
+		<Button
+			ref={ref}
+			variant="outline"
+			aria-disabled={atLimit || undefined}
+			onClick={(event) => {
+				if (!atLimit) {
+					onClick(event);
+				}
+			}}
+		>
+			<PlusIcon aria-hidden="true" />
+			New workflow
+		</Button>
+	);
+	if (!atLimit) {
+		return button;
+	}
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>{button}</TooltipTrigger>
+			<TooltipContent>
+				This list holds {SAVED_WORKFLOW_MAX_PER_SCOPE} workflows, the limit.
+				Delete one before you create another.
+			</TooltipContent>
+		</Tooltip>
+	);
+};
 
 /** Lists saved workflows of one tier with its dialogs. */
 export const ForkSavedWorkflowsTableView: React.FC<
@@ -189,7 +224,8 @@ export const ForkSavedWorkflowsTableView: React.FC<
 				access={access}
 				hasRowActions={hasRowActions}
 				// A deleted row takes its menu button with it, so focus falls
-				// back to the first remaining row's button.
+				// back to the first remaining row's menu button, or its name
+				// button when the table has no row menus.
 				isFirst={workflow.id === workflows[0]?.id}
 				onView={onView}
 				onEdit={onEdit}
@@ -213,6 +249,7 @@ export const ForkSavedWorkflowsTableView: React.FC<
 						{access.create && (
 							<NewWorkflowButton
 								ref={setSecondaryFallback}
+								atLimit={workflows.length >= SAVED_WORKFLOW_MAX_PER_SCOPE}
 								onClick={(event) => {
 									rememberTrigger(event);
 									onCreate();
@@ -340,6 +377,7 @@ const SavedWorkflowRow: React.FC<SavedWorkflowRowProps> = ({
 			<Button
 				variant="subtle"
 				className="h-auto min-w-0 max-w-full justify-start p-0"
+				ref={isFirst && !hasRowActions ? setPrimaryFallback : undefined}
 				onClick={(event) => {
 					rememberTrigger(event);
 					onView(workflow);
