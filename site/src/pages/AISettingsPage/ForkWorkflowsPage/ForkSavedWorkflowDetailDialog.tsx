@@ -59,7 +59,7 @@ export const ForkSavedWorkflowDetailDialog: React.FC<
 							? "Loading saved workflow"
 							: `View ${workflow?.name ?? "saved workflow"}`}
 					</DialogTitle>
-					<DialogDescription>
+					<DialogDescription className="whitespace-pre-wrap">
 						{workflow === undefined
 							? null
 							: workflow.description || "This workflow has no description."}

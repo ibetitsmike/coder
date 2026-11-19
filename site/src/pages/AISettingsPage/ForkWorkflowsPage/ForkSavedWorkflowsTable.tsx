@@ -51,7 +51,6 @@ const copy = {
 type ForkSavedWorkflowsTableProps = {
 	scope: SavedWorkflowScope;
 	access?: SkillAccess;
-	action?: React.ReactNode;
 	onManagePermissions?: (
 		workflow: ForkSavedWorkflowMetadata,
 		onCloseAutoFocus: (event: Event) => void,
@@ -61,7 +60,7 @@ type ForkSavedWorkflowsTableProps = {
 /** Wires the saved workflows table of one scope to the API. */
 export const ForkSavedWorkflowsTable: React.FC<
 	ForkSavedWorkflowsTableProps
-> = ({ scope, access, action, onManagePermissions }) => {
+> = ({ scope, access, onManagePermissions }) => {
 	const queryClient = useQueryClient();
 	const [deleteTarget, setDeleteTarget] = useState<{
 		workflow: ForkSavedWorkflowMetadata;
@@ -150,7 +149,6 @@ export const ForkSavedWorkflowsTable: React.FC<
 			description={copy[scope.tier].description}
 			emptyMessage={copy[scope.tier].emptyMessage}
 			access={access}
-			action={action}
 			error={workflowsQuery.error}
 			isLoading={workflowsQuery.isLoading}
 			isRetrying={workflowsQuery.isFetching}

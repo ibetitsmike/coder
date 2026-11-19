@@ -290,6 +290,32 @@ describe("deleteSavedWorkflow", () => {
 			queryKey: listKey,
 		});
 	});
+
+	it("reports a change when the workflow is gone by the time of the delete", async () => {
+		const queryClient = createQueryClient();
+		const listKey = savedWorkflowsKey(scope);
+		const listed = [metadataOf(MockForkSavedWorkflowCreated)];
+		queryClient.setQueryData(listKey, listed);
+		vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow").mockResolvedValue(
+			MockForkSavedWorkflowCreated,
+		);
+		vi.spyOn(
+			forkSavedWorkflowsApi,
+			"deleteUserSavedWorkflow",
+		).mockRejectedValue(mockApiError({ message: "Not found.", status: 404 }));
+
+		await expect(
+			new MutationObserver(
+				queryClient,
+				deleteSavedWorkflow(queryClient),
+			).mutate({ scope, name, id: MockForkSavedWorkflowCreated.id }),
+		).rejects.toBeInstanceOf(SavedWorkflowChangedError);
+
+		expect(queryClient.getQueryData(listKey)).toEqual(listed);
+		expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
+			queryKey: listKey,
+		});
+	});
 });
 
 describe("savedWorkflow", () => {

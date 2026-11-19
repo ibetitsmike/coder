@@ -49,10 +49,11 @@ describe("savedWorkflowFormErrors", () => {
 			'{"maximum": 9007199254740993}',
 			'{"minimum": -9007199254740993}',
 			'{"maximum": 1e400}',
+			'{"minimum": 1e-400}',
 		]) {
 			expect(
 				savedWorkflowFormErrors({ ...validValues, argsSchema }).argsSchema,
-			).toMatch(/integers must be between/);
+			).toMatch(/numbers must stay exact/);
 		}
 	});
 
@@ -61,7 +62,7 @@ describe("savedWorkflowFormErrors", () => {
 			savedWorkflowFormErrors({
 				...validValues,
 				argsSchema:
-					'{"maximum": 9007199254740991, "minimum": -1.5e3, "default": "9007199254740993 \\" 1e400"}',
+					'{"maximum": 9007199254740991, "minimum": -1.5e3, "multipleOf": 0e-400, "default": "9007199254740993 \\" 1e400"}',
 			}),
 		).toEqual({});
 	});

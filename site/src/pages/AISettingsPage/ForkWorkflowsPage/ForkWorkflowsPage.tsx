@@ -57,16 +57,6 @@ const ForkWorkflowsPage: React.FC = () => {
 	const isMember = organization
 		? user.organization_ids.includes(organization.id)
 		: false;
-	const organizationPicker = organization && (
-		<OrganizationPicker
-			id="workflows-organization"
-			className="w-full sm:w-60"
-			organizations={readableOrganizations}
-			organization={organization}
-			onChange={setOrganization}
-			showLabel={false}
-		/>
-	);
 	// Back and Forward can change the organization while the dialog is open,
 	// and a save must not land in an organization the page no longer shows.
 	if (sharing && sharing.organizationId !== organization?.id) {
@@ -90,13 +80,25 @@ const ForkWorkflowsPage: React.FC = () => {
 					)}
 					{organization && (
 						<div className="flex flex-col gap-10">
+							{/* The picker sits outside both tables so that it keeps its
+							    place and focus when a change of organization shows or
+							    hides the personal tier. */}
+							<div className="flex justify-end">
+								<OrganizationPicker
+									id="workflows-organization"
+									className="w-full sm:w-60"
+									organizations={readableOrganizations}
+									organization={organization}
+									onChange={setOrganization}
+									showLabel={false}
+								/>
+							</div>
 							{isMember && (
 								<ForkSavedWorkflowsTable
 									scope={{
 										tier: "user",
 										organizationId: organization.id,
 									}}
-									action={organizationPicker}
 								/>
 							)}
 							<ForkSavedWorkflowsTable
@@ -104,7 +106,6 @@ const ForkWorkflowsPage: React.FC = () => {
 									tier: "organization",
 									organizationId: organization.id,
 								}}
-								action={isMember ? undefined : organizationPicker}
 								access={{
 									create: Boolean(
 										organizationPermissions?.createOrganizationSkill,

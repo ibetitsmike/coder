@@ -69,8 +69,6 @@ type ForkSavedWorkflowsTableViewProps = {
 	 * Hides the create, edit, and delete controls the user may not use.
 	 */
 	access?: SkillAccess;
-	/** Rendered in the section header, for example an organization picker. */
-	action?: React.ReactNode;
 	error: unknown;
 	isLoading: boolean;
 	isRetrying: boolean;
@@ -136,16 +134,17 @@ const NewWorkflowButton: React.FC<NewWorkflowButtonProps> = ({
 			New workflow
 		</Button>
 	);
-	if (!atLimit) {
-		return button;
-	}
+	// The tooltip wraps the button either way, so that crossing the limit
+	// does not remount the button and lose its focus.
 	return (
 		<Tooltip>
 			<TooltipTrigger asChild>{button}</TooltipTrigger>
-			<TooltipContent>
-				This list holds {SAVED_WORKFLOW_MAX_PER_SCOPE} workflows, the limit.
-				Delete one before you create another.
-			</TooltipContent>
+			{atLimit && (
+				<TooltipContent>
+					This list holds {SAVED_WORKFLOW_MAX_PER_SCOPE} workflows, the limit.
+					Delete one before you create another.
+				</TooltipContent>
+			)}
 		</Tooltip>
 	);
 };
@@ -159,7 +158,6 @@ export const ForkSavedWorkflowsTableView: React.FC<
 	description,
 	emptyMessage,
 	access = fullSkillAccess,
-	action,
 	error,
 	isLoading,
 	isRetrying,
@@ -244,19 +242,16 @@ export const ForkSavedWorkflowsTableView: React.FC<
 				label={title}
 				description={description}
 				action={
-					<div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-						{action}
-						{access.create && (
-							<NewWorkflowButton
-								ref={setSecondaryFallback}
-								atLimit={workflows.length >= SAVED_WORKFLOW_MAX_PER_SCOPE}
-								onClick={(event) => {
-									rememberTrigger(event);
-									onCreate();
-								}}
-							/>
-						)}
-					</div>
+					access.create && (
+						<NewWorkflowButton
+							ref={setSecondaryFallback}
+							atLimit={workflows.length >= SAVED_WORKFLOW_MAX_PER_SCOPE}
+							onClick={(event) => {
+								rememberTrigger(event);
+								onCreate();
+							}}
+						/>
+					)
 				}
 			/>
 

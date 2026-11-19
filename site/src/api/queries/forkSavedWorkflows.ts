@@ -244,7 +244,15 @@ export const deleteSavedWorkflow = (queryClient: QueryClient) =>
 			if (current.id !== id) {
 				throw new SavedWorkflowChangedError();
 			}
-			await endpoints.remove(name);
+			try {
+				await endpoints.remove(name);
+			} catch (error) {
+				// Someone else deleted the workflow after the check.
+				if (isAxiosError(error) && error.response?.status === 404) {
+					throw new SavedWorkflowChangedError();
+				}
+				throw error;
+			}
 		},
 		onSuccess: (_data, { scope, name }) => {
 			queryClient.setQueryData(savedWorkflows(scope).queryKey, (workflows) =>

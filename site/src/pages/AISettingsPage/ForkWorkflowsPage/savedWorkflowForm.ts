@@ -84,9 +84,9 @@ const jsonStringOrNumberPattern =
 
 /**
  * Whether valid JSON text holds a number that JSON.parse cannot keep
- * exactly: an integer beyond Number.MAX_SAFE_INTEGER or a value out of
- * range. The browser would send a rounded value, which is not what the
- * user wrote.
+ * exactly: an integer beyond Number.MAX_SAFE_INTEGER, a value too large,
+ * or a nonzero value so small it becomes 0. The browser would send a
+ * rounded value, which is not what the user wrote.
  */
 const hasUnsafeJSONNumber = (json: string): boolean => {
 	for (const [token] of json.matchAll(jsonStringOrNumberPattern)) {
@@ -96,7 +96,8 @@ const hasUnsafeJSONNumber = (json: string): boolean => {
 		const value = Number(token);
 		if (
 			!Number.isFinite(value) ||
-			(Number.isInteger(value) && !Number.isSafeInteger(value))
+			(Number.isInteger(value) && !Number.isSafeInteger(value)) ||
+			(value === 0 && /[1-9]/.test(token.split(/[eE]/)[0]))
 		) {
 			return true;
 		}
@@ -160,7 +161,7 @@ export const savedWorkflowFormErrors = (
 		) {
 			errors.argsSchema = "Args schema must be a JSON object.";
 		} else if (hasUnsafeJSONNumber(argsSchema)) {
-			errors.argsSchema = `Args schema integers must be between -${Number.MAX_SAFE_INTEGER} and ${Number.MAX_SAFE_INTEGER}. Write larger values as strings.`;
+			errors.argsSchema = `Args schema numbers must stay exact in the browser: integers between -${Number.MAX_SAFE_INTEGER} and ${Number.MAX_SAFE_INTEGER}, and no values too large or too small to store. Write such values as strings.`;
 		} else if (
 			savedWorkflowArgsSchemaSizeBytes(argsSchema) >
 			SAVED_WORKFLOW_MAX_ARGS_SCHEMA_BYTES

@@ -544,8 +544,34 @@ it("hides the personal tier in an organization the user is not a member of", asy
 	expect(listOrganization).toHaveBeenCalledWith(MockOrganization2.id);
 	expect(listUser).not.toHaveBeenCalled();
 	expect(screen.queryByText("Personal workflows")).toBeNull();
-	// The picker moves to the organization tier, so the user can switch.
+	// The picker sits above both tiers, so the user can switch.
 	expect(screen.getByRole("combobox")).toBeInTheDocument();
+});
+
+it("keeps the picker and its focus when a switch hides the personal tier", async () => {
+	const user = userEvent.setup();
+	auth.organizationIds = [MockOrganization.id];
+	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflows").mockResolvedValue(
+		[],
+	);
+	vi.spyOn(
+		forkSavedWorkflowsApi,
+		"getOrganizationSavedWorkflows",
+	).mockResolvedValue([]);
+	renderPage(`?org=${MockOrganization.name}`);
+	await screen.findByText("Personal workflows");
+
+	const picker = screen.getByRole("combobox");
+	await user.click(picker);
+	await user.click(
+		await screen.findByRole("option", { name: /My Organization 2/ }),
+	);
+
+	await waitFor(() =>
+		expect(screen.queryByText("Personal workflows")).toBeNull(),
+	);
+	expect(screen.getByRole("combobox")).toBe(picker);
+	await waitFor(() => expect(picker).toHaveFocus());
 });
 
 it("returns focus to a name button in a read-only table when the row is gone", async () => {
