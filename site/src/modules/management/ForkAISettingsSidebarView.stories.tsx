@@ -60,3 +60,23 @@ export const WithPluginPacksForOrganizationAuditor: Story = {
 	},
 	parameters: pluginPacksParameters,
 };
+
+const workflowsParameters = {
+	experiments: ["fork-workflows"],
+	reactRouter: reactRouterParameters({
+		location: { path: "/ai/settings/workflows" },
+		routing: { path: "/ai/settings/workflows" },
+	}),
+};
+
+export const WithWorkflowsForDeploymentAdmin: Story = {
+	args: { permissions: MockPermissions },
+	parameters: workflowsParameters,
+};
+
+export const WithWorkflowsForOrganizationAuditor: Story = {
+	args: {
+		permissions: { ...MockNoPermissions, viewAnyOrganizationSkills: true },
+	},
+	parameters: workflowsParameters,
+};
