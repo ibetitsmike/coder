@@ -39,7 +39,6 @@ import { MessageScroller } from "#/vendor/message-scroller";
 import type { ChatMessageInputRef } from "./AgentChatInput";
 import { createChatStore } from "./ChatConversation/chatStore";
 import {
-import {
 	MockAsyncQuestionMessages,
 	MockAsyncQuestionResult,
 	MockAsyncQuestionResultMessage,
