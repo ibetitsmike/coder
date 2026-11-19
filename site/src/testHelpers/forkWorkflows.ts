@@ -103,6 +103,10 @@ export const MockForkWorkflowFailedResult = {
 	],
 };
 
+export const MockForkWorkflowStepValue = {
+	findings: ["the handler writes to a nil map when the request has no labels"],
+};
+
 /** A fixed "now" a few minutes after the mock runs start. */
 export const MockForkWorkflowNow = Date.parse("2026-11-12T10:05:00Z");
 
@@ -130,6 +134,7 @@ export const MockChatWorkflowRunDetail: WorkflowRunDetail = {
 		status: step.status,
 		reused: step.reused === true,
 		error: "",
+		value: step.status === "reported" ? MockForkWorkflowStepValue : undefined,
 		ordinal,
 		phase: step.phase,
 		started_at: "2026-11-12T10:00:05Z",

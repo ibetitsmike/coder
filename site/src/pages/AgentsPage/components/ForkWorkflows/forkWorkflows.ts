@@ -1,6 +1,7 @@
 // This file is fork code: it parses the Starlark workflow tool results of
 // the fork-workflows experiment and maps their statuses to display values.
 
+import { isUnsafeInteger, unsafeIntegerText } from "#/api/forkWorkflows";
 import type { WorkflowRun, WorkflowRunDetail } from "#/api/typesGenerated";
 import { humanDurationShort } from "#/utils/time";
 import { asRecord, asString } from "../ChatElements/runtimeTypeUtils";
@@ -13,6 +14,8 @@ export type ForkWorkflowStep = {
 	reused: boolean;
 	error: string;
 	phase: string;
+	/** The report the step sent, undefined until it reported. */
+	value?: unknown;
 };
 
 /** A run as run_workflow and await_workflow report it. */
@@ -128,6 +131,7 @@ export const forkWorkflowRunDetailSteps = (
 	run: WorkflowRunDetail,
 ): ForkWorkflowStep[] =>
 	run.steps
+		// The API's ordinal is the step's position in the run.
 		.toSorted((left, right) => left.ordinal - right.ordinal)
 		.map((step) => ({
 			chatId: step.id,
@@ -136,6 +140,7 @@ export const forkWorkflowRunDetailSteps = (
 			reused: step.reused,
 			error: step.error,
 			phase: step.phase,
+			value: step.value,
 		}));
 
 /** Converts a run detail to the snapshot that a tool result parses to. */
@@ -153,8 +158,10 @@ const forkWorkflowRunDetailSnapshot = (
 });
 
 /**
- * Applies a run detail to a running tool result. The detail has no logs until
- * the run ends and does not mark reused steps, so those come from the result.
+ * Applies a run detail to a running tool result. The merge keeps the
+ * snapshot's reused flags and drops the detail's step values, so the chat's
+ * tool card reads like the run_workflow result it started as; the panel's
+ * run detail shows the values.
  */
 export const mergeForkWorkflowRunDetail = (
 	snapshot: ForkWorkflowRunSnapshot,
@@ -179,9 +186,15 @@ export const mergeForkWorkflowRunDetail = (
 	return {
 		...detail,
 		...phaseState,
-		steps: detail.steps.map((step) =>
-			reusedChatIds.has(step.chatId) ? { ...step, reused: true } : step,
-		),
+		steps: detail.steps.map((step) => {
+			const merged = reusedChatIds.has(step.chatId)
+				? { ...step, reused: true }
+				: step;
+			// The chat's tool card has no Value blocks: they belong to the
+			// panel's run detail, and await_workflow results never show them.
+			const { value: _value, ...cardStep } = merged;
+			return cardStep;
+		}),
 		logs: detail.logs.length > 0 ? detail.logs : snapshot.logs,
 	};
 };
@@ -309,6 +322,16 @@ export const forkWorkflowRunDuration = (
 	return humanDurationShort(Math.max(0, end - Date.parse(run.created_at)));
 };
 
-/** Formats a JSON value for display; strings show as they are. */
+/**
+ * Formats a JSON value for display; strings show as they are, except the
+ * empty string, which shows as "" so it does not read as a missing value.
+ */
 export const formatForkWorkflowValue = (value: unknown): string =>
-	typeof value === "string" ? value : JSON.stringify(value, null, 2);
+	typeof value === "string"
+		? value || '""'
+		: JSON.stringify(
+				value,
+				(_key, item) =>
+					isUnsafeInteger(item) ? unsafeIntegerText(item) : item,
+				2,
+			);

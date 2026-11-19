@@ -5,12 +5,14 @@ import type React from "react";
 import { useId } from "react";
 import { Badge } from "#/components/Badge/Badge";
 import { ForkChatLink } from "../ChatElements/tools/ForkChatLink";
+import { ForkWorkflowLongText } from "./ForkWorkflowLongText";
 import { ForkWorkflowPhaseRail } from "./ForkWorkflowPhaseRail";
 import { ForkWorkflowStatusBadge } from "./ForkWorkflowStatusBadge";
 import {
 	type ForkWorkflowStep,
 	forkWorkflowStepPhases,
 	forkWorkflowStepStatusMeta,
+	formatForkWorkflowValue,
 } from "./forkWorkflows";
 
 type ForkWorkflowStepsProps = {
@@ -51,6 +53,9 @@ export const ForkWorkflowSteps: React.FC<ForkWorkflowStepsProps> = ({
 						// heading.
 						const isFirstStepOfGroup = group.steps[0] === step;
 						const headingId = `${headingIdPrefix}-${groupIndex}`;
+						// The value regions are named by the step's position in
+						// the list as shown, so two values never share a name.
+						const stepOrdinal = steps.indexOf(step);
 						return (
 							<li
 								key={step.chatId}
@@ -92,6 +97,12 @@ export const ForkWorkflowSteps: React.FC<ForkWorkflowStepsProps> = ({
 									<div className="pl-1 font-mono text-xs text-content-destructive wrap-anywhere">
 										{step.error}
 									</div>
+								)}
+								{step.value !== undefined && (
+									<ForkWorkflowLongText
+										label={`Step ${stepOrdinal + 1}: ${step.title || "Untitled step"} value`}
+										text={formatForkWorkflowValue(step.value)}
+									/>
 								)}
 							</li>
 						);

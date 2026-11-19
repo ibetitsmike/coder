@@ -1,11 +1,24 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClientProvider } from "react-query";
+import { HttpResponse, http } from "msw";
+import {
+	focusManager,
+	type InfiniteData,
+	InfiniteQueryObserver,
+	QueryClientProvider,
+} from "react-query";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { describe, expect, it, vi } from "vitest";
+import { API } from "#/api/api";
 import * as forkWorkflowsApi from "#/api/forkWorkflows";
-import type { WorkflowRunDetail } from "#/api/typesGenerated";
+import {
+	chatWorkflowRunKey,
+	chatWorkflowRuns,
+	chatWorkflowRunsKey,
+} from "#/api/queries/forkWorkflows";
+import type { WorkflowRun, WorkflowRunDetail } from "#/api/typesGenerated";
 import { toast } from "#/components/Toaster/toast";
+import { MockChat } from "#/testHelpers/chatEntities";
 import { mockApiError } from "#/testHelpers/entities";
 import {
 	MockChatWorkflowRun,
@@ -16,8 +29,14 @@ import {
 	createTestQueryClient,
 	renderComponent,
 } from "#/testHelpers/renderHelpers";
+import { server } from "#/testHelpers/server";
 import { generateUUID } from "#/utils/random";
 import { ForkWorkflowsPanel } from "./ForkWorkflowsPanel";
+
+// Captured before any test spies on the module: the integer test below
+// needs the real fetch, and clearAllMocks keeps earlier mock
+// implementations alive across tests in this file.
+const realGetChatWorkflowRun = forkWorkflowsApi.getChatWorkflowRun;
 
 // The panel remembers the open run per chat, so each test uses its own chat.
 const renderPanel = (chatId: string) => {
@@ -42,7 +61,7 @@ const renderPanel = (chatId: string) => {
 			<RouterProvider router={router} />
 		</QueryClientProvider>,
 	);
-	return router;
+	return { router, queryClient };
 };
 
 describe("ForkWorkflowsPanel", () => {
@@ -55,6 +74,8 @@ describe("ForkWorkflowsPanel", () => {
 			result: undefined,
 			finished_at: undefined,
 		};
+		// The list holds a running run, so the detail fetch loads with
+		// it; the stop does not have to.
 		const getRuns = vi
 			.spyOn(forkWorkflowsApi, "getChatWorkflowRuns")
 			.mockResolvedValue([{ ...MockChatWorkflowRun, status: "running" }]);
@@ -87,6 +108,55 @@ describe("ForkWorkflowsPanel", () => {
 		expect(
 			screen.getByRole("heading", { name: /review changed files/i }),
 		).toHaveFocus();
+	});
+
+	it("announces appended log lines while the run is live", async () => {
+		const chatId = generateUUID();
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockResolvedValue([
+			{ ...MockChatWorkflowRun, status: "running" },
+		]);
+		const runningDetail: WorkflowRunDetail = {
+			...MockChatWorkflowRunDetail,
+			chat_id: chatId,
+			status: "running",
+			logs: [],
+			result: undefined,
+			finished_at: undefined,
+		};
+		const getRun = vi
+			.spyOn(forkWorkflowsApi, "getChatWorkflowRun")
+			.mockResolvedValue(runningDetail);
+		const { queryClient } = renderPanel(chatId);
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: /review changed files/i }),
+		);
+		// A live run with no logs yet still mounts the region, so the
+		// first lines land in a live region that already exists.
+		const logs = await screen.findByRole("log", { name: "Logs" });
+		expect(logs.querySelector("pre")?.textContent ?? "").toBe("");
+		expect(logs).toHaveAttribute("aria-live", "polite");
+		// aria-relevant stays unset on purpose: role="log" defaults to
+		// "additions text", and the appended text node counts as a text
+		// change, which an additions-only value would suppress.
+		expect(logs).not.toHaveAttribute("aria-relevant");
+
+		// The poll appends a line and the same region announces it. The
+		// append must reach the mounted live region, not remount it.
+		getRun.mockResolvedValue({
+			...runningDetail,
+			logs: ["step 1 started"],
+		});
+		await queryClient.refetchQueries({
+			queryKey: chatWorkflowRunKey(chatId, runningDetail.id),
+		});
+		await waitFor(() =>
+			expect(screen.getByRole("log", { name: "Logs" })).toHaveTextContent(
+				"step 1 started",
+			),
+		);
+		expect(screen.getByRole("log", { name: "Logs" })).toBe(logs);
 	});
 
 	it("reports a failed stop and refreshes the runs", async () => {
@@ -129,6 +199,474 @@ describe("ForkWorkflowsPanel", () => {
 		await waitFor(() => expect(getRuns).toHaveBeenCalledTimes(2));
 	});
 
+	it("loads the older page with the last run's cursor", async () => {
+		const chatId = generateUUID();
+		// A full page promises older runs; the cursor page holds one.
+		const firstPage = Array.from({ length: 50 }, (_, index) => ({
+			...MockChatWorkflowRun,
+			id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+			created_at: `2026-11-12T10:00:${String(index).padStart(2, "0")}Z`,
+		}));
+		const getRuns = vi
+			.spyOn(forkWorkflowsApi, "getChatWorkflowRuns")
+			.mockImplementation((_chatId, after) =>
+				Promise.resolve(after ? [MockChatWorkflowRun] : firstPage),
+			);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		const { queryClient } = renderPanel(chatId);
+
+		await screen.findByRole("list", { name: "Workflow runs" });
+		// The cursor page asks for the runs behind the last run of the
+		// first page, as the server's after parameter expects.
+		const last = firstPage[firstPage.length - 1];
+		await userEvent
+			.setup()
+			.click(await screen.findByRole("button", { name: "Load older runs" }));
+		await waitFor(() =>
+			expect(getRuns).toHaveBeenCalledWith(
+				chatId,
+				`${last.created_at}/${last.id}`,
+				expect.anything(),
+				50,
+			),
+		);
+		// The query holds both pages: the first page's params plus the
+		// cursor page behind the last run of that page.
+		await waitFor(() => {
+			const cached = queryClient.getQueryData<
+				InfiniteData<WorkflowRun[], { after: string }>
+			>(chatWorkflowRunsKey(chatId));
+			expect(cached?.pageParams).toEqual([
+				{ after: "" },
+				{ after: `${last.created_at}/${last.id}` },
+			]);
+			expect(cached?.pages).toHaveLength(2);
+		});
+	});
+
+	it("offers no older page after a short page", async () => {
+		const chatId = generateUUID();
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockResolvedValue([
+			MockChatWorkflowRun,
+		]);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		const { queryClient } = renderPanel(chatId);
+
+		await screen.findByRole("list", { name: "Workflow runs" });
+		// The query itself ends the paging: one page's params and no next
+		// cursor, so a later refresh cannot ask for a page the server never
+		// promised.
+		await waitFor(() => {
+			const cached = queryClient.getQueryData<
+				InfiniteData<WorkflowRun[], { after: string }>
+			>(chatWorkflowRunsKey(chatId));
+			expect(cached?.pageParams).toEqual([{ after: "" }]);
+			expect(cached?.pages).toHaveLength(1);
+		});
+		await waitFor(() => {
+			// hasNextPage is false exactly when getNextPageParam returns
+			// undefined for the short page.
+			const observer = new InfiniteQueryObserver(
+				queryClient,
+				chatWorkflowRuns(chatId),
+			);
+			expect(observer.getCurrentResult().hasNextPage).toBe(false);
+		});
+	});
+
+	it("keeps focus moving through the runs when the last page removes the control", async () => {
+		const chatId = generateUUID();
+		const firstPage = Array.from({ length: 50 }, (_, index) => ({
+			...MockChatWorkflowRun,
+			id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+			created_at: `2026-11-12T10:00:${String(index).padStart(2, "0")}Z`,
+		}));
+		// The cursor page is short, so loading it ends the paging and
+		// unmounts "Load older runs" while the user holds focus on it.
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockImplementation(
+			(_chatId, after) =>
+				Promise.resolve(after ? [MockChatWorkflowRun] : firstPage),
+		);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		renderPanel(chatId);
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Load older runs" }),
+		);
+		await screen.findByRole("list", { name: "Workflow runs" });
+		// The focus moved from the unmounted button onto the first run of
+		// the appended page, the one after the last run the user could
+		// see before, so keyboard focus does not drop to the body.
+		await waitFor(() =>
+			expect(
+				within(screen.getAllByRole("listitem")[50]).getByRole("button"),
+			).toHaveFocus(),
+		);
+	});
+
+	it("lands focus on the last run when the final page is empty", async () => {
+		const chatId = generateUUID();
+		const firstPage = Array.from({ length: 50 }, (_, index) => ({
+			...MockChatWorkflowRun,
+			id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+			created_at: `2026-11-12T10:00:${String(index).padStart(2, "0")}Z`,
+		}));
+		// A total that is an exact multiple of the page size gives the last
+		// fetch an empty page with no next cursor, so no new row follows
+		// the one the user was reading.
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockImplementation(
+			(_chatId, after) =>
+				Promise.resolve(
+					after === `${firstPage[49].created_at}/${firstPage[49].id}`
+						? []
+						: after
+							? [MockChatWorkflowRun]
+							: firstPage,
+				),
+		);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		renderPanel(chatId);
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Load older runs" }),
+		);
+		await screen.findByRole("list", { name: "Workflow runs" });
+		// The empty page leaves the previously last run as the last one, so
+		// that row's button takes focus instead of the list.
+		await waitFor(() =>
+			expect(
+				within(screen.getAllByRole("listitem")[49]).getByRole("button", {
+					name: /review changed files/i,
+				}),
+			).toHaveFocus(),
+		);
+	});
+
+	it("keeps focus moving through three pages of runs", async () => {
+		const chatId = generateUUID();
+		const firstPage = Array.from({ length: 50 }, (_, index) => ({
+			...MockChatWorkflowRun,
+			id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+			created_at: `2026-11-12T10:00:${String(index).padStart(2, "0")}Z`,
+		}));
+		const secondPage = Array.from({ length: 50 }, (_, index) => ({
+			...MockChatWorkflowRun,
+			id: `00000001-0000-4000-8000-${String(index).padStart(12, "0")}`,
+			created_at: `2026-11-11T10:00:${String(index).padStart(2, "0")}Z`,
+		}));
+		// The first two pages are full and the third is short, so the
+		// control unmounts only after the second load ends the paging.
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockImplementation(
+			(_chatId, after) =>
+				Promise.resolve(
+					after === `${secondPage[49].created_at}/${secondPage[49].id}`
+						? [MockChatWorkflowRun]
+						: after
+							? secondPage
+							: firstPage,
+				),
+		);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		renderPanel(chatId);
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Load older runs" }),
+		);
+		await user.click(
+			await screen.findByRole("button", { name: "Load older runs" }),
+		);
+		await screen.findByRole("list", { name: "Workflow runs" });
+		await waitFor(() =>
+			expect(
+				within(screen.getAllByRole("listitem")[100]).getByRole("button"),
+			).toHaveFocus(),
+		);
+	});
+
+	it("leaves the restored focus alone through later polls", async () => {
+		const chatId = generateUUID();
+		const firstPage = Array.from({ length: 50 }, (_, index) => ({
+			...MockChatWorkflowRun,
+			id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+			created_at: `2026-11-12T10:00:${String(index).padStart(2, "0")}Z`,
+		}));
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockImplementation(
+			(_chatId, after) =>
+				Promise.resolve(after ? [MockChatWorkflowRun] : firstPage),
+		);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		const { queryClient } = renderPanel(chatId);
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Load older runs" }),
+		);
+		await waitFor(() =>
+			expect(
+				within(screen.getAllByRole("listitem")[50]).getByRole("button"),
+			).toHaveFocus(),
+		);
+		const restored = within(screen.getAllByRole("listitem")[50]).getByRole(
+			"button",
+		);
+		expect(restored).toHaveFocus();
+
+		// The user moves focus to an earlier run, then the list polls; the
+		// restore must not pull focus back onto the restored run. Focus
+		// moves without a click, because a click would open that run.
+		const earlier = within(screen.getAllByRole("listitem")[0]).getByRole(
+			"button",
+		);
+		earlier.focus();
+		expect(earlier).toHaveFocus();
+		await queryClient.refetchQueries({
+			queryKey: chatWorkflowRunsKey(chatId),
+		});
+		await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+		expect(
+			within(screen.getAllByRole("listitem")[0]).getByRole("button"),
+		).toHaveFocus();
+	});
+
+	it("leaves focus alone when the user moved it off the removed control", async () => {
+		const chatId = generateUUID();
+		const firstPage = Array.from({ length: 50 }, (_, index) => ({
+			...MockChatWorkflowRun,
+			id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+			created_at: `2026-11-12T10:00:${String(index).padStart(2, "0")}Z`,
+		}));
+		// The cursor page is held open, so the click starts the request
+		// and focus can move before the short page ends the paging and
+		// unmounts "Load older runs". Every held fetch waits in one set
+		// and the release also answers cursor fetches that start later,
+		// so a second held fetch, such as one a background poll starts,
+		// cannot hold the paging open past the release.
+		let releasedCursor = false;
+		const cursorWaiters = new Set<() => void>();
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockImplementation(
+			(_chatId, after) => {
+				if (!after) {
+					return Promise.resolve(firstPage);
+				}
+				if (releasedCursor) {
+					return Promise.resolve([MockChatWorkflowRun]);
+				}
+				return new Promise<WorkflowRun[]>((resolve) => {
+					cursorWaiters.add(() => resolve([MockChatWorkflowRun]));
+				});
+			},
+		);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		const { queryClient } = renderPanel(chatId);
+		const user = userEvent.setup();
+		const getRuns = vi.mocked(forkWorkflowsApi.getChatWorkflowRuns);
+
+		const control = await screen.findByRole("button", {
+			name: "Load older runs",
+		});
+		await user.click(control);
+		await waitFor(() => expect(getRuns).toHaveBeenCalledTimes(2));
+		// While the cursor page is pending, the user moves focus off the
+		// control, and jsdom drops it to the body.
+		await user.click(document.body);
+		expect(control).not.toHaveFocus();
+
+		// Release every held cursor fetch; any later one answers at once.
+		releasedCursor = true;
+		for (const resolve of cursorWaiters) {
+			resolve();
+		}
+		cursorWaiters.clear();
+		// The cursor page is short, so the control unmounts once the page
+		// lands in the cache. Waiting on the cache state and a quiet cache
+		// keeps the assertions deterministic: the observer holds both
+		// pages before they run, however the commit is scheduled under
+		// CI load.
+		await waitFor(() =>
+			expect(queryClient.getQueryData(chatWorkflowRunsKey(chatId))).toEqual({
+				pages: [firstPage, [MockChatWorkflowRun]],
+				pageParams: [{ after: "" }, expect.anything()],
+			}),
+		);
+		await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+		expect(
+			screen.queryByRole("button", { name: "Load older runs" }),
+		).toBeNull();
+		// The list must not pull focus back: the user left it on the body
+		// on purpose, and the body is where a removed focused element
+		// naturally lands.
+		expect(
+			screen.getByRole("list", { name: "Workflow runs" }),
+		).not.toHaveFocus();
+		expect(document.body).toHaveFocus();
+	});
+
+	it("keeps the older-runs control focused while a fetch is in flight", async () => {
+		const chatId = generateUUID();
+		// The test client's refetchInterval would wait out the real tick, so
+		// the test drives both fetches itself and holds each one open.
+		focusManager.setFocused(false);
+		try {
+			// Full pages keep an older page promised, so the control stays
+			// mounted through both fetches.
+			const firstPage = Array.from({ length: 50 }, (_, index) => ({
+				...MockChatWorkflowRun,
+				id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+				created_at: `2026-11-12T10:00:${String(index).padStart(2, "0")}Z`,
+			}));
+			const olderPage = Array.from({ length: 50 }, (_, index) => ({
+				...MockChatWorkflowRun,
+				id: `00000001-0000-4000-8000-${String(index).padStart(12, "0")}`,
+				created_at: `2026-11-11T10:00:${String(index).padStart(2, "0")}Z`,
+			}));
+			// The fetch in flight holds this resolver until the test lets it
+			// finish, so the control's states can be asserted mid-fetch.
+			const held: { resolve: (() => void) | null } = { resolve: null };
+			const hold = (value: WorkflowRun[]) =>
+				new Promise<WorkflowRun[]>((resolve) => {
+					held.resolve = () => resolve(value);
+				});
+			let phase: "next-page" | "tick" | "settled" = "next-page";
+			vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockImplementation(
+				(_chatId, after) => {
+					if (phase === "next-page") {
+						return after ? hold(olderPage) : Promise.resolve(firstPage);
+					}
+					if (phase === "tick") {
+						// A tick reuses the finished older page from the cache,
+						// so holding the first page holds the whole tick.
+						return after ? Promise.resolve(olderPage) : hold(firstPage);
+					}
+					return Promise.resolve(after ? olderPage : firstPage);
+				},
+			);
+			vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+				MockChatWorkflowRunDetail,
+			);
+			const { queryClient } = renderPanel(chatId);
+			const user = userEvent.setup();
+			const getRuns = vi.mocked(forkWorkflowsApi.getChatWorkflowRuns);
+			const releaseHeld = () => {
+				const release = held.resolve;
+				phase = "settled";
+				if (release) {
+					release();
+				}
+			};
+
+			let control = await screen.findByRole("button", {
+				name: "Load older runs",
+			});
+			await user.click(control);
+
+			// A next-page fetch is in flight. The control must stay
+			// operable, keep focus and refuse a second load while it runs.
+			await waitFor(() => expect(getRuns).toHaveBeenCalledTimes(2));
+			expect(control).not.toBeDisabled();
+			expect(control).toHaveAccessibleName("Load older runs");
+			control.focus();
+			expect(control).toHaveFocus();
+			await user.click(control);
+			expect(getRuns).toHaveBeenCalledTimes(2);
+			releaseHeld();
+			// The fetch's answer lands in the cache before the tick starts.
+			await waitFor(() =>
+				expect(queryClient.getQueryData(chatWorkflowRunsKey(chatId))).toEqual({
+					pages: [firstPage, olderPage],
+					pageParams: [{ after: "" }, expect.anything()],
+				}),
+			);
+
+			// A background tick is in flight: the same story.
+			control = screen.getByRole("button", { name: "Load older runs" });
+			// Move focus away first, so re-focusing the control is not a
+			// no-op on an element that already holds focus: a disabled
+			// control would then fail to take focus back.
+			const runList = screen.getByRole("list", { name: "Workflow runs" });
+			runList.focus();
+			expect(runList).toHaveFocus();
+			phase = "tick";
+			queryClient.refetchQueries({ queryKey: chatWorkflowRunsKey(chatId) });
+			await waitFor(() => expect(getRuns).toHaveBeenCalledTimes(3));
+			expect(control).not.toBeDisabled();
+			expect(control).toHaveAccessibleName("Load older runs");
+			control.focus();
+			expect(control).toHaveFocus();
+			await user.click(control);
+			expect(getRuns).toHaveBeenCalledTimes(3);
+			releaseHeld();
+			// The tick is over only when its last request has settled.
+			await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+		} finally {
+			focusManager.setFocused(true);
+		}
+	});
+
+	it("shows a large integer in Arguments exactly as the server sent it", async () => {
+		const chatId = generateUUID();
+		// Earlier tests in this file spy getChatWorkflowRun, and
+		// clearAllMocks keeps their implementations, so restore the real
+		// function: the detail must come from the wire below.
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockImplementation(
+			realGetChatWorkflowRun,
+		);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockResolvedValue([
+			MockChatWorkflowRun,
+		]);
+		// The detail comes from the wire, so the response text must carry
+		// the exact digits: the axios default parse would round
+		// 9007199254740993 to ...992 before the formatter saw it. This
+		// pins the lossless path end to end, from the response text
+		// through the reviver axios uses to the rendered block.
+		vi.spyOn(API.experimental, "getChat").mockResolvedValue({
+			...MockChat,
+			id: chatId,
+		} as never);
+		server.use(
+			http.get("**/chats/fork/:chatId/workflow-runs/:runId", () => {
+				// The digits are spliced into the response bytes, so the
+				// test exercises the JSON.parse reviver axios calls, not a
+				// fixture that already holds the wrapped value.
+				const body = JSON.stringify({
+					...MockChatWorkflowRunDetail,
+					chat_id: chatId,
+					args: null,
+				}).replace('"args":null', '"args":{"count":9007199254740993}');
+				return new HttpResponse(body, {
+					headers: { "content-type": "application/json" },
+				});
+			}),
+		);
+		renderPanel(chatId);
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: /review changed files/i }),
+		);
+		const argumentsBlock = await screen.findByRole("region", {
+			name: "Arguments",
+		});
+		expect(argumentsBlock).toHaveTextContent("9007199254740993");
+		expect(argumentsBlock).not.toHaveTextContent("9007199254740992");
+	});
+
 	it("opens a run, then a step's child chat, and back again", async () => {
 		const chatId = generateUUID();
 		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockResolvedValue([
@@ -137,7 +675,7 @@ describe("ForkWorkflowsPanel", () => {
 		const getRun = vi
 			.spyOn(forkWorkflowsApi, "getChatWorkflowRun")
 			.mockResolvedValue(MockChatWorkflowRunDetail);
-		const router = renderPanel(chatId);
+		const { router } = renderPanel(chatId);
 		const user = userEvent.setup();
 
 		await user.click(

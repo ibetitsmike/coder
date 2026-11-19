@@ -6,7 +6,10 @@
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
-import { MockChatWorkflowRunDetail } from "#/testHelpers/forkWorkflows";
+import {
+	MockChatWorkflowRunDetail,
+	MockForkWorkflowStepValue,
+} from "#/testHelpers/forkWorkflows";
 import { render } from "#/testHelpers/renderHelpers";
 import { ForkWorkflowSteps } from "./ForkWorkflowSteps";
 import type { ForkWorkflowStep } from "./forkWorkflows";
@@ -32,6 +35,7 @@ const renderSteps = (stepInputs: readonly StepInput[]) => {
 			status: step.status,
 			reused: step.reused === true,
 			error: step.error ?? "",
+			value: step.status === "reported" ? MockForkWorkflowStepValue : undefined,
 			ordinal,
 			phase: step.phase,
 			started_at: "2026-11-12T10:00:05Z",
@@ -45,6 +49,7 @@ const renderSteps = (stepInputs: readonly StepInput[]) => {
 		reused: step.reused === true,
 		error: step.error ?? "",
 		phase: step.phase,
+		value: run.steps.find((runStep) => runStep.id === step.id)?.value,
 	}));
 	render(
 		<ForkWorkflowSteps
@@ -149,5 +154,28 @@ describe("ForkWorkflowSteps", () => {
 		const [prePhaseStep, buildStep] = stepList.getAllByRole("listitem");
 		expect(prePhaseStep).toHaveAccessibleDescription("");
 		expect(buildStep).toHaveAccessibleDescription("build");
+	});
+
+	it("names each reported value by the step's position in the list", () => {
+		renderSteps([
+			{
+				chatId: "aa111111-1111-4111-8111-111111111111",
+				title: "Review the file",
+				status: "reported",
+				phase: "plan",
+			},
+			{
+				chatId: "bb222222-2222-4222-8222-222222222222",
+				title: "Review the file",
+				status: "reported",
+				phase: "build",
+			},
+		]);
+
+		// Two steps can share a title, so the region names carry the
+		// position each value sits at, and they are never identical.
+		const values = screen.getAllByRole("region", { name: /value$/ });
+		expect(values[0]).toHaveAccessibleName("Step 1: Review the file value");
+		expect(values[1]).toHaveAccessibleName("Step 2: Review the file value");
 	});
 });
