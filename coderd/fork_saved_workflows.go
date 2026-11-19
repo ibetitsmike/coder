@@ -22,6 +22,7 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/httpapi"
 	"github.com/coder/coder/v2/coderd/httpmw"
@@ -164,13 +165,20 @@ func (api *API) forkUserSavedWorkflow(rw http.ResponseWriter, r *http.Request) {
 // @Param organization path string true "Organization ID or name"
 // @Param user path string true "User ID, username, or me"
 // @Param workflow path string true "Workflow name"
+// @Param expect_id query string false "Expected workflow ID, as a UUID" format(uuid)
 // @Param request body codersdk.UpdateForkSavedWorkflowRequest true "Request body"
+// @Failure 400 {object} codersdk.Response
+// @Failure 409 {object} codersdk.Response
 // @Success 200 {object} codersdk.ForkSavedWorkflow
 // @Router /api/v2/chats/fork/organizations/{organization}/members/{user}/workflows/{workflow} [patch]
 // @x-apidocgen {"skip": true}
 func (api *API) patchForkUserSavedWorkflow(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	member := httpmw.OrganizationMemberParam(r)
+	expectID, ok := readForkSavedWorkflowExpectID(rw, r)
+	if !ok {
+		return
+	}
 	update, ok := readForkSavedWorkflowUpdate(ctx, rw, r)
 	if !ok {
 		return
@@ -181,9 +189,16 @@ func (api *API) patchForkUserSavedWorkflow(rw http.ResponseWriter, r *http.Reque
 	}
 	update.OrganizationID = member.OrganizationID
 	update.UserID = member.UserID
+	update.ExpectID = expectID
 	row, err := fdb.UpdateUserSavedWorkflowByName(ctx, update)
-	if err != nil {
-		writeForkSavedWorkflowWriteError(ctx, rw, err)
+	if !okAfterConditionalWrite(ctx, rw, err, expectID, false, func(ctx context.Context) (uuid.UUID, error) {
+		row, err := fdb.GetUserSavedWorkflowByName(ctx, forkdb.GetUserSavedWorkflowByNameParams{
+			OrganizationID: update.OrganizationID,
+			UserID:         update.UserID,
+			Name:           update.Name,
+		})
+		return row.ID, err
+	}) {
 		return
 	}
 	httpapi.Write(ctx, rw, http.StatusOK, convertForkSavedWorkflow(row))
@@ -196,6 +211,9 @@ func (api *API) patchForkUserSavedWorkflow(rw http.ResponseWriter, r *http.Reque
 // @Param organization path string true "Organization ID or name"
 // @Param user path string true "User ID, username, or me"
 // @Param workflow path string true "Workflow name"
+// @Param expect_id query string false "Expected workflow ID, as a UUID" format(uuid)
+// @Failure 400 {object} codersdk.Response
+// @Failure 409 {object} codersdk.Response
 // @Success 204
 // @Router /api/v2/chats/fork/organizations/{organization}/members/{user}/workflows/{workflow} [delete]
 // @x-apidocgen {"skip": true}
@@ -203,6 +221,10 @@ func (api *API) deleteForkUserSavedWorkflow(rw http.ResponseWriter, r *http.Requ
 	ctx := r.Context()
 	member := httpmw.OrganizationMemberParam(r)
 	name, ok := forkSavedWorkflowPathName(rw, r)
+	if !ok {
+		return
+	}
+	expectID, ok := readForkSavedWorkflowExpectID(rw, r)
 	if !ok {
 		return
 	}
@@ -214,12 +236,101 @@ func (api *API) deleteForkUserSavedWorkflow(rw http.ResponseWriter, r *http.Requ
 		OrganizationID: member.OrganizationID,
 		UserID:         member.UserID,
 		Name:           name,
+		ExpectID:       expectID,
 	})
-	if err != nil {
-		writeForkSavedWorkflowWriteError(ctx, rw, err)
+	if !okAfterConditionalWrite(ctx, rw, err, expectID, false, func(ctx context.Context) (uuid.UUID, error) {
+		row, err := fdb.GetUserSavedWorkflowByName(ctx, forkdb.GetUserSavedWorkflowByNameParams{
+			OrganizationID: member.OrganizationID,
+			UserID:         member.UserID,
+			Name:           name,
+		})
+		return row.ID, err
+	}) {
 		return
 	}
 	rw.WriteHeader(http.StatusNoContent)
+}
+
+// readForkSavedWorkflowExpectID reads the optional expect_id query
+// parameter. Absent means no check. An explicit but invalid value, including
+// an empty one, is a bad request, so a client can never silently drop its
+// concurrency guard.
+func readForkSavedWorkflowExpectID(rw http.ResponseWriter, r *http.Request) (uuid.NullUUID, bool) {
+	raw, ok := r.URL.Query()["expect_id"]
+	if !ok || len(raw) == 0 {
+		return uuid.NullUUID{}, true
+	}
+	id, err := uuid.Parse(raw[0])
+	if err != nil {
+		httpapi.Write(r.Context(), rw, http.StatusBadRequest, codersdk.Response{
+			Message: "Invalid expect_id.",
+			Detail:  "expect_id must be a UUID.",
+		})
+		return uuid.NullUUID{}, false
+	}
+	return uuid.NullUUID{UUID: id, Valid: true}, true
+}
+
+// okAfterConditionalWrite turns the result of a conditional write into a
+// response. Without an expect_id it reports the write error as usual. With
+// one, sql.ErrNoRows can mean either a missing workflow (404) or a stored id
+// that differs from the expected one (409), and one read as the system tells
+// the two apart, so a delete-only caller still learns of a conflict.
+//
+// A denial probes with the caller's authorization instead, so a caller who
+// cannot read a hidden workflow keeps getting 404, never a conflict or its
+// stored id. Denials probe only when probeDenial is set or the write was
+// conditional. The organization tier always probes, because its delete of a
+// hidden workflow answered 404 before expect_id existed; the user tier keeps
+// the plain write response unless the caller asked for the check.
+//
+//nolint:revive // probeDenial encodes a real tier difference, not a mode switch.
+func okAfterConditionalWrite(ctx context.Context, rw http.ResponseWriter, err error, expectID uuid.NullUUID, probeDenial bool, currentID func(ctx context.Context) (uuid.UUID, error)) bool {
+	if err == nil {
+		return true
+	}
+	if httpapi.IsUnauthorizedError(err) && (probeDenial || expectID.Valid) {
+		_, readErr := currentID(ctx)
+		if readErr == nil {
+			// The workflow exists and the caller may read it, so its
+			// denial was about the write: 403.
+			writeForkSavedWorkflowWriteError(ctx, rw, err)
+			return false
+		}
+		if httpapi.Is404Error(readErr) {
+			// The caller cannot read the workflow either, so it learns
+			// nothing beyond a missing resource: 404.
+			httpapi.ResourceNotFound(rw)
+			return false
+		}
+		// The probe itself failed, which says nothing about the workflow.
+		httpapi.InternalServerError(rw, readErr)
+		return false
+	}
+	if expectID.Valid && xerrors.Is(err, sql.ErrNoRows) {
+		// The write already authorized this caller, so the conflict check
+		// reads as the system and a delete-only caller still learns of a
+		// mismatch instead of a missing workflow.
+		//nolint:gocritic // Authorized by the conditional write above.
+		id, readErr := currentID(dbauthz.AsSystemRestricted(ctx))
+		switch {
+		case readErr == nil && id != expectID.UUID:
+			httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{
+				Message: "The stored workflow does not match the expected id.",
+				Detail:  "Read the workflow again and retry with its current id.",
+			})
+			return false
+		case httpapi.Is404Error(readErr):
+			// The row is gone after all, which the caller may not have been
+			// able to see: the write error below answers 404.
+		default:
+			// The probe itself failed, which says nothing about the workflow.
+			httpapi.InternalServerError(rw, readErr)
+			return false
+		}
+	}
+	writeForkSavedWorkflowWriteError(ctx, rw, err)
+	return false
 }
 
 // forkSavedWorkflowPathName reads the workflow path parameter. A name that

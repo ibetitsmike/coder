@@ -1551,7 +1551,10 @@ func (f *forkQuerier) UpdateOrganizationSavedWorkflowACLByName(ctx context.Conte
 
 func (f *forkQuerier) DeleteOrganizationSavedWorkflowByName(ctx context.Context, arg forkdb.DeleteOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
 	fetch := func(ctx context.Context, arg forkdb.DeleteOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
-		return f.db.GetOrganizationSavedWorkflowByName(ctx, forkdb.GetOrganizationSavedWorkflowByNameParams(arg))
+		return f.db.GetOrganizationSavedWorkflowByName(ctx, forkdb.GetOrganizationSavedWorkflowByNameParams{
+			OrganizationID: arg.OrganizationID,
+			Name:           arg.Name,
+		})
 	}
 	return fetchAndQuery(f.q.log, f.q.auth, policy.ActionDelete, fetch, f.db.DeleteOrganizationSavedWorkflowByName)(ctx, arg)
 }

@@ -7021,6 +7021,19 @@ export interface ForkSavedWorkflowMetadata {
 	readonly updated_at: string;
 }
 
+// From codersdk/fork_saved_workflows.go
+/**
+ * ForkSavedWorkflowWriteParams holds the optional conditions of a saved
+ * workflow update or delete.
+ */
+export interface ForkSavedWorkflowWriteParams {
+	/**
+	 * ExpectID rejects the write with 409 Conflict when the stored workflow
+	 * has another ID. Nil leaves the write unconditional.
+	 */
+	readonly expect_id?: string;
+}
+
 // From codersdk/fork_subagent_limits.go
 /**
  * ForkSubagentLimitValues are subagent limits in force. A capacity limit of

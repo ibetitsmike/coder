@@ -440,6 +440,8 @@ type Querier interface {
 	UpdateOrganizationAgentDefinitionACLByName(ctx context.Context, arg UpdateOrganizationAgentDefinitionACLByNameParams) (AgentDefinition, error)
 	UpdateOrganizationAgentDefinitionByName(ctx context.Context, arg UpdateOrganizationAgentDefinitionByNameParams) (AgentDefinition, error)
 	UpdateOrganizationSavedWorkflowACLByName(ctx context.Context, arg UpdateOrganizationSavedWorkflowACLByNameParams) (SavedWorkflow, error)
+	// Set ExpectID to write only when the stored row still has that id, like
+	// the user write.
 	UpdateOrganizationSavedWorkflowByName(ctx context.Context, arg UpdateOrganizationSavedWorkflowByNameParams) (SavedWorkflow, error)
 	UpdatePluginChatBindingDelivered(ctx context.Context, arg UpdatePluginChatBindingDeliveredParams) error
 	UpdatePluginChatBindingFailed(ctx context.Context, arg UpdatePluginChatBindingFailedParams) error
@@ -449,6 +451,10 @@ type Querier interface {
 	UpdatePluginPackCommit(ctx context.Context, arg UpdatePluginPackCommitParams) (PluginPack, error)
 	UpdateProjectAgentDefinitionByName(ctx context.Context, arg UpdateProjectAgentDefinitionByNameParams) (AgentDefinition, error)
 	UpdateUserAgentDefinitionByName(ctx context.Context, arg UpdateUserAgentDefinitionByNameParams) (AgentDefinition, error)
+	// Set ExpectID to write only when the stored row still has that id. NULL
+	// writes unconditionally. The check runs in SQL, so the caller's
+	// authorization happens before any id comparison and no read leaks a row
+	// the caller cannot see.
 	UpdateUserSavedWorkflowByName(ctx context.Context, arg UpdateUserSavedWorkflowByNameParams) (SavedWorkflow, error)
 	// phase() journals the phase state of a live run as it changes: the display
 	// list and the current name. The write does not touch status, error or

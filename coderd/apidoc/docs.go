@@ -5780,11 +5780,30 @@ const docTemplate = `{
                         "name": "workflow",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Expected workflow ID, as a UUID",
+                        "name": "expect_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "204": {
                         "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
                     }
                 },
                 "security": [
@@ -5831,6 +5850,13 @@ const docTemplate = `{
                         "required": true
                     },
                     {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Expected workflow ID, as a UUID",
+                        "name": "expect_id",
+                        "in": "query"
+                    },
+                    {
                         "description": "Request body",
                         "name": "request",
                         "in": "body",
@@ -5845,6 +5871,18 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/codersdk.ForkSavedWorkflow"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
                         }
                     }
                 },
@@ -6959,11 +6997,30 @@ const docTemplate = `{
                         "name": "workflow",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Expected workflow ID, as a UUID",
+                        "name": "expect_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "204": {
                         "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
                     }
                 },
                 "security": [
@@ -7003,6 +7060,13 @@ const docTemplate = `{
                         "required": true
                     },
                     {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Expected workflow ID, as a UUID",
+                        "name": "expect_id",
+                        "in": "query"
+                    },
+                    {
                         "description": "Request body",
                         "name": "request",
                         "in": "body",
@@ -7017,6 +7081,18 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/codersdk.ForkSavedWorkflow"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
                         }
                     }
                 },
@@ -26066,20 +26142,20 @@ const docTemplate = `{
         "codersdk.ChatContextResourceKind": {
             "type": "string",
             "enum": [
+                "subagent",
                 "instruction_file",
                 "skill",
                 "mcp_config",
                 "mcp_server",
-                "acp_harness",
-                "subagent"
+                "acp_harness"
             ],
             "x-enum-varnames": [
+                "ChatContextResourceKindSubagent",
                 "ChatContextResourceKindInstructionFile",
                 "ChatContextResourceKindSkill",
                 "ChatContextResourceKindMCPConfig",
                 "ChatContextResourceKindMCPServer",
-                "ChatContextResourceKindACPHarness",
-                "ChatContextResourceKindSubagent"
+                "ChatContextResourceKindACPHarness"
             ]
         },
         "codersdk.ChatContextResourceStatus": {
@@ -28467,7 +28543,6 @@ const docTemplate = `{
         "codersdk.ChatWatchEventKind": {
             "type": "string",
             "enum": [
-                "fork_change",
                 "status_change",
                 "summary_change",
                 "chat_summary_change",
@@ -28477,10 +28552,10 @@ const docTemplate = `{
                 "diff_status_change",
                 "action_required",
                 "context_dirty",
-                "project_change"
+                "project_change",
+                "fork_change"
             ],
             "x-enum-varnames": [
-                "ChatWatchEventKindForkChange",
                 "ChatWatchEventKindStatusChange",
                 "ChatWatchEventKindSummaryChange",
                 "ChatWatchEventKindChatSummaryChange",
@@ -28490,7 +28565,8 @@ const docTemplate = `{
                 "ChatWatchEventKindDiffStatusChange",
                 "ChatWatchEventKindActionRequired",
                 "ChatWatchEventKindContextDirty",
-                "ChatWatchEventKindProjectChange"
+                "ChatWatchEventKindProjectChange",
+                "ChatWatchEventKindForkChange"
             ]
         },
         "codersdk.ChatWatchForkChange": {
