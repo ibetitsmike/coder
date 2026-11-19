@@ -140,7 +140,14 @@ export const createSavedWorkflow = (queryClient: QueryClient) =>
 		// The created row is added until the refetch settles: a list
 		// without the name may predate the commit or follow a delete, and
 		// only the refetch can tell. The rows keep the API's order by name.
-		onSuccess: ({ script: _script, ...created }, { scope }) => {
+		onSuccess: (workflow, { scope }) => {
+			// A detail cached under the name may hold an older workflow of that
+			// name, so the full response replaces it unless it is newer.
+			queryClient.setQueryData<ForkSavedWorkflow>(
+				savedWorkflowKey(scope, workflow.name),
+				(cached) => (cached && isNewer(cached, workflow) ? cached : workflow),
+			);
+			const { script: _script, ...created } = workflow;
 			queryClient.setQueryData(savedWorkflows(scope).queryKey, (workflows) => {
 				const listed = workflows?.find(
 					(workflow) =>

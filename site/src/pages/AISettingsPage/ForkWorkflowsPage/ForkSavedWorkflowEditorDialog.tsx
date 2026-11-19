@@ -266,6 +266,7 @@ const SavedWorkflowNameField: React.FC<SavedWorkflowNameFieldProps> = ({
 }) => {
 	const nameId = useId();
 	const nameErrorId = useId();
+	const nameHelpId = useId();
 	return (
 		<div className="flex flex-col gap-2">
 			<Label htmlFor={nameId}>Name</Label>
@@ -276,14 +277,14 @@ const SavedWorkflowNameField: React.FC<SavedWorkflowNameFieldProps> = ({
 				placeholder="review-files"
 				disabled={disabled}
 				aria-invalid={Boolean(error)}
-				aria-describedby={error ? nameErrorId : undefined}
+				aria-describedby={error ? nameErrorId : nameHelpId}
 			/>
 			{error ? (
 				<p id={nameErrorId} className="m-0 text-xs text-content-destructive">
 					{error}
 				</p>
 			) : (
-				<p className="m-0 text-xs text-content-secondary">
+				<p id={nameHelpId} className="m-0 text-xs text-content-secondary">
 					Use lowercase letters, numbers, and hyphens. Names cannot be changed
 					after creation.
 				</p>

@@ -72,7 +72,10 @@ const savedWorkflowScriptError = (script: string): string | undefined => {
 	if (script.trim() === "" || !/^def\s+main\s*\(/m.test(script)) {
 		return "Script must define main(args), as a run_workflow script does.";
 	}
-	if (getSkillContentSizeBytes(script) > SAVED_WORKFLOW_MAX_SCRIPT_BYTES) {
+	// The request sends the script without trailing whitespace.
+	if (
+		getSkillContentSizeBytes(script.trimEnd()) > SAVED_WORKFLOW_MAX_SCRIPT_BYTES
+	) {
 		return `Script must be ${SAVED_WORKFLOW_MAX_SCRIPT_BYTES} bytes or smaller.`;
 	}
 	return undefined;
@@ -135,7 +138,8 @@ export const savedWorkflowFormErrors = (
 		errors.name = `Use lowercase letters, numbers, and hyphens, at most ${SAVED_WORKFLOW_MAX_NAME_BYTES} bytes.`;
 	}
 	if (
-		getSkillContentSizeBytes(values.description) >
+		// The request sends the trimmed description.
+		getSkillContentSizeBytes(values.description.trim()) >
 		SAVED_WORKFLOW_MAX_DESCRIPTION_BYTES
 	) {
 		errors.description = `Description must be ${SAVED_WORKFLOW_MAX_DESCRIPTION_BYTES} bytes or smaller.`;

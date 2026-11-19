@@ -217,6 +217,9 @@ it("creates a workflow from the editor form", async () => {
 		within(dialog).getByLabelText("Name"),
 		MockForkSavedWorkflowMetadata.name,
 	);
+	expect(within(dialog).getByLabelText("Name")).toHaveAccessibleDescription(
+		/cannot be changed after creation/,
+	);
 	await user.type(within(dialog).getByLabelText("Script"), typedScript);
 	await user.click(
 		within(dialog).getByRole("button", { name: "Create workflow" }),
@@ -495,7 +498,7 @@ it("deletes nothing when the name now holds another workflow", async () => {
 	await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 
-it("disables New workflow at the limit and says why", async () => {
+it("creates nothing from New workflow at the limit", async () => {
 	const user = userEvent.setup();
 	const workflows: ForkSavedWorkflowMetadata[] = Array.from(
 		{ length: 100 },
@@ -516,16 +519,11 @@ it("disables New workflow at the limit and says why", async () => {
 	renderPage(`?org=${MockOrganization2.name}`);
 
 	await screen.findByRole("button", { name: "workflow-99" });
-	const disabled = screen
-		.getAllByRole("button", { name: "New workflow" })
-		.filter((button) => button.getAttribute("aria-disabled") === "true");
-	expect(disabled).toHaveLength(1);
-
-	await user.hover(disabled[0]);
-	expect(await screen.findByRole("tooltip")).toHaveTextContent(
-		/100 workflows, the limit/,
-	);
-	await user.click(disabled[0]);
+	// The personal tier comes first, and it holds the 100 workflows.
+	const [personalNewWorkflow] = screen.getAllByRole("button", {
+		name: "New workflow",
+	});
+	await user.click(personalNewWorkflow);
 	expect(screen.queryByRole("dialog")).toBeNull();
 	expect(create).not.toHaveBeenCalled();
 });

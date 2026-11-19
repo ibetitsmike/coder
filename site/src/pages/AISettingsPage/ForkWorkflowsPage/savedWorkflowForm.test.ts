@@ -29,6 +29,23 @@ describe("savedWorkflowFormErrors", () => {
 		).toBeDefined();
 	});
 
+	it("measures the description and script as the request sends them", () => {
+		const description = "d".repeat(4096);
+		expect(
+			savedWorkflowFormErrors({
+				...validValues,
+				description: `${description}\n`,
+				script: `${MockForkWorkflowScript}${" ".repeat(65536)}`,
+			}),
+		).toEqual({});
+		expect(
+			savedWorkflowFormErrors({
+				...validValues,
+				description: `${description}d`,
+			}).description,
+		).toBeDefined();
+	});
+
 	it("rejects a script without main(args)", () => {
 		expect(
 			savedWorkflowFormErrors({ ...validValues, script: "log('hi')" }).script,

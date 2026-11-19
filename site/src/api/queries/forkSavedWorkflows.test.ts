@@ -124,6 +124,32 @@ describe("createSavedWorkflow", () => {
 		expect(queryClient.getQueryData(savedWorkflowsKey(scope))).toEqual([]);
 	});
 
+	it("replaces an older same-name workflow in the detail cache", async () => {
+		const queryClient = createQueryClient();
+		const detailKey = savedWorkflowKey(scope, name);
+		const older: ForkSavedWorkflow = {
+			...MockForkSavedWorkflowCreated,
+			id: "deleted-elsewhere",
+			script: "def main(args):\n    pass",
+			updated_at: "2020-01-01T00:00:00Z",
+		};
+		queryClient.setQueryData(savedWorkflowsKey(scope), []);
+		queryClient.setQueryData(detailKey, older);
+		vi.spyOn(
+			forkSavedWorkflowsApi,
+			"createUserSavedWorkflow",
+		).mockResolvedValue(MockForkSavedWorkflowCreated);
+
+		await new MutationObserver(
+			queryClient,
+			createSavedWorkflow(queryClient),
+		).mutate({ scope, req: mockCreateRequest });
+
+		expect(queryClient.getQueryData(detailKey)).toEqual(
+			MockForkSavedWorkflowCreated,
+		);
+	});
+
 	it.each([
 		["a later change", MockForkSavedWorkflowNewer],
 		["a later recreate", MockForkSavedWorkflowRecreated],
