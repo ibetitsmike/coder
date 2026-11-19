@@ -69,14 +69,16 @@ describe("ForkWorkflowLongText", () => {
 		expect(grown).toHaveFocus();
 	});
 
-	it("keeps the scroll viewport for a block that was long from the start", () => {
+	it("keeps the scroll viewport for a block that was long from the start", async () => {
 		render(<ForkWorkflowLongText label="Result" text={longText} />);
 		const result = screen.getByRole("region", { name: "Result" });
 
 		// Expanding this block never grew through a live region, so it
 		// keeps the shared scroll viewport with its border and padding.
 		const user = userEvent.setup();
-		user.click(screen.getByRole("button", { name: "Show more of Result" }));
+		await user.click(
+			screen.getByRole("button", { name: "Show more of Result" }),
+		);
 		expect(result.querySelector("pre")).not.toHaveClass("max-h-96");
 	});
 
