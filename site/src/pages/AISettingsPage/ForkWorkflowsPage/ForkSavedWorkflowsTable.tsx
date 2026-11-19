@@ -25,6 +25,13 @@ import {
 } from "./ForkSavedWorkflowsTableView";
 import { useForkSavedWorkflowEditor } from "./useForkSavedWorkflowEditor";
 
+type ForkSavedWorkflowsTableCopy = {
+	title: string;
+	description: string;
+	emptyMessage: string;
+	deleteMessage: (name: string) => string;
+};
+
 const copy = {
 	user: {
 		title: "Personal workflows",
@@ -42,18 +49,12 @@ const copy = {
 		deleteMessage: (name: string) =>
 			`The organization workflow ${name} will be deleted. Personal workflows with the same name are not affected. This action cannot be undone.`,
 	},
-} satisfies Record<
-	SavedWorkflowScope["tier"],
-	{
-		title: string;
-		description: string;
-		emptyMessage: string;
-		deleteMessage: (name: string) => string;
-	}
->;
+} satisfies Record<SavedWorkflowScope["tier"], ForkSavedWorkflowsTableCopy>;
 
 type ForkSavedWorkflowsTableProps = {
 	scope: SavedWorkflowScope;
+	/** Replaces parts of the tier's default copy. */
+	copy?: Partial<ForkSavedWorkflowsTableCopy>;
 	access?: SkillAccess;
 	onManagePermissions?: (
 		workflow: ForkSavedWorkflowMetadata,
@@ -64,7 +65,8 @@ type ForkSavedWorkflowsTableProps = {
 /** Wires the saved workflows table of one scope to the API. */
 export const ForkSavedWorkflowsTable: React.FC<
 	ForkSavedWorkflowsTableProps
-> = ({ scope, access, onManagePermissions }) => {
+> = ({ scope, copy: copyOverride, access, onManagePermissions }) => {
+	const tierCopy = { ...copy[scope.tier], ...copyOverride };
 	const queryClient = useQueryClient();
 	const [deleteTarget, setDeleteTarget] = useState<{
 		workflow: ForkSavedWorkflowMetadata;
@@ -109,7 +111,7 @@ export const ForkSavedWorkflowsTable: React.FC<
 		const isDeleting = isTarget && deleteMutation.isPending;
 		deleteState = {
 			workflow: activeDeleteTarget,
-			message: copy[scope.tier].deleteMessage(activeDeleteTarget.name),
+			message: tierCopy.deleteMessage(activeDeleteTarget.name),
 			error: isTarget ? deleteMutation.error : undefined,
 			isDeleting,
 			onConfirm: () =>
@@ -148,10 +150,10 @@ export const ForkSavedWorkflowsTable: React.FC<
 
 	return (
 		<ForkSavedWorkflowsTableView
-			title={copy[scope.tier].title}
+			title={tierCopy.title}
 			workflows={workflowsQuery.data ?? []}
-			description={copy[scope.tier].description}
-			emptyMessage={copy[scope.tier].emptyMessage}
+			description={tierCopy.description}
+			emptyMessage={tierCopy.emptyMessage}
 			access={access}
 			error={workflowsQuery.error}
 			isLoading={workflowsQuery.isLoading}
