@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn, spyOn } from "storybook/test";
+import { fn, spyOn, within } from "storybook/test";
 import type { WorkflowRun } from "#/api/typesGenerated";
 import {
 	MockChatWorkflowRun,
@@ -78,8 +78,52 @@ type Story = StoryObj<typeof ForkWorkflowRunList>;
 
 export const Runs: Story = {};
 
+/** The list offers a Load older runs control when more pages exist. */
+export const WithOlderRuns: Story = {
+	args: {
+		hasOlderRuns: true,
+		onLoadOlderRuns: fn(),
+	},
+};
+
+/** The Load older runs control shows a spinner while its page loads. */
+export const LoadingOlderRuns: Story = {
+	args: {
+		hasOlderRuns: true,
+		isLoadingOlderRuns: true,
+		onLoadOlderRuns: fn(),
+	},
+};
+
+/**
+ * A poll tick or a refetch the user did not start holds the control busy:
+ * it signals aria-disabled and ignores clicks, without the page spinner.
+ */
+export const BusyOlderRuns: Story = {
+	args: {
+		hasOlderRuns: true,
+		disabled: true,
+		onLoadOlderRuns: fn(),
+	},
+};
+
 export const Loading: Story = {
 	args: { runs: undefined },
+};
+
+/**
+ * When the last page ends the paging, the unmounting Load older runs
+ * control hands focus to the first run of the appended page, which shows
+ * the focus-visible ring.
+ */
+export const FirstAppendedRunTakesFocus: Story = {
+	args: { hasOlderRuns: false },
+	play: async ({ canvas }) => {
+		const list = canvas.getByRole("list", { name: "Workflow runs" });
+		within(within(list).getAllByRole("listitem")[1])
+			.getByRole("button")
+			.focus();
+	},
 };
 
 export const LoadFailed: Story = {

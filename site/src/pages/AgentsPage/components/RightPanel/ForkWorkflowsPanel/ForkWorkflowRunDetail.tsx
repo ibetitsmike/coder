@@ -175,7 +175,19 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 				</p>
 			)}
 			{run.error !== "" && (
-				<ForkWorkflowLongText label="Error" text={run.error} isError />
+				<ForkWorkflowLongText
+					key="error"
+					label="Error"
+					text={run.error}
+					isError
+				/>
+			)}
+			{run.args !== undefined && (
+				<ForkWorkflowLongText
+					key="arguments"
+					label="Arguments"
+					text={formatForkWorkflowValue(run.args)}
+				/>
 			)}
 			{steps.length > 0 && (
 				<ForkWorkflowSteps
@@ -195,20 +207,30 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 			)}
 			{run.result !== undefined && (
 				<ForkWorkflowLongText
+					key="result"
 					label="Result"
 					text={formatForkWorkflowValue(run.result)}
 				/>
 			)}
-			{isRunning ? (
-				<p className="m-0 mt-1.5 text-xs text-content-secondary">
-					Logs appear when the run ends.
-				</p>
-			) : (
-				run.logs.length > 0 && (
-					<ForkWorkflowLongText label="Logs" text={run.logs.join("\n")} />
-				)
+			{run.logs.length > 0 && (
+				<ForkWorkflowLongText
+					key="logs"
+					label="Logs"
+					text={run.logs.join("\n")}
+					isLive={isRunning}
+				/>
 			)}
-			<ForkWorkflowLongText label="Script" text={run.script} />
+			{run.logs.length === 0 && isRunning && (
+				// The live region mounts empty, so the first lines land in a
+				// region that already exists and screen readers announce them.
+				<ForkWorkflowLongText key="logs" label="Logs" text="" isLive />
+			)}
+			{run.logs.length === 0 && isRunning && (
+				<p className="m-0 mt-1.5 text-xs text-content-secondary">
+					Logs appear as the script prints them.
+				</p>
+			)}
+			<ForkWorkflowLongText key="script" label="Script" text={run.script} />
 		</section>
 	);
 };

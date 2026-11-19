@@ -13,6 +13,7 @@ import {
 	forkWorkflowRunStatusMeta,
 	forkWorkflowStepPhases,
 	forkWorkflowStepProgress,
+	formatForkWorkflowValue,
 	mergeForkWorkflowRunDetail,
 	parseForkWorkflowRunSnapshot,
 } from "./forkWorkflows";
@@ -344,12 +345,18 @@ describe("mergeForkWorkflowRunDetail", () => {
 			steps: MockChatWorkflowRunDetail.steps.map((step) => ({
 				...step,
 				reused: false,
+				// The detail carries the values the panel shows; the merged
+				// card must not.
+				value: step.status === "reported" ? "the report" : undefined,
 			})),
 		};
 
 		const merged = mergeForkWorkflowRunDetail(snapshot, mockRunningDetail);
 		expect(merged.status).toBe("running");
 		expect(merged.logs).toEqual(["checked 2 files"]);
+		// The chat's tool card shows no Value blocks: they belong to the
+		// panel's run detail, and await_workflow results never show them.
+		expect(merged.steps.every((step) => step.value === undefined)).toBe(true);
 		expect(merged.steps.map((step) => step.reused)).toEqual([
 			true,
 			false,
@@ -445,5 +452,12 @@ describe("mergeForkWorkflowRunDetail", () => {
 		});
 		expect(moved.phases).toEqual(["plan", "build", "extra"]);
 		expect(moved.currentPhase).toBe("extra");
+	});
+});
+
+describe("formatForkWorkflowValue", () => {
+	it("shows an empty string as a quoted empty string", () => {
+		expect(formatForkWorkflowValue("")).toBe('""');
+		expect(formatForkWorkflowValue("done")).toBe("done");
 	});
 });
