@@ -82,6 +82,31 @@ describe("ForkWorkflowLongText", () => {
 		expect(result.querySelector("pre")).not.toHaveClass("max-h-96");
 	});
 
+	it("shows a log that is already long when it mounts live in full", () => {
+		render(<ForkWorkflowLongText label="Logs" text={longText} isLive />);
+		expect(screen.getByRole("log", { name: "Logs" })).toHaveTextContent(
+			"line 12",
+		);
+	});
+
+	it("keeps an expanded scroller mounted when its long log turns live", async () => {
+		const user = userEvent.setup();
+		const { rerender } = render(
+			<ForkWorkflowLongText label="Logs" text={longText} />,
+		);
+		await user.click(screen.getByRole("button", { name: "Show more of Logs" }));
+		const scroller = screen.getByRole("region", { name: "Full logs" });
+		scroller.focus();
+
+		// A resume turns the interrupted run's long log live again. It never
+		// crossed the threshold while live, so it keeps the same scroller.
+		rerender(
+			<ForkWorkflowLongText label="Logs" text={`${longText}\nmore`} isLive />,
+		);
+		expect(screen.getByRole("region", { name: "Full logs" })).toBe(scroller);
+		expect(scroller).toHaveFocus();
+	});
+
 	it("names each toggle by its block so two blocks stay apart", async () => {
 		const user = userEvent.setup();
 		render(

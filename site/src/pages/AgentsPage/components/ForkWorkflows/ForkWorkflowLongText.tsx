@@ -45,31 +45,35 @@ export const ForkWorkflowLongText: React.FC<ForkWorkflowLongTextProps> = ({
 }) => {
 	// Once the text shows in full, it stays in full: polling can grow
 	// it past the threshold, and collapsing it under the user would
-	// hide what they were reading.
-	const [expanded, setExpanded] = useState(() => textPreview(text) === null);
-	// Whether the block grew past the threshold while it was live. Such a
-	// block keeps the plain pre it announced through, even after the run
-	// finishes: swapping it for a scroll area would drop keyboard focus,
-	// reset the scroll position, and have role="log" re-announce the
-	// added subtree. A block that was long from the start has no such
-	// history and keeps the shared scroll viewport.
-	const [grewLive, setGrewLive] = useState(false);
+	// hide what they were reading. A live block starts in full too, since
+	// it has no Show more while it grows.
+	const [expanded, setExpanded] = useState(
+		() => isLive || textPreview(text) === null,
+	);
+	// Whether the block was live before it was long. Such a block keeps
+	// the plain pre it announced through once it grows long, even after
+	// the run finishes: swapping it for a scroll area would drop keyboard
+	// focus, reset the scroll position, and have role="log" re-announce
+	// the added subtree. A block that was long before it turned live, such
+	// as a resumed run's log, has no such history and keeps the shared
+	// scroll viewport it already shows.
+	const [liveBeforeLong, setLiveBeforeLong] = useState(isLive);
 	const preview = textPreview(text);
-	// The flag is set during render, not in an effect, so the render that
-	// first sees the long text already selects the stable plain pre: an
-	// effect would let that render swap the announced pre for a scroll area
-	// and then swap it back one commit later, which makes role="log"
-	// re-announce the whole history. Guarding on the state value keeps
-	// this a one-time adjustment, as React's render-time set-state rules
-	// require.
-	if (isLive && preview !== null && !grewLive) {
-		setGrewLive(true);
+	// The flag is set during render while the text is still short, not in
+	// an effect, so the render that first sees the long text already
+	// selects the stable plain pre: an effect would let that render swap
+	// the announced pre for a scroll area and then swap it back one commit
+	// later, which makes role="log" re-announce the whole history. Guarding
+	// on the state value keeps this a one-time adjustment, as React's
+	// render-time set-state rules require.
+	if (isLive && preview === null && !liveBeforeLong) {
+		setLiveBeforeLong(true);
 	}
 	const textClassName = cn(
 		"m-0 whitespace-pre-wrap wrap-break-word bg-transparent font-mono text-xs leading-5",
 		isError ? "text-content-destructive" : "text-content-primary",
 	);
-	const isLiveExpanded = expanded && preview !== null && grewLive;
+	const isLiveExpanded = expanded && preview !== null && liveBeforeLong;
 
 	return (
 		<section
@@ -113,7 +117,7 @@ export const ForkWorkflowLongText: React.FC<ForkWorkflowLongTextProps> = ({
 					) : (
 						<pre className={textClassName}>{`${preview}…`}</pre>
 					)}
-					{!isLive && (
+					{!(isLive && isLiveExpanded) && (
 						<Button
 							variant="subtle"
 							size="xs"

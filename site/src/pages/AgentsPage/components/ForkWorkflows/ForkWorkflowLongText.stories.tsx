@@ -40,3 +40,10 @@ export const Expanded: Story = {
 		);
 	},
 };
+
+export const LiveLog: Story = {
+	args: {
+		label: "Logs",
+		isLive: true,
+	},
+};

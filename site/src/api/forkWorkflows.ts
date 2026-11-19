@@ -16,7 +16,7 @@ export const workflowRunsMaxLimit = 100;
  * get this wrapper, and JSON.stringify of a number never emits a decimal
  * point, so the source text is the digits of the number itself.
  */
-export type UnsafeInteger = {
+type UnsafeInteger = {
 	forkUnsafeInteger: string;
 };
 

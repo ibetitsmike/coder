@@ -322,10 +322,13 @@ export const forkWorkflowRunDuration = (
 	return humanDurationShort(Math.max(0, end - Date.parse(run.created_at)));
 };
 
-/** Formats a JSON value for display; strings show as they are. */
+/**
+ * Formats a JSON value for display; strings show as they are, except the
+ * empty string, which shows as "" so it does not read as a missing value.
+ */
 export const formatForkWorkflowValue = (value: unknown): string =>
 	typeof value === "string"
-		? value
+		? value || '""'
 		: JSON.stringify(
 				value,
 				(_key, item) =>
