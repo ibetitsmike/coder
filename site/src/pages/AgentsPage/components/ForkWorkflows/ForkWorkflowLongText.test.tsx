@@ -1,7 +1,7 @@
 // This file is fork code: tests for the labeled long-text block
 // (fork-workflows experiment).
 
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { ForkWorkflowLongText } from "./ForkWorkflowLongText";
@@ -48,11 +48,16 @@ describe("ForkWorkflowLongText", () => {
 		rerender(<ForkWorkflowLongText label="Logs" text={longText} isLive />);
 		expect(screen.getByRole("log", { name: "Logs" })).toBe(logs);
 		expect(logs).toHaveTextContent("line 12");
-		// The expansion control never lives inside the live region.
-		expect(within(logs).queryByRole("button")).toBeNull();
-		// The grown log is keyboard reachable and named, like the scroll
-		// area other expanded blocks use.
+		// The first long render must already commit the grown plain pre: an
+		// intermediate commit that swapped the announced pre for a scroll
+		// area would make role="log" re-announce the whole history. No
+		// scroll area viewport may mount for a block that grew while live.
 		const grown = screen.getByRole("region", { name: "Full logs" });
+		expect(grown.tagName).toBe("PRE");
+		expect(grown).toHaveClass("max-h-96");
+		expect(logs.querySelector("[data-radix-scroll-area-viewport]")).toBeNull();
+
+		// The grown log is keyboard reachable.
 		grown.focus();
 		expect(grown).toHaveFocus();
 

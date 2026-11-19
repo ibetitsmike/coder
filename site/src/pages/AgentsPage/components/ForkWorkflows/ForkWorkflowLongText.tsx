@@ -3,7 +3,7 @@
 
 import { cn } from "cn";
 import type React from "react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "#/components/Button/Button";
 import { ScrollArea } from "#/components/ScrollArea/ScrollArea";
 
@@ -55,15 +55,20 @@ export const ForkWorkflowLongText: React.FC<ForkWorkflowLongTextProps> = ({
 	// history and keeps the shared scroll viewport.
 	const [grewLive, setGrewLive] = useState(false);
 	const preview = textPreview(text);
+	// The flag is set during render, not in an effect, so the render that
+	// first sees the long text already selects the stable plain pre: an
+	// effect would let that render swap the announced pre for a scroll area
+	// and then swap it back one commit later, which makes role="log"
+	// re-announce the whole history. Guarding on the state value keeps
+	// this a one-time adjustment, as React's render-time set-state rules
+	// require.
+	if (isLive && preview !== null && !grewLive) {
+		setGrewLive(true);
+	}
 	const textClassName = cn(
 		"m-0 whitespace-pre-wrap wrap-break-word bg-transparent font-mono text-xs leading-5",
 		isError ? "text-content-destructive" : "text-content-primary",
 	);
-	useEffect(() => {
-		if (isLive && preview !== null) {
-			setGrewLive(true);
-		}
-	}, [isLive, preview]);
 	const isLiveExpanded = expanded && preview !== null && grewLive;
 
 	return (
