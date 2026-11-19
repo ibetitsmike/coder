@@ -75,12 +75,21 @@ describe("the lossless JSON parse", () => {
 	});
 
 	it("wraps an integer literal that overflows the number format", () => {
-		// JSON.parse hands the reviver +-Infinity for a literal this large,
-		// but the source text still holds the exact digits.
-		const parsed = parse('{"n":123456789012345678901234567890}');
+		// JSON.parse hands the reviver Infinity for a literal this large,
+		// which Number.isSafeInteger rejects, and the source text still
+		// holds the exact digits. A literal that merely rounds to a finite
+		// unsafe integer (9007199254740993) is a separate case above.
+		const digits = `1${"0".repeat(400)}`;
+		const parsed = parse(`{"n":${digits}}`);
 		expect((parsed as { n: unknown }).n).toEqual({
-			forkUnsafeInteger: "123456789012345678901234567890",
+			forkUnsafeInteger: digits,
 		});
+		// The digits show as bare JSON, like any other wrapped integer.
+		expect(
+			JSON.stringify({
+				v: unsafeIntegerText((parsed as { n: unknown }).n as never),
+			}),
+		).toBe(`{"v":${digits}}`);
 	});
 });
 
