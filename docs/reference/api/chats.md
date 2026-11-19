@@ -1918,9 +1918,11 @@ curl -X GET http://coder-server:8080/api/v2/chats/watch \
 
 `GET /api/v2/chats/watch`
 
+Upgrades to a WebSocket and sends one event per message. The server closes the connection if you send a message.
+
 ### Example responses
 
-> 200 Response
+> 101 Response
 
 ```json
 {
@@ -2128,9 +2130,9 @@ curl -X GET http://coder-server:8080/api/v2/chats/watch \
 
 ### Responses
 
-| Status | Meaning                                                 | Description | Schema                                                       |
-|--------|---------------------------------------------------------|-------------|--------------------------------------------------------------|
-| 200    | [OK](https://tools.ietf.org/html/rfc7231#section-6.3.1) | OK          | [codersdk.ChatWatchEvent](schemas.md#codersdkchatwatchevent) |
+| Status | Meaning                                                                  | Description         | Schema                                                       |
+|--------|--------------------------------------------------------------------------|---------------------|--------------------------------------------------------------|
+| 101    | [Switching Protocols](https://tools.ietf.org/html/rfc7231#section-6.2.2) | Switching Protocols | [codersdk.ChatWatchEvent](schemas.md#codersdkchatwatchevent) |
 
 To perform this operation, you must be authenticated. [Learn more](authentication.md).
 
@@ -4586,6 +4588,8 @@ curl -X GET http://coder-server:8080/api/v2/chats/{chat}/stream \
 
 `GET /api/v2/chats/{chat}/stream`
 
+Upgrades to a WebSocket and sends each message as a JSON array holding a batch of one or more events. The server closes the connection if you send a message.
+
 Each WebSocket message is a JSON array of events.
 
 The server increases a chat's `snapshot_version` by 1 each time it changes the chat's messages, queue, or status.
@@ -4640,7 +4644,7 @@ When the server can't subscribe to the chat or read it, the server returns `500 
 
 ### Example responses
 
-> 200 Response
+> 101 Response
 
 ```json
 [
@@ -4881,13 +4885,13 @@ When the server can't subscribe to the chat or read it, the server returns `500 
 
 ### Responses
 
-| Status | Meaning                                                 | Description | Schema                                                                  |
-|--------|---------------------------------------------------------|-------------|-------------------------------------------------------------------------|
-| 200    | [OK](https://tools.ietf.org/html/rfc7231#section-6.3.1) | OK          | array of [codersdk.ChatStreamEvent](schemas.md#codersdkchatstreamevent) |
+| Status | Meaning                                                                  | Description         | Schema                                                                  |
+|--------|--------------------------------------------------------------------------|---------------------|-------------------------------------------------------------------------|
+| 101    | [Switching Protocols](https://tools.ietf.org/html/rfc7231#section-6.2.2) | Switching Protocols | array of [codersdk.ChatStreamEvent](schemas.md#codersdkchatstreamevent) |
 
 <h3 id="stream-chat-events-via-websockets-responseschema">Response Schema</h3>
 
-Status Code **200**
+Status Code **101**
 
 | Name                               | Type                                                                             | Required | Restrictions | Description                                                                                                                                                                                                                                                                                                                                                                                                |
 |------------------------------------|----------------------------------------------------------------------------------|----------|--------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -5024,6 +5028,8 @@ curl -X GET http://coder-server:8080/api/v2/chats/{chat}/stream/git \
 
 `GET /api/v2/chats/{chat}/stream/git`
 
+Upgrades to a WebSocket. Each server message is either a `changes` message with a delta of repository changes after the previous message or an `error` message, and you can send `{"type": "refresh"}` to request an immediate re-scan.
+
 ### Parameters
 
 | Name   | In   | Type         | Required | Description |
@@ -5032,7 +5038,7 @@ curl -X GET http://coder-server:8080/api/v2/chats/{chat}/stream/git \
 
 ### Example responses
 
-> 200 Response
+> 101 Response
 
 ```json
 {
@@ -5053,9 +5059,9 @@ curl -X GET http://coder-server:8080/api/v2/chats/{chat}/stream/git \
 
 ### Responses
 
-| Status | Meaning                                                 | Description | Schema                                                                                       |
-|--------|---------------------------------------------------------|-------------|----------------------------------------------------------------------------------------------|
-| 200    | [OK](https://tools.ietf.org/html/rfc7231#section-6.3.1) | OK          | [codersdk.WorkspaceAgentGitServerMessage](schemas.md#codersdkworkspaceagentgitservermessage) |
+| Status | Meaning                                                                  | Description         | Schema                                                                                       |
+|--------|--------------------------------------------------------------------------|---------------------|----------------------------------------------------------------------------------------------|
+| 101    | [Switching Protocols](https://tools.ietf.org/html/rfc7231#section-6.2.2) | Switching Protocols | [codersdk.WorkspaceAgentGitServerMessage](schemas.md#codersdkworkspaceagentgitservermessage) |
 
 To perform this operation, you must be authenticated. [Learn more](authentication.md).
 
