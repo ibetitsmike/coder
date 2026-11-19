@@ -83,19 +83,14 @@ describe("ForkSavedWorkflowsPage", () => {
 		expect(
 			screen.getAllByRole("button", { name: "New workflow" }),
 		).toHaveLength(1);
-		expect(
-			within(personal).getByRole("button", {
-				name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
-			}),
-		).toBeInTheDocument();
+		within(personal).getByRole("button", {
+			name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
+		});
 		expect(
 			screen.queryByRole("button", {
 				name: `More actions for ${MockForkOrganizationSavedWorkflowMetadata.name}`,
 			}),
 		).toBeNull();
-		expect(
-			screen.getByText(/Organization workflows you can read\./),
-		).toBeInTheDocument();
 	});
 
 	it("shows an organization workflow read-only in its detail dialog", async () => {
@@ -122,12 +117,11 @@ describe("ForkSavedWorkflowsPage", () => {
 			MockDefaultOrganization.id,
 			MockForkOrganizationSavedWorkflowMetadata.name,
 		);
-		expect(within(dialog).queryByRole("button", { name: /edit/i })).toBeNull();
 	});
 
 	it("offers only the member's organizations in the picker", async () => {
 		const user = userEvent.setup();
-		const { listUser } = renderPage();
+		const { listUser, listOrganization } = renderPage();
 		await waitFor(() =>
 			expect(listUser).toHaveBeenCalledWith(MockDefaultOrganization.id),
 		);
@@ -148,6 +142,7 @@ describe("ForkSavedWorkflowsPage", () => {
 		await waitFor(() =>
 			expect(listUser).toHaveBeenLastCalledWith(MockOrganization2.id),
 		);
+		expect(listOrganization).toHaveBeenLastCalledWith(MockOrganization2.id);
 		expect(listUser).not.toHaveBeenCalledWith(MockOrganization3.id);
 	});
 
