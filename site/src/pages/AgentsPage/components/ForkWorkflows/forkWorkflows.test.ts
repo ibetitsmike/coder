@@ -13,6 +13,7 @@ import {
 	forkWorkflowRunStatusMeta,
 	forkWorkflowStepPhases,
 	forkWorkflowStepProgress,
+	formatForkWorkflowValue,
 	mergeForkWorkflowRunDetail,
 	parseForkWorkflowRunSnapshot,
 } from "./forkWorkflows";
@@ -451,5 +452,12 @@ describe("mergeForkWorkflowRunDetail", () => {
 		});
 		expect(moved.phases).toEqual(["plan", "build", "extra"]);
 		expect(moved.currentPhase).toBe("extra");
+	});
+});
+
+describe("formatForkWorkflowValue", () => {
+	it("shows an empty string as a quoted empty string", () => {
+		expect(formatForkWorkflowValue("")).toBe('""');
+		expect(formatForkWorkflowValue("done")).toBe("done");
 	});
 });

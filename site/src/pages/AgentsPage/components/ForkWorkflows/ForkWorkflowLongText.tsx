@@ -45,35 +45,28 @@ export const ForkWorkflowLongText: React.FC<ForkWorkflowLongTextProps> = ({
 }) => {
 	// Once the text shows in full, it stays in full: polling can grow
 	// it past the threshold, and collapsing it under the user would
-	// hide what they were reading. A live block starts in full too, since
-	// it has no Show more while it grows.
+	// hide what they were reading. A live block has no Show more while
+	// it grows, so it starts in full.
 	const [expanded, setExpanded] = useState(
 		() => isLive || textPreview(text) === null,
 	);
-	// Whether the block was live before it was long. Such a block keeps
-	// the plain pre it announced through once it grows long, even after
-	// the run finishes: swapping it for a scroll area would drop keyboard
-	// focus, reset the scroll position, and have role="log" re-announce
-	// the added subtree. A block that was long before it turned live, such
-	// as a resumed run's log, has no such history and keeps the shared
-	// scroll viewport it already shows.
-	const [liveBeforeLong, setLiveBeforeLong] = useState(isLive);
+	// Whether the block was live from its mount or while it was still
+	// short. Such a block grows its own pre into the scroller, so focus,
+	// scroll position and the live region's node survive; a block that was
+	// long before it turned live, such as a resumed run's log, keeps the
+	// scroll area it already shows.
+	const [announcedLive, setAnnouncedLive] = useState(isLive);
 	const preview = textPreview(text);
-	// The flag is set during render while the text is still short, not in
-	// an effect, so the render that first sees the long text already
-	// selects the stable plain pre: an effect would let that render swap
-	// the announced pre for a scroll area and then swap it back one commit
-	// later, which makes role="log" re-announce the whole history. Guarding
-	// on the state value keeps this a one-time adjustment, as React's
-	// render-time set-state rules require.
-	if (isLive && preview === null && !liveBeforeLong) {
-		setLiveBeforeLong(true);
+	// Set during render while the text is short, so the render that first
+	// sees the long text already picks the grown pre.
+	if (isLive && preview === null && !announcedLive) {
+		setAnnouncedLive(true);
 	}
 	const textClassName = cn(
 		"m-0 whitespace-pre-wrap wrap-break-word bg-transparent font-mono text-xs leading-5",
 		isError ? "text-content-destructive" : "text-content-primary",
 	);
-	const isLiveExpanded = expanded && preview !== null && liveBeforeLong;
+	const isLiveExpanded = expanded && preview !== null && announcedLive;
 
 	return (
 		<section
@@ -88,48 +81,47 @@ export const ForkWorkflowLongText: React.FC<ForkWorkflowLongTextProps> = ({
 			aria-live={isLive ? "polite" : undefined}
 		>
 			<div className="text-xs font-medium text-content-secondary">{label}</div>
-			{preview === null ? (
-				<pre className={textClassName}>{text}</pre>
+			{/* The short text and the grown live log share this one pre, so
+			    crossing the threshold updates the node instead of replacing it. */}
+			{preview === null || isLiveExpanded ? (
+				// biome-ignore lint/a11y/useAriaPropsSupportedByRole: aria-label is set only together with role="region".
+				<pre
+					role={isLiveExpanded ? "region" : undefined}
+					aria-label={
+						isLiveExpanded ? `Full ${label.toLowerCase()}` : undefined
+					}
+					// oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrolling region must be keyboard reachable.
+					tabIndex={isLiveExpanded ? 0 : undefined}
+					className={cn(
+						textClassName,
+						isLiveExpanded && "max-h-96 overflow-y-auto",
+					)}
+				>
+					{text}
+				</pre>
+			) : expanded ? (
+				<ScrollArea
+					className="rounded-md border"
+					viewportClassName="max-h-96 p-2"
+					viewportTabIndex={0}
+					viewportAriaLabel={`Full ${label.toLowerCase()}`}
+				>
+					<pre className={textClassName}>{text}</pre>
+				</ScrollArea>
 			) : (
-				<>
-					{isLiveExpanded ? (
-						// The element the live region announced through, grown
-						// to the scrollable height instead of swapped for a
-						// scroll area.
-						<pre
-							role="region"
-							aria-label={`Full ${label.toLowerCase()}`}
-							// oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrolling region must be keyboard reachable.
-							tabIndex={0}
-							className={cn(textClassName, "max-h-96 overflow-y-auto")}
-						>
-							{text}
-						</pre>
-					) : expanded ? (
-						<ScrollArea
-							className="rounded-md border"
-							viewportClassName="max-h-96 p-2"
-							viewportTabIndex={0}
-							viewportAriaLabel={`Full ${label.toLowerCase()}`}
-						>
-							<pre className={textClassName}>{text}</pre>
-						</ScrollArea>
-					) : (
-						<pre className={textClassName}>{`${preview}…`}</pre>
-					)}
-					{!(isLive && isLiveExpanded) && (
-						<Button
-							variant="subtle"
-							size="xs"
-							className="w-fit px-0"
-							aria-expanded={expanded}
-							aria-label={`${expanded ? "Show less" : "Show more"} of ${label}`}
-							onClick={() => setExpanded((value) => !value)}
-						>
-							{expanded ? "Show less" : "Show more"}
-						</Button>
-					)}
-				</>
+				<pre className={textClassName}>{`${preview}…`}</pre>
+			)}
+			{preview !== null && !(isLive && isLiveExpanded) && (
+				<Button
+					variant="subtle"
+					size="xs"
+					className="w-fit px-0"
+					aria-expanded={expanded}
+					aria-label={`${expanded ? "Show less" : "Show more"} of ${label}`}
+					onClick={() => setExpanded((value) => !value)}
+				>
+					{expanded ? "Show less" : "Show more"}
+				</Button>
 			)}
 		</section>
 	);

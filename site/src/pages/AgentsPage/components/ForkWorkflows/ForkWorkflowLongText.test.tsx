@@ -53,6 +53,7 @@ describe("ForkWorkflowLongText", () => {
 		// area would make role="log" re-announce the whole history. No
 		// scroll area viewport may mount for a block that grew while live.
 		const grown = screen.getByRole("region", { name: "Full logs" });
+		expect(grown).toBe(pre);
 		expect(grown.tagName).toBe("PRE");
 		expect(grown).toHaveClass("max-h-96");
 		expect(logs.querySelector("[data-radix-scroll-area-viewport]")).toBeNull();
@@ -82,7 +83,7 @@ describe("ForkWorkflowLongText", () => {
 		expect(result.querySelector("pre")).not.toHaveClass("max-h-96");
 	});
 
-	it("shows a log that is already long when it mounts live in full", () => {
+	it("shows in full a log that is already long when it mounts live", () => {
 		render(<ForkWorkflowLongText label="Logs" text={longText} isLive />);
 		expect(screen.getByRole("log", { name: "Logs" })).toHaveTextContent(
 			"line 12",

@@ -138,11 +138,6 @@ describe("formatForkWorkflowValue", () => {
 		expect(text).toContain('"count": "9007199254740993"');
 	});
 
-	it("shows an empty string as a quoted empty string", () => {
-		expect(formatForkWorkflowValue("")).toBe('""');
-		expect(formatForkWorkflowValue("done")).toBe("done");
-	});
-
 	it("prints a plain safe number as a number", () => {
 		const text = formatForkWorkflowValue({ count: 42 });
 		expect(text).toContain('"count": 42');
