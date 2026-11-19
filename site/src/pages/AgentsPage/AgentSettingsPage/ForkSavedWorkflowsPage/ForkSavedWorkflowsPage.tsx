@@ -41,16 +41,18 @@ const ForkSavedWorkflowsPage: React.FC = () => {
 		<div className="flex flex-col gap-10">
 			{/* The picker sits outside both tables, as on the AI settings page,
 			    so it keeps its place and focus when the organization changes. */}
-			<div className="flex justify-end">
-				<OrganizationField
-					id="workflows-organization"
-					className="w-full sm:w-60"
-					organizations={memberOrganizations}
-					organization={organization}
-					onChange={(org) => setSelectedOrganizationId(org.id)}
-					showLabel={false}
-				/>
-			</div>
+			{memberOrganizations.length > 1 && (
+				<div className="flex justify-end">
+					<OrganizationField
+						id="workflows-organization"
+						className="w-full sm:w-60"
+						organizations={memberOrganizations}
+						organization={organization}
+						onChange={(org) => setSelectedOrganizationId(org.id)}
+						showLabel={false}
+					/>
+				</div>
+			)}
 			<ForkSavedWorkflowsTable
 				scope={{ tier: "user", organizationId: organization.id }}
 			/>
