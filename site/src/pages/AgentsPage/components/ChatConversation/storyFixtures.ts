@@ -7,6 +7,7 @@ import { MockUserPreferenceSettings } from "#/testHelpers/entities";
 import { MockPngBase64 } from "#/testHelpers/files";
 import { getAsyncAnswerPrefix } from "../ChatElements/tools/asyncAnswer";
 import { deriveAskUserQuestionState } from "./askUserQuestionState";
+import { type ChatStore, createChatStore } from "./chatStore";
 import {
 	type DeriveLiveStatusParams,
 	deriveLiveStatus,
@@ -21,6 +22,29 @@ import type {
 	StreamState,
 } from "./types";
 import type { WorkingBlock } from "./workingBlockGrouping";
+
+const loadedStores = new Map<string, ChatStore>();
+
+/**
+ * A chat store loaded with page, which loadedChatStore returns until the
+ * next call for the chat. A story's chatStoreKey query data calls it, so
+ * each render gets a new store.
+ */
+export const buildLoadedChatStore = (
+	chatID: string,
+	page: TypesGen.ChatMessagesResponse,
+) => {
+	const store = createChatStore();
+	store.seed(page);
+	loadedStores.set(chatID, store);
+	return store;
+};
+
+/**
+ * The store that buildLoadedChatStore last built for the chat, for a play
+ * function that delivers what the stream would.
+ */
+export const loadedChatStore = (chatID: string) => loadedStores.get(chatID);
 
 export type StoryStreamRenderState = {
 	streamState: StreamState | null;
