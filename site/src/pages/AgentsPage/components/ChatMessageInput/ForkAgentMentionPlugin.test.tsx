@@ -18,7 +18,11 @@ import * as forkSavedWorkflowsApi from "#/api/forkSavedWorkflows";
 import { chat } from "#/api/queries/chats";
 import { agentDefinitions } from "#/api/queries/forkAgentDefinitions";
 import { userSkills } from "#/api/queries/userSkills";
-import type { Chat, Experiment } from "#/api/typesGenerated";
+import type {
+	Chat,
+	Experiment,
+	ForkSavedWorkflowMetadata,
+} from "#/api/typesGenerated";
 import {
 	DashboardContext,
 	type DashboardValue,
@@ -69,11 +73,13 @@ const renderComposer = ({
 	experiments = [],
 	isNewChat = false,
 	hasWorkspace = false,
+	skipAgentDefinitionsExperiment = false,
 }: {
 	chat?: Partial<Chat>;
 	experiments?: Experiment[];
 	isNewChat?: boolean;
 	hasWorkspace?: boolean;
+	skipAgentDefinitionsExperiment?: boolean;
 } = {}) => {
 	const getPersonal = vi
 		.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinitions")
@@ -100,7 +106,12 @@ const renderComposer = ({
 	const onEnter = vi.fn();
 	const dashboard: DashboardValue = {
 		entitlements: MockEntitlements,
-		experiments: ["fork-agent-definitions", ...experiments],
+		experiments: [
+			...(skipAgentDefinitionsExperiment
+				? []
+				: (["fork-agent-definitions"] as const)),
+			...experiments,
+		],
 		appearance: MockAppearanceConfig,
 		buildInfo: MockBuildInfo,
 		organizations: [MockDefaultOrganization],
@@ -360,7 +371,7 @@ describe("ForkAgentMentionPlugin", () => {
 			}),
 		);
 		expect(inputRef.current?.getValue()).toBe(
-			`Run the ${MockForkSavedWorkflowMetadata.name} workflow with run_workflow with these args: files (required). `,
+			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}) with args: files (required). `,
 		);
 		expect(getUserWorkflows).toHaveBeenCalledWith(MockDefaultOrganization.id);
 		expect(getOrganizationWorkflows).toHaveBeenCalledWith(
@@ -382,7 +393,7 @@ describe("ForkAgentMentionPlugin", () => {
 			}),
 		);
 		expect(inputRef.current?.getValue()).toBe(
-			`Run the ${MockForkOrganizationSavedWorkflowMetadata.name} workflow with run_workflow with no args: `,
+			`Run the ${MockForkOrganizationSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkOrganizationSavedWorkflowMetadata.name}) with no args: `,
 		);
 	});
 
@@ -402,16 +413,14 @@ describe("ForkAgentMentionPlugin", () => {
 		await typeIntoComposer("@");
 		await screen.findByRole("option", {
 			name: new RegExp(
-				`${MockForkOrganizationSavedWorkflowMetadata.name}.*personal`,
+				`^@${MockForkOrganizationSavedWorkflowMetadata.name}\\s*personal`,
 			),
 		});
 		expect(
-			screen.queryByRole("option", {
-				name: new RegExp(
-					`${MockForkOrganizationSavedWorkflowMetadata.name}.*organization`,
-				),
+			screen.getAllByRole("option", {
+				name: new RegExp(`^@${MockForkOrganizationSavedWorkflowMetadata.name}`),
 			}),
-		).toBeNull();
+		).toHaveLength(1);
 	});
 
 	it("filters the workflows by the typed text", async () => {
@@ -454,7 +463,7 @@ describe("ForkAgentMentionPlugin", () => {
 		});
 		await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{Enter}");
 		expect(inputRef.current?.getValue()).toBe(
-			`Run the ${MockForkOrganizationSavedWorkflowMetadata.name} workflow with run_workflow with no args: `,
+			`Run the ${MockForkOrganizationSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkOrganizationSavedWorkflowMetadata.name}) with no args: `,
 		);
 	});
 
@@ -487,6 +496,59 @@ describe("ForkAgentMentionPlugin", () => {
 		renderComposer({ experiments: [] });
 		await typeIntoComposer("@none");
 		await screen.findByText("No agents match that query.");
+	});
+
+	it("offers workflows alone when fork-workflows is on and fork-agent-definitions is off", async () => {
+		const { getUserWorkflows, getPersonal } = renderComposer({
+			experiments: ["fork-workflows"],
+			skipAgentDefinitionsExperiment: true,
+		});
+		getUserWorkflows.mockResolvedValue([MockForkSavedWorkflowMetadata]);
+		const user = await typeIntoComposer("@");
+		await screen.findByText("Workflows");
+		await screen.findByRole("option", {
+			name: new RegExp(`^@${MockForkSavedWorkflowMetadata.name}`),
+		});
+		expect(screen.queryByRole("option", { name: /^@explore/ })).toBeNull();
+		expect(getPersonal).not.toHaveBeenCalled();
+		await user.keyboard("{Escape}");
+	});
+
+	it("shows the workflow loading state while only the workflows are pending", async () => {
+		const { getUserWorkflows } = renderComposer({
+			experiments: ["fork-workflows"],
+			skipAgentDefinitionsExperiment: true,
+		});
+		getUserWorkflows.mockReturnValue(new Promise(() => {}));
+		await typeIntoComposer("@");
+		await screen.findByText("Loading workflows...");
+	});
+
+	it("reads an args schema whose properties arrive as a JSON string", async () => {
+		const { getUserWorkflows, inputRef } = renderComposer({
+			experiments: ["fork-workflows"],
+			skipAgentDefinitionsExperiment: true,
+		});
+		getUserWorkflows.mockResolvedValue([
+			{
+				...MockForkSavedWorkflowMetadata,
+				args_schema: {
+					type: "object",
+					properties: '{"files":{"type":"array"}}',
+					required: '["files"]',
+				} as unknown as ForkSavedWorkflowMetadata["args_schema"],
+			},
+		]);
+		const user = await typeIntoComposer("@");
+		await user.click(
+			await screen.findByRole("option", {
+				name: new RegExp(`^@${MockForkSavedWorkflowMetadata.name}`),
+			}),
+		);
+		expect(inputRef.current?.getValue()).toBe(
+			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}) with args: files (required). `,
+		);
+		await user.keyboard("{Escape}");
 	});
 
 	it("keeps / opening the skills menu", async () => {

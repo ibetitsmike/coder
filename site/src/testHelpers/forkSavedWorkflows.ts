@@ -17,9 +17,12 @@ export const MockForkSavedWorkflowMetadata: ForkSavedWorkflowMetadata = {
 	description: "Reviews a list of files for bugs with parallel agents.",
 	args_schema: {
 		type: "object",
-		required: '["files"]',
-		properties: '{"files":{"type":"array"}}',
-	},
+		properties: { files: { type: "array" } },
+		required: ["files"],
+		// The backend sends args_schema as raw JSON, so properties is an
+		// object on the wire. The generated Record<string, string> type is
+		// wrong; typed fixtures encode it as a JSON string instead.
+	} as unknown as ForkSavedWorkflowMetadata["args_schema"],
 	phases: ["review", "summarize"],
 	created_at: MOCK_TIMESTAMP,
 	updated_at: MOCK_TIMESTAMP,

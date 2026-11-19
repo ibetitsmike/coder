@@ -26,7 +26,7 @@ import type {
 } from "#/api/typesGenerated";
 import { asRecord } from "../ChatElements/runtimeTypeUtils";
 import { useForkExperiment } from "../ChatElements/tools/forkToolUtils";
-import { parseJSON, parseStringList } from "../ChatElements/tools/utils";
+import { parseArgs, parseStringList } from "../ChatElements/tools/utils";
 import {
 	type AgentMention,
 	AgentMentionOption,
@@ -137,7 +137,9 @@ const workspaceAgents = (
 
 /** The empty string means the workflow takes no args. */
 const workflowArgsSummary = (schema: Record<string, string>): string => {
-	const properties = asRecord(parseJSON(schema.properties ?? ""));
+	// The backend stores args_schema as raw JSON, so a property value can be
+	// either the JSON Schema object or a typed fixture's JSON string of it.
+	const properties = asRecord(parseArgs(schema.properties ?? ""));
 	const names = properties ? Object.keys(properties).sort() : [];
 	if (names.length === 0) {
 		return "";
@@ -202,9 +204,10 @@ const menuStatus = (
 	if (isAgentsLoading && isWorkflowsLoading) {
 		return "Loading agents and workflows...";
 	}
-	return isAgentsLoading || isWorkflowsLoading
-		? "Loading agents..."
-		: undefined;
+	if (isAgentsLoading) {
+		return "Loading agents...";
+	}
+	return isWorkflowsLoading ? "Loading workflows..." : undefined;
 };
 
 const handleSelect = (
@@ -223,8 +226,8 @@ const handleSelect = (
 		const { name, argsSummary } = option.workflow;
 		textNode
 			?.setTextContent(
-				`Run the ${name} workflow with run_workflow${
-					argsSummary ? ` with these args: ${argsSummary}. ` : " with no args: "
+				`Run the ${name} saved workflow (run_workflow name ${name}) with${
+					argsSummary ? ` args: ${argsSummary}. ` : " no args: "
 				}`,
 			)
 			.selectEnd();
@@ -265,6 +268,9 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 		!isChildChat || (isNestingEnabled && currentChat?.agent_type === "general");
 	// Workflows run only in root chats, so a child is offered none.
 	const canRunWorkflows = isWorkflowsEnabled && !isChildChat;
+	// Agents are offered only when the experiment is on and this chat may
+	// spawn them; workflows stay available on their own experiment.
+	const canOfferAgents = isEnabled && canSpawn;
 	// A child chat has no project of its own; chatd offers it the agents of
 	// its root chat's project.
 	const rootChatId = isChildChat ? currentChat?.root_chat_id : undefined;
@@ -284,24 +290,26 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 	const storedQueries = useQueries({
 		queries: scopes.map(({ source: _, ...scope }) => ({
 			...agentDefinitions(scope),
-			enabled: isMenuShown && organizationId !== "",
+			enabled: canOfferAgents && isMenuShown && organizationId !== "",
 			staleTime: 60_000,
 		})),
 	});
 	const isRootProjectUnknown = rootChatId !== undefined && !rootChat.data;
-	const mentions = resolveAgentMentions([
-		...scopes.map(({ source }, index) => ({
-			source,
-			agents: storedQueries[index].data?.filter((agent) => agent.enabled),
-		})),
-		...(isRootProjectUnknown
-			? [{ source: "project" as const, agents: undefined }]
-			: []),
-		{
-			source: "workspace",
-			agents: workspaceAgents(currentChat?.context, hasWorkspace),
-		},
-	]);
+	const mentions = canOfferAgents
+		? resolveAgentMentions([
+				...scopes.map(({ source }, index) => ({
+					source,
+					agents: storedQueries[index].data?.filter((agent) => agent.enabled),
+				})),
+				...(isRootProjectUnknown
+					? [{ source: "project" as const, agents: undefined }]
+					: []),
+				{
+					source: "workspace",
+					agents: workspaceAgents(currentChat?.context, hasWorkspace),
+				},
+			])
+		: [];
 	// One ordered tier list drives the queries and the resolution, so the
 	// personal-over-organization precedence is stated once.
 	const workflowTiers = [
@@ -372,7 +380,7 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 		[editor],
 	);
 
-	if (!isEnabled || !canSpawn) {
+	if ((!isEnabled || !canSpawn) && !canRunWorkflows) {
 		return null;
 	}
 
