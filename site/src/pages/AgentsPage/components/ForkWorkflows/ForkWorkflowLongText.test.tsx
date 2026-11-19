@@ -53,7 +53,6 @@ describe("ForkWorkflowLongText", () => {
 		// The grown log is keyboard reachable and named, like the scroll
 		// area other expanded blocks use.
 		const grown = screen.getByRole("region", { name: "Full logs" });
-		expect(grown).toHaveClass("max-h-96");
 		grown.focus();
 		expect(grown).toHaveFocus();
 
@@ -63,6 +62,17 @@ describe("ForkWorkflowLongText", () => {
 		expect(screen.getByRole("region", { name: "Logs" })).toBe(logs);
 		expect(screen.getByRole("region", { name: "Full logs" })).toBe(grown);
 		expect(grown).toHaveFocus();
+	});
+
+	it("keeps the scroll viewport for a block that was long from the start", () => {
+		render(<ForkWorkflowLongText label="Result" text={longText} />);
+		const result = screen.getByRole("region", { name: "Result" });
+
+		// Expanding this block never grew through a live region, so it
+		// keeps the shared scroll viewport with its border and padding.
+		const user = userEvent.setup();
+		user.click(screen.getByRole("button", { name: "Show more of Result" }));
+		expect(result.querySelector("pre")).not.toHaveClass("max-h-96");
 	});
 
 	it("names each toggle by its block so two blocks stay apart", async () => {

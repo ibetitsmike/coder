@@ -3,7 +3,7 @@
 
 import { cn } from "cn";
 import type React from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "#/components/Button/Button";
 import { ScrollArea } from "#/components/ScrollArea/ScrollArea";
 
@@ -47,18 +47,24 @@ export const ForkWorkflowLongText: React.FC<ForkWorkflowLongTextProps> = ({
 	// it past the threshold, and collapsing it under the user would
 	// hide what they were reading.
 	const [expanded, setExpanded] = useState(() => textPreview(text) === null);
+	// Whether the block grew past the threshold while it was live. Such a
+	// block keeps the plain pre it announced through, even after the run
+	// finishes: swapping it for a scroll area would drop keyboard focus,
+	// reset the scroll position, and have role="log" re-announce the
+	// added subtree. A block that was long from the start has no such
+	// history and keeps the shared scroll viewport.
+	const [grewLive, setGrewLive] = useState(false);
 	const preview = textPreview(text);
 	const textClassName = cn(
 		"m-0 whitespace-pre-wrap wrap-break-word bg-transparent font-mono text-xs leading-5",
 		isError ? "text-content-destructive" : "text-content-primary",
 	);
-	// A block that grew past the threshold while live keeps the same
-	// expanded pre when the run finishes: swapping it for a scroll area
-	// then would drop keyboard focus and reset the scroll position right
-	// as the user reads it, and role="log" would also re-announce the
-	// added subtree. The live flag only moves the toggle out of the
-	// region while the block announces additions.
-	const isLiveExpanded = expanded && preview !== null;
+	useEffect(() => {
+		if (isLive && preview !== null) {
+			setGrewLive(true);
+		}
+	}, [isLive, preview]);
+	const isLiveExpanded = expanded && preview !== null && grewLive;
 
 	return (
 		<section
@@ -78,9 +84,9 @@ export const ForkWorkflowLongText: React.FC<ForkWorkflowLongTextProps> = ({
 			) : (
 				<>
 					{isLiveExpanded ? (
-						// The same element the preview rendered, grown to the
-						// scrollable height instead of swapped for a scroll
-						// area, so the live region keeps announcing additions.
+						// The element the live region announced through, grown
+						// to the scrollable height instead of swapped for a
+						// scroll area.
 						<pre
 							role="region"
 							aria-label={`Full ${label.toLowerCase()}`}
