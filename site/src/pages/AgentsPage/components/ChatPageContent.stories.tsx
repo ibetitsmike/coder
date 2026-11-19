@@ -704,7 +704,12 @@ const buildAsyncQuestionStore = (
 	messages: readonly TypesGen.ChatMessage[] = MockAsyncQuestionMessages,
 ) => {
 	const store = createChatStore();
-	store.replaceMessages(messages);
+	store.seed({
+		messages,
+		queued_messages: [],
+		has_more: false,
+		snapshot_version: 1,
+	});
 	return store;
 };
 
@@ -925,7 +930,7 @@ export const AsyncQuestionDockedSubmitError: Story = {
 
 const buildLiveAsyncQuestionStore = () => {
 	const store = buildAsyncQuestionStore(MockWorkingMessages.slice(0, 1));
-	store.setChatStatus("running");
+	store.applyServerChatStatus("running");
 	store.applyMessagePart({
 		type: "tool-call",
 		tool_call_id: "question",
@@ -971,7 +976,7 @@ export const AsyncQuestionFromStreamAnswerQueued: Story = {
 export const AsyncQuestionAnswerPromoting: Story = {
 	render: () => {
 		const store = buildAsyncQuestionStore();
-		store.setChatStatus("running");
+		store.applyServerChatStatus("running");
 		store.setQueuedMessages([
 			{ ...MockQueuedQuestionAnswer, busy_behavior: "steer" },
 		]);

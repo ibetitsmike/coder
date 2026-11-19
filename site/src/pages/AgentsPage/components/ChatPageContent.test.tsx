@@ -265,10 +265,12 @@ describe("ChatPageTimeline", () => {
 					persistedError={undefined}
 					hasMoreMessages={false}
 					isFetchingMoreMessages={false}
+					isHydratingMessages={false}
 					hasFetchMoreError={false}
 					onFetchMoreMessages={vi.fn()}
 					urlTransform={(url) => url}
 					mcpServers={[]}
+					isReadOnly={false}
 				/>
 			</MessageScroller.Provider>,
 		);
@@ -995,7 +997,6 @@ const TimelineStage: React.FC<TimelineStageProps> = ({
 				persistedError={undefined}
 				hasMoreMessages={false}
 				isFetchingMoreMessages={false}
-				isHydratingMessages={false}
 				hasFetchMoreError={false}
 				onFetchMoreMessages={async () => {}}
 				urlTransform={defaultUrlTransform}
@@ -1012,7 +1013,12 @@ const renderChatPageTimeline = (
 	onSendAskUserQuestionResponse: AnswerCallback,
 ) => {
 	const store = createChatStore();
-	store.replaceMessages(MockAsyncQuestionMessages);
+	store.seed({
+		messages: MockAsyncQuestionMessages,
+		queued_messages: [],
+		has_more: false,
+		snapshot_version: 1,
+	});
 	const queryClient = createPreferenceSeededQueryClient();
 	const { rerender } = renderComponent(
 		<TimelineStage
@@ -1106,8 +1112,13 @@ describe("ChatPageTimeline question dock", () => {
 
 	it("announces a question that is still in the stream", () => {
 		const store = createChatStore();
-		store.replaceMessages(MockWorkingMessages.slice(0, 1));
-		store.setChatStatus("running");
+		store.seed({
+			messages: MockWorkingMessages.slice(0, 1),
+			queued_messages: [],
+			has_more: false,
+			snapshot_version: 1,
+		});
+		store.applyServerChatStatus("running");
 		store.applyMessagePart({
 			type: "tool-call",
 			tool_call_id: "question",
