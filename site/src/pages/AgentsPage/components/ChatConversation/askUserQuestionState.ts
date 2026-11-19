@@ -75,6 +75,11 @@ export const deriveAskUserQuestionState = (
 		if (message.role !== "user") {
 			continue;
 		}
+		// A pending send's optimistic row is not a delivered answer: the send
+		// can still fail, and the form must then show its error.
+		if (isPendingRowID(message.id)) {
+			continue;
+		}
 
 		const asyncAnswer = parseAsyncAnswerContent(message.content);
 		if (asyncAnswer) {

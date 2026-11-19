@@ -269,6 +269,20 @@ describe("deriveAskUserQuestionState", () => {
 		expect(state.openAsyncQuestion?.id).toBe("async-call");
 	});
 
+	it("ignores a pending send message that answers the question", () => {
+		const state = derive([
+			...questionStep("async-call", { async: true }),
+			{
+				...userMessage(answerMessage("async-call")),
+				id: Number.MAX_SAFE_INTEGER,
+			},
+		]);
+
+		expect(state.isLatestAnswered).toBe(false);
+		expect(responseTo(state, "async-call")).toBeUndefined();
+		expect(state.openAsyncQuestion?.id).toBe("async-call");
+	});
+
 	it("leaves no async question open once a newer blocking one asks", () => {
 		const state = derive([
 			...questionStep("async-call", { async: true }),
