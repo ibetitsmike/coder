@@ -452,15 +452,24 @@ describe("ForkWorkflowsPanel", () => {
 		}));
 		// The cursor page is held open, so the click starts the request
 		// and focus can move before the short page ends the paging and
-		// unmounts "Load older runs".
-		const cursorResolver: { current?: () => void } = {};
+		// unmounts "Load older runs". Every held fetch waits in one set
+		// and the release also answers cursor fetches that start later,
+		// so a second held fetch, such as one a background poll starts,
+		// cannot hold the paging open past the release.
+		let releasedCursor = false;
+		const cursorWaiters = new Set<() => void>();
 		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRuns").mockImplementation(
-			(_chatId, after) =>
-				after
-					? new Promise<WorkflowRun[]>((resolve) => {
-							cursorResolver.current = () => resolve([MockChatWorkflowRun]);
-						})
-					: Promise.resolve(firstPage),
+			(_chatId, after) => {
+				if (!after) {
+					return Promise.resolve(firstPage);
+				}
+				if (releasedCursor) {
+					return Promise.resolve([MockChatWorkflowRun]);
+				}
+				return new Promise<WorkflowRun[]>((resolve) => {
+					cursorWaiters.add(() => resolve([MockChatWorkflowRun]));
+				});
+			},
 		);
 		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
 			MockChatWorkflowRunDetail,
@@ -479,28 +488,27 @@ describe("ForkWorkflowsPanel", () => {
 		await user.click(document.body);
 		expect(control).not.toHaveFocus();
 
-		cursorResolver.current?.();
-		// The cursor page is short, so the control unmounts once it
-		// resolves. A resync tick can start a fresh fetch and remount the
-		// control while the loop waits, so keep waiting until the removal
-		// survives a quiet cache: under CI load the tick lands between
-		// the loop's checks, and the control must be gone for good.
-		await waitFor(
-			() => {
-				expect(
-					screen.queryByRole("button", { name: "Load older runs" }),
-				).toBeNull();
-				expect(queryClient.isFetching()).toBe(0);
-			},
-			// The test client's gcTime would drop the cache between the
-			// checks otherwise, which would also remove the control.
-			{ interval: 10 },
+		// Release every held cursor fetch; any later one answers at once.
+		releasedCursor = true;
+		for (const resolve of cursorWaiters) {
+			resolve();
+		}
+		cursorWaiters.clear();
+		// The cursor page is short, so the control unmounts once the page
+		// lands in the cache. Waiting on the cache state and a quiet cache
+		// keeps the assertions deterministic: the observer holds both
+		// pages before they run, however the commit is scheduled under
+		// CI load.
+		await waitFor(() =>
+			expect(queryClient.getQueryData(chatWorkflowRunsKey(chatId))).toEqual({
+				pages: [firstPage, [MockChatWorkflowRun]],
+				pageParams: [{ after: "" }, expect.anything()],
+			}),
 		);
-		await new Promise((resolve) => setTimeout(resolve, 50));
+		await waitFor(() => expect(queryClient.isFetching()).toBe(0));
 		expect(
 			screen.queryByRole("button", { name: "Load older runs" }),
 		).toBeNull();
-		expect(queryClient.isFetching()).toBe(0);
 		// The list must not pull focus back: the user left it on the body
 		// on purpose, and the body is where a removed focused element
 		// naturally lands.
