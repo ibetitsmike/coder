@@ -233,6 +233,10 @@ export function useConversationEditingState(deps: {
 		}
 	}, [editorInitialValue, inputValueRef]);
 
+	// Bumps on every edit loaded into the editor. A send captures the count
+	// and skips its rollback and post-send bookkeeping when an edit opened
+	// during the request, so that edit keeps the editor.
+	const targetLoadCountRef = useRef(0);
 	const [loadedTarget, setLoadedTarget] = useState<LoadedTarget | null>(null);
 	const [draftBeforeEdit, setDraftBeforeEdit] =
 		useState<DraftBeforeEdit | null>(null);
@@ -416,6 +420,7 @@ export function useConversationEditingState(deps: {
 				? getAsyncAnswerPrefix(asyncAnswer.toolCallId)
 				: "",
 		});
+		targetLoadCountRef.current++;
 	});
 	useLayoutEffect(() => {
 		loadTargetIntoEditor();
@@ -488,6 +493,9 @@ export function useConversationEditingState(deps: {
 		busyBehavior,
 	}: SendChatMessageOptions) => {
 const sendTarget = target ?? undefined;
+		// An edit opened during the request keeps its editor: skip the
+		// rollback and the send's own bookkeeping for it.
+		const targetLoadCount = targetLoadCountRef.current;
 		const answerPrefix =
 			sendTarget !== undefined ? (loadedTarget?.answerPrefix ?? "") : "";
 		const sendPromise = onSend({
@@ -509,7 +517,10 @@ editingTarget: sendTarget,
 		try {
 			await sendPromise;
 		} catch (error) {
-			rollback();
+			// An edit opened during the send keeps its editor.
+			if (targetLoadCountRef.current === targetLoadCount) {
+				rollback();
+			}
 			requestInFlightRef.current = null;
 			if (error instanceof BuiltInCommandPendingError) {
 				return;
@@ -532,6 +543,11 @@ editingTarget: sendTarget,
 		// for an edit the compose draft as edited since.
 		persistDraft();
 		if (target !== null) {
+			if (targetLoadCountRef.current !== targetLoadCount) {
+				// An edit opened during the send owns the editor and the
+				// pre-edit draft; the sent edit only leaves the queue.
+				return;
+			}
 			removeQueuedEdit(target);
 			setDraftBeforeEdit(null);
 		}

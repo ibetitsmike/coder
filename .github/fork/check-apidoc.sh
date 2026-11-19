@@ -2,8 +2,9 @@
 # Fails when coderd/apidoc is out of date with the API annotations. swag
 # collects enum constants from a package's files in map order, so an enum
 # declared across files comes out in a different order from run to run:
-# codersdk.Experiment (deployment.go and fork_experiments.go) and
-# codersdk.ChatContextResourceKind (chats.go and fork_agent_definitions.go).
+# codersdk.Experiment (deployment.go and fork_experiments.go),
+# codersdk.ChatContextResourceKind (chats.go and fork_agent_definitions.go)
+# and codersdk.ChatWatchEventKind (chats.go and fork_chat_watch.go).
 # The comparison sorts those enums' values, moving each value's
 # x-enum-varnames and x-enum-descriptions entries with it, so a stale
 # value-to-name mapping still fails. Every other enum keeps its order.
@@ -21,6 +22,7 @@ def sort_enum:
 	| if has("x-enum-descriptions") then ."x-enum-descriptions" = [$t[][2]] else . end;
 .definitions["codersdk.Experiment"] |= sort_enum
 | .definitions["codersdk.ChatContextResourceKind"] |= sort_enum
+| .definitions["codersdk.ChatWatchEventKind"] |= sort_enum
 '
 
 # docs.go embeds the spec in a Go raw string, which spells a backtick as
