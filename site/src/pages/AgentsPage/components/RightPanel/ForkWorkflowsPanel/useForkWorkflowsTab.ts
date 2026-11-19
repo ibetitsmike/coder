@@ -1,7 +1,7 @@
 // This file is fork code: it decides whether a chat shows the Workflows tab
 // of the fork-workflows experiment.
 
-import { useQuery } from "react-query";
+import { useInfiniteQuery } from "react-query";
 import { chatWorkflowRuns } from "#/api/queries/forkWorkflows";
 import type { Chat } from "#/api/typesGenerated";
 import { useForkExperiment } from "../../ChatElements/tools/forkToolUtils";
@@ -13,9 +13,9 @@ import { useForkExperiment } from "../../ChatElements/tools/forkToolUtils";
  */
 export const useForkWorkflowsTab = (chat: Chat): boolean => {
 	const isEnabled = useForkExperiment("fork-workflows") && !chat.parent_chat_id;
-	const runsQuery = useQuery({
+	const runsQuery = useInfiniteQuery({
 		...chatWorkflowRuns(chat.id),
 		enabled: isEnabled,
 	});
-	return isEnabled && (runsQuery.data?.length ?? 0) > 0;
+	return isEnabled && (runsQuery.data?.pages[0]?.length ?? 0) > 0;
 };
