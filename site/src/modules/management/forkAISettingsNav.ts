@@ -50,6 +50,18 @@ export const useForkAgentDefinitionsPath = (
 	);
 
 /** See `useForkOrganizationPagePath` for the organization carry-over rules. */
+export const useForkWorkflowsPath = (
+	skillOrganizations: readonly Organization[],
+	organizationName: string | null,
+): To | undefined =>
+	useForkOrganizationPagePath(
+		"fork-workflows",
+		"/ai/settings/workflows",
+		skillOrganizations,
+		organizationName,
+	);
+
+/** See `useForkOrganizationPagePath` for the organization carry-over rules. */
 export const useForkPluginPacksPath = (
 	skillOrganizations: readonly Organization[],
 	organizationName: string | null,

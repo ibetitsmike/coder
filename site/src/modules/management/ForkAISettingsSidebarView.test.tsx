@@ -25,6 +25,7 @@ describe.each<[Experiment, string, string]>([
 		"/ai/settings/agent-definitions",
 	],
 	["fork-plugin-packs", "Plugin packs", "/ai/settings/plugin-packs"],
+	["fork-workflows", "Workflows", "/ai/settings/workflows"],
 ])("the %s link", (experiment, linkName, pathname) => {
 	it.each([
 		[

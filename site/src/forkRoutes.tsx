@@ -30,6 +30,10 @@ const ForkPluginPacksPage = lazy(
 		import("./pages/AISettingsPage/ForkPluginPacksPage/ForkPluginPacksPage"),
 );
 
+const ForkWorkflowsPage = lazy(
+	() => import("./pages/AISettingsPage/ForkWorkflowsPage/ForkWorkflowsPage"),
+);
+
 /** Routes nested under /agents/settings. */
 export const forkAgentSettingsRoutes = (
 	<>
@@ -46,5 +50,6 @@ export const forkAISettingsRoutes = (
 			element={<ForkOrganizationAgentDefinitionsPage />}
 		/>
 		<Route path="plugin-packs" element={<ForkPluginPacksPage />} />
+		<Route path="workflows" element={<ForkWorkflowsPage />} />
 	</>
 );
