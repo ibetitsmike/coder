@@ -51,7 +51,14 @@ describe("ForkWorkflowLongText", () => {
 		// The expansion control never lives inside the live region.
 		expect(within(logs).queryByRole("button")).toBeNull();
 		// The grown log is still scrollable without remounting a subtree.
-		expect(logs.querySelector("pre")).toHaveClass("max-h-96");
+		const grown = logs.querySelector("pre");
+		expect(grown).toHaveClass("max-h-96");
+
+		// The run finishes and the block stops being live: the same pre
+		// must stay mounted, so focus and scroll position survive.
+		rerender(<ForkWorkflowLongText label="Logs" text={longText} />);
+		expect(screen.getByRole("region", { name: "Logs" })).toBe(logs);
+		expect(logs.querySelector("pre")).toBe(grown);
 	});
 
 	it("names each toggle by its block so two blocks stay apart", async () => {

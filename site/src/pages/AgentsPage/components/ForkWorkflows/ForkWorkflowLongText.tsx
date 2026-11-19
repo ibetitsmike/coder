@@ -52,19 +52,21 @@ export const ForkWorkflowLongText: React.FC<ForkWorkflowLongTextProps> = ({
 		"m-0 whitespace-pre-wrap wrap-break-word bg-transparent font-mono text-xs leading-5",
 		isError ? "text-content-destructive" : "text-content-primary",
 	);
-	// role="log" re-announces added nodes, so a live block whose preview
-	// swaps for a scroll area would re-read the whole log. In a live block
-	// the full text keeps the plain pre the block already had, and the
-	// toggle sits outside the live region below it.
-	const isLiveExpanded = isLive && expanded && preview !== null;
+	// A block that grew past the threshold while live keeps the same
+	// expanded pre when the run finishes: swapping it for a scroll area
+	// then would drop keyboard focus and reset the scroll position right
+	// as the user reads it, and role="log" would also re-announce the
+	// added subtree. The live flag only moves the toggle out of the
+	// region while the block announces additions.
+	const isLiveExpanded = expanded && preview !== null;
 
 	return (
 		<section
 			aria-label={label}
 			className={cn(
 				"mt-1.5 flex flex-col gap-0.5",
-				// A live full log scrolls on the pre itself; min-width 0
-				// would let that long line shrink the block to nothing.
+				// A full log scrolls on the pre itself; min-width 0 would let
+				// that long line shrink the block to nothing.
 				isLive ? "min-w-px" : "min-w-0",
 			)}
 			role={isLive ? "log" : undefined}
