@@ -1,6 +1,7 @@
 import type * as TypesGen from "#/api/typesGenerated";
 import { isAfter } from "#/utils/time";
 import { isAsyncAskUserQuestionResult } from "../ChatElements/tools/utils";
+import { isPendingRowID } from "./chatStore";
 import { getMessageText, parseAsyncAnswerContent } from "./messageParsing";
 import type { MergedTool, ParsedMessageEntry } from "./types";
 
@@ -114,6 +115,12 @@ export const deriveAskUserQuestionState = (
 	// page hides the dock. openAsyncQuestion is set before this loop, so the
 	// dock comes back if the queue drops the answer.
 	for (const queuedMessage of queuedMessages) {
+		// A pending send's optimistic row is not an answer the server holds.
+		// Counting it would mark the question answered before the request
+		// settles, so a failed send could not show its error.
+		if (isPendingRowID(queuedMessage.id)) {
+			continue;
+		}
 		const asyncAnswer = parseAsyncAnswerContent(queuedMessage.content);
 		const answeredTool =
 			asyncAnswer && latestToolById.get(asyncAnswer.toolCallId);

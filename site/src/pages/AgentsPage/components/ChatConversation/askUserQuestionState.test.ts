@@ -254,6 +254,19 @@ describe("deriveAskUserQuestionState", () => {
 		expect(state.isLatestAnswered).toBe(false);
 		expect(responseTo(state, "async-call")).toBe(answerMessage("async-call"));
 		expect(state.openAsyncQuestion?.id).toBe("async-call");
+	}); // A pending send's optimistic row disappears when the send fails, so it
+	// must not mark the question answered: the form still has to show the
+	// send's error.
+	it("ignores a pending send row that answers the question", () => {
+		const state = derive(questionStep("async-call", { async: true }), {
+			queuedMessages: [
+				{ ...queued(answerMessage("async-call")), id: Number.MAX_SAFE_INTEGER },
+			],
+		});
+
+		expect(state.isLatestAnswered).toBe(false);
+		expect(responseTo(state, "async-call")).toBeUndefined();
+		expect(state.openAsyncQuestion?.id).toBe("async-call");
 	});
 
 	it("leaves no async question open once a newer blocking one asks", () => {

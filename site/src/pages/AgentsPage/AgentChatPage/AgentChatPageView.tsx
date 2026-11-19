@@ -551,8 +551,6 @@ export const AgentChatPageView: React.FC<AgentChatPageViewProps> = ({
 	};
 
 	const isOtherUserReadOnly = !isArchived && currentUser.id !== chat.owner_id;
-	// A request's rollback would overwrite an edit opened during the request.
-	const canBeginEdit = !isOtherUserReadOnly && !isSubmissionPending;
 
 	return (
 		<TerminalClientSessionContext value={clientSessionId}>
@@ -625,7 +623,9 @@ export const AgentChatPageView: React.FC<AgentChatPageViewProps> = ({
 								hasFetchMoreError={hasFetchMoreError}
 								onFetchMoreMessages={onFetchMoreMessages}
 								onEditUserMessage={
-									canBeginEdit ? editing.handleBeginHistoryEdit : undefined
+									isOtherUserReadOnly
+										? undefined
+										: editing.handleBeginHistoryEdit
 								}
 								editingMessageId={
 									editing.editingTarget?.kind === "history"
@@ -659,7 +659,7 @@ export const AgentChatPageView: React.FC<AgentChatPageViewProps> = ({
 									onDeleteQueuedMessage={handleDeleteQueuedMessage}
 									onPromoteQueuedMessage={handlePromoteQueuedMessage}
 									onEditQueuedMessage={
-										canBeginEdit ? handleEditQueuedMessage : undefined
+										isOtherUserReadOnly ? undefined : handleEditQueuedMessage
 									}
 									onEndQueuedMessageEdit={
 										isOtherUserReadOnly ? undefined : handleEndQueuedMessageEdit
