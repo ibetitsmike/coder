@@ -79,7 +79,6 @@ describe("ForkSavedWorkflowsPage", () => {
 		expect(listUser).toHaveBeenCalledWith(MockDefaultOrganization.id);
 		expect(listOrganization).toHaveBeenCalledWith(MockDefaultOrganization.id);
 
-		// Only the personal tier has a create button and row actions.
 		expect(
 			screen.getAllByRole("button", { name: "New workflow" }),
 		).toHaveLength(1);
