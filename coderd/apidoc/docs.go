@@ -28549,6 +28549,7 @@ const docTemplate = `{
         "codersdk.ChatWatchEventKind": {
             "type": "string",
             "enum": [
+                "fork_change",
                 "status_change",
                 "summary_change",
                 "chat_summary_change",
@@ -28558,10 +28559,10 @@ const docTemplate = `{
                 "diff_status_change",
                 "action_required",
                 "context_dirty",
-                "project_change",
-                "fork_change"
+                "project_change"
             ],
             "x-enum-varnames": [
+                "ChatWatchEventKindForkChange",
                 "ChatWatchEventKindStatusChange",
                 "ChatWatchEventKindSummaryChange",
                 "ChatWatchEventKindChatSummaryChange",
@@ -28571,8 +28572,7 @@ const docTemplate = `{
                 "ChatWatchEventKindDiffStatusChange",
                 "ChatWatchEventKindActionRequired",
                 "ChatWatchEventKindContextDirty",
-                "ChatWatchEventKindProjectChange",
-                "ChatWatchEventKindForkChange"
+                "ChatWatchEventKindProjectChange"
             ]
         },
         "codersdk.ChatWatchForkChange": {

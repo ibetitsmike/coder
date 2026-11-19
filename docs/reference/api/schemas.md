@@ -6556,7 +6556,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     "root_chat_id": "2898031c-fdce-4e3e-8c53-4481dd42fcd7",
     "workflow_run_id": "5e5ef678-2347-491b-a579-798b0d4ed952"
   },
-  "kind": "status_change",
+  "kind": "fork_change",
   "tool_calls": [
     {
       "args": "string",
@@ -6580,7 +6580,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ## codersdk.ChatWatchEventKind
 
 ```json
-"status_change"
+"fork_change"
 ```
 
 ### Properties
