@@ -265,7 +265,6 @@ describe("ChatPageTimeline", () => {
 					persistedError={undefined}
 					hasMoreMessages={false}
 					isFetchingMoreMessages={false}
-					isHydratingMessages={false}
 					hasFetchMoreError={false}
 					onFetchMoreMessages={vi.fn()}
 					urlTransform={(url) => url}
