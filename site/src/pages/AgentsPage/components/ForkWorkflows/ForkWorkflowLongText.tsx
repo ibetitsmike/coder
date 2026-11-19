@@ -49,14 +49,24 @@ export const ForkWorkflowLongText: React.FC<ForkWorkflowLongTextProps> = ({
 	const [expanded, setExpanded] = useState(() => textPreview(text) === null);
 	const preview = textPreview(text);
 	const textClassName = cn(
-		"m-0 whitespace-pre-wrap wrap-break-word bg-transparent p-0 font-mono text-xs leading-5",
+		"m-0 whitespace-pre-wrap wrap-break-word bg-transparent font-mono text-xs leading-5",
 		isError ? "text-content-destructive" : "text-content-primary",
 	);
+	// role="log" re-announces added nodes, so a live block whose preview
+	// swaps for a scroll area would re-read the whole log. In a live block
+	// the full text keeps the plain pre the block already had, and the
+	// toggle sits outside the live region below it.
+	const isLiveExpanded = isLive && expanded && preview !== null;
 
 	return (
 		<section
 			aria-label={label}
-			className="mt-1.5 flex min-w-0 flex-col gap-0.5"
+			className={cn(
+				"mt-1.5 flex flex-col gap-0.5",
+				// A live full log scrolls on the pre itself; min-width 0
+				// would let that long line shrink the block to nothing.
+				isLive ? "min-w-px" : "min-w-0",
+			)}
 			role={isLive ? "log" : undefined}
 			aria-live={isLive ? "polite" : undefined}
 		>
@@ -65,7 +75,18 @@ export const ForkWorkflowLongText: React.FC<ForkWorkflowLongTextProps> = ({
 				<pre className={textClassName}>{text}</pre>
 			) : (
 				<>
-					{expanded ? (
+					{isLiveExpanded ? (
+						// The same element the preview rendered, grown to the
+						// scrollable height instead of swapped for a scroll
+						// area, so the live region keeps announcing additions.
+						<pre
+							// oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrolling region must be keyboard reachable.
+							tabIndex={0}
+							className={cn(textClassName, "max-h-96 overflow-y-auto")}
+						>
+							{text}
+						</pre>
+					) : expanded ? (
 						<ScrollArea
 							className="rounded-md border"
 							viewportClassName="max-h-96 p-2"
@@ -77,16 +98,18 @@ export const ForkWorkflowLongText: React.FC<ForkWorkflowLongTextProps> = ({
 					) : (
 						<pre className={textClassName}>{`${preview}…`}</pre>
 					)}
-					<Button
-						variant="subtle"
-						size="xs"
-						className="w-fit px-0"
-						aria-expanded={expanded}
-						aria-label={`${expanded ? "Show less" : "Show more"} of ${label}`}
-						onClick={() => setExpanded((value) => !value)}
-					>
-						{expanded ? "Show less" : "Show more"}
-					</Button>
+					{!isLive && (
+						<Button
+							variant="subtle"
+							size="xs"
+							className="w-fit px-0"
+							aria-expanded={expanded}
+							aria-label={`${expanded ? "Show less" : "Show more"} of ${label}`}
+							onClick={() => setExpanded((value) => !value)}
+						>
+							{expanded ? "Show less" : "Show more"}
+						</Button>
+					)}
 				</>
 			)}
 		</section>

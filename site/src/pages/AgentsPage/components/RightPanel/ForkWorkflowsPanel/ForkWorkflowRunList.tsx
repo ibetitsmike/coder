@@ -2,7 +2,7 @@
 // (fork-workflows experiment).
 
 import type React from "react";
-import { useEffect, useRef } from "react";
+import { createContext, useContext, useEffect, useRef } from "react";
 import { getErrorMessage } from "#/api/errors";
 import type { WorkflowRun } from "#/api/typesGenerated";
 import { Alert } from "#/components/Alert/Alert";
@@ -39,16 +39,23 @@ type ForkWorkflowRunRowProps = {
 	buttonRef?: (button: HTMLButtonElement | null) => void;
 };
 
+// The shared slow clock of the list. A useTime on every row would give
+// each loaded row its own interval, and the row count is unbounded, so
+// terminal rows read this one value and only a running row keeps a
+// one-second clock of its own.
+const ListNowContext = createContext<number>(Date.now());
+
 // The clock lives on the row so only rows with a running run tick every
-// second; completed rows keep the slow interval.
+// second; completed rows reuse the list's shared clock.
 const ForkWorkflowRunRow: React.FC<ForkWorkflowRunRowProps> = ({
 	run,
 	onSelectRun,
 	buttonRef,
 }) => {
-	const now = useTime(() => Date.now(), {
-		interval: run.status === "running" ? 1_000 : 30_000,
-	});
+	const isRunning = run.status === "running";
+	const sharedNow = useContext(ListNowContext);
+	const runningNow = useTime(() => Date.now(), { disabled: !isRunning });
+	const now = isRunning ? runningNow : sharedNow;
 	return (
 		<button
 			type="button"
@@ -89,6 +96,9 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 	onLoadOlderRuns,
 }) => {
 	const listRef = useRef<HTMLUListElement>(null);
+	// Ticks every 30 seconds, so the terminal rows' relative timestamps
+	// stay fresh without one interval per row.
+	const listNow = useTime(() => Date.now(), { interval: 30_000 });
 	// The row buttons by run id, so focus restoration targets the actual
 	// control and cannot land on a button a row grows later.
 	const rowButtons = useRef(new Map<string, HTMLButtonElement>());
@@ -157,32 +167,34 @@ export const ForkWorkflowRunList: React.FC<ForkWorkflowRunListProps> = ({
 					</p>
 				</Alert>
 			)}
-			<ul
-				ref={listRef}
-				aria-label="Workflow runs"
-				className="m-0 flex list-none flex-col gap-1 p-0 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-content-link"
-				// When "Load older runs" unmounts after the last page, focus
-				// moves to the first run of the appended page, or to the last
-				// run when that page is empty, or here, so it does not drop to
-				// the body.
-				tabIndex={-1}
-			>
-				{runs.map((run) => (
-					<li key={run.id}>
-						<ForkWorkflowRunRow
-							run={run}
-							onSelectRun={onSelectRun}
-							buttonRef={(button) => {
-								if (button) {
-									rowButtons.current.set(run.id, button);
-								} else {
-									rowButtons.current.delete(run.id);
-								}
-							}}
-						/>
-					</li>
-				))}
-			</ul>
+			<ListNowContext.Provider value={listNow}>
+				<ul
+					ref={listRef}
+					aria-label="Workflow runs"
+					className="m-0 flex list-none flex-col gap-1 p-0 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-content-link"
+					// When "Load older runs" unmounts after the last page, focus
+					// moves to the first run of the appended page, or to the last
+					// run when that page is empty, or here, so it does not drop to
+					// the body.
+					tabIndex={-1}
+				>
+					{runs.map((run) => (
+						<li key={run.id}>
+							<ForkWorkflowRunRow
+								run={run}
+								onSelectRun={onSelectRun}
+								buttonRef={(button) => {
+									if (button) {
+										rowButtons.current.set(run.id, button);
+									} else {
+										rowButtons.current.delete(run.id);
+									}
+								}}
+							/>
+						</li>
+					))}
+				</ul>
+			</ListNowContext.Provider>
 			{hasOlderRuns && onLoadOlderRuns && (
 				<Button
 					variant="subtle"
