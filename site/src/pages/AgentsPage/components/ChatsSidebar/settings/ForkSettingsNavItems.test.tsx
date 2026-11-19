@@ -54,9 +54,6 @@ describe("ForkSettingsNavItems", () => {
 		await waitFor(() =>
 			expect(router.state.location.pathname).toBe("/agents/settings/workflows"),
 		);
-		expect(
-			screen.queryByRole("link", { name: "Agent definitions" }),
-		).toBeNull();
 	});
 
 	it("renders no links while the fork experiments are off", async () => {

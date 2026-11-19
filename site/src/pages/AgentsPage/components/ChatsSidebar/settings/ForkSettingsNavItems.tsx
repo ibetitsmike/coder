@@ -15,11 +15,9 @@ export const ForkSettingsNavItems: React.FC<ForkSettingsNavItemsProps> = ({
 	state,
 }) => {
 	const { experiments } = useDashboard();
-	const showAgentDefinitions = experiments.includes("fork-agent-definitions");
-	const showWorkflows = experiments.includes("fork-workflows");
 	return (
 		<>
-			{showAgentDefinitions && (
+			{experiments.includes("fork-agent-definitions") && (
 				<>
 					<SettingsNavItem
 						icon={WorkflowIcon}
@@ -37,7 +35,7 @@ export const ForkSettingsNavItems: React.FC<ForkSettingsNavItemsProps> = ({
 					/>
 				</>
 			)}
-			{showWorkflows && (
+			{experiments.includes("fork-workflows") && (
 				<SettingsNavItem
 					icon={ScrollTextIcon}
 					label="Workflows"

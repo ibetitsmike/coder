@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
 import { savedWorkflowsKey } from "#/api/queries/forkSavedWorkflows";
-import type { ForkSavedWorkflowMetadata } from "#/api/typesGenerated";
 import {
 	MockDefaultOrganization,
 	MockOrganization2,
@@ -19,21 +18,6 @@ import {
 import ForkSavedWorkflowsPage from "./ForkSavedWorkflowsPage";
 
 const path = "/agents/settings/workflows";
-
-const workflowQueries = (
-	organizationId: string,
-	personal: readonly ForkSavedWorkflowMetadata[],
-	organization: readonly ForkSavedWorkflowMetadata[],
-) => [
-	{
-		key: savedWorkflowsKey({ tier: "user", organizationId }),
-		data: personal,
-	},
-	{
-		key: savedWorkflowsKey({ tier: "organization", organizationId }),
-		data: organization,
-	},
-];
 
 const meta = {
 	title: "pages/AgentsPage/ForkSavedWorkflowsPage",
@@ -58,17 +42,43 @@ type Story = StoryObj<typeof meta>;
 
 export const Listed: Story = {
 	parameters: {
-		queries: workflowQueries(
-			MockDefaultOrganization.id,
-			[MockForkSavedWorkflowMetadata],
-			[MockForkOrganizationSavedWorkflowMetadata],
-		),
+		queries: [
+			{
+				key: savedWorkflowsKey({
+					tier: "user",
+					organizationId: MockDefaultOrganization.id,
+				}),
+				data: [MockForkSavedWorkflowMetadata],
+			},
+			{
+				key: savedWorkflowsKey({
+					tier: "organization",
+					organizationId: MockDefaultOrganization.id,
+				}),
+				data: [MockForkOrganizationSavedWorkflowMetadata],
+			},
+		],
 	},
 };
 
 export const Empty: Story = {
 	parameters: {
-		queries: workflowQueries(MockDefaultOrganization.id, [], []),
+		queries: [
+			{
+				key: savedWorkflowsKey({
+					tier: "user",
+					organizationId: MockDefaultOrganization.id,
+				}),
+				data: [],
+			},
+			{
+				key: savedWorkflowsKey({
+					tier: "organization",
+					organizationId: MockDefaultOrganization.id,
+				}),
+				data: [],
+			},
+		],
 	},
 };
 
@@ -79,11 +89,22 @@ export const MultipleOrganizations: Story = {
 			organization_ids: [MockDefaultOrganization.id, MockOrganization2.id],
 		},
 		organizations: [MockDefaultOrganization, MockOrganization2],
-		queries: workflowQueries(
-			MockDefaultOrganization.id,
-			[MockForkSavedWorkflowMetadata],
-			[MockForkOrganizationSavedWorkflowMetadata],
-		),
+		queries: [
+			{
+				key: savedWorkflowsKey({
+					tier: "user",
+					organizationId: MockDefaultOrganization.id,
+				}),
+				data: [MockForkSavedWorkflowMetadata],
+			},
+			{
+				key: savedWorkflowsKey({
+					tier: "organization",
+					organizationId: MockDefaultOrganization.id,
+				}),
+				data: [MockForkOrganizationSavedWorkflowMetadata],
+			},
+		],
 	},
 };
 

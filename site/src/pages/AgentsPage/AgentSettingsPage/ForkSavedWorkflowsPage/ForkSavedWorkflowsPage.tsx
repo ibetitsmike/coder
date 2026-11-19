@@ -1,7 +1,5 @@
-// This file is fork code: the fork-workflows experiment's saved workflows
-// page in Agent settings. Any member manages their personal workflows here
-// and reads the organization workflows they can read. Organization admins
-// manage organization workflows in AI settings.
+// This file is fork code. Organization admins manage organization
+// workflows in AI settings, so members only read them here.
 
 import { useState } from "react";
 import { Navigate } from "react-router";
@@ -14,12 +12,6 @@ import {
 import { ForkSavedWorkflowsTable } from "#/pages/AISettingsPage/ForkWorkflowsPage/ForkSavedWorkflowsTable";
 import { SectionHeader } from "../../components/SectionHeader";
 import { readOnlySkillAccess } from "../../utils/skills";
-
-const organizationCopy = {
-	description:
-		"Organization workflows you can read. Your chats in this organization run one with run_workflow. Ask an organization admin to change them.",
-	emptyMessage: "No organization workflows are available to you.",
-};
 
 const ForkSavedWorkflowsPage: React.FC = () => {
 	const { user } = useAuthenticated();
@@ -65,7 +57,11 @@ const ForkSavedWorkflowsPage: React.FC = () => {
 			<ForkSavedWorkflowsTable
 				scope={{ tier: "organization", organizationId: organization.id }}
 				access={readOnlySkillAccess}
-				copy={organizationCopy}
+				copy={{
+					description:
+						"Organization workflows you can read. Your chats in this organization run one with run_workflow. Ask an organization admin to change them.",
+					emptyMessage: "No organization workflows are available to you.",
+				}}
 			/>
 		</div>
 	);

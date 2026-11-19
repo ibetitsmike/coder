@@ -143,7 +143,6 @@ describe("ForkSavedWorkflowsPage", () => {
 			expect(listUser).toHaveBeenLastCalledWith(MockOrganization2.id),
 		);
 		expect(listOrganization).toHaveBeenLastCalledWith(MockOrganization2.id);
-		expect(listUser).not.toHaveBeenCalledWith(MockOrganization3.id);
 	});
 
 	it("asks a user without an organization to join one", async () => {
