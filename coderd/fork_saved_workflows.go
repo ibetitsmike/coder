@@ -275,7 +275,10 @@ func readForkSavedWorkflowExpectID(rw http.ResponseWriter, r *http.Request) (uui
 // response. Without an expect_id it reports the write error as usual. With
 // one, sql.ErrNoRows can mean either a missing workflow (404) or a stored id
 // that differs from the expected one (409), and one read as the system tells
-// the two apart, so a delete-only caller still learns of a conflict.
+// the two apart, so a delete-only caller still learns of a conflict. The org
+// wrapper marks a no-rows that its pre-authorization fetch returned: the
+// write never ran there, so the check skips the probe and reports the write
+// error, which says nothing about a workflow the caller cannot see.
 //
 // A denial probes with the caller's authorization instead, so a caller who
 // cannot read a hidden workflow keeps getting 404, never a conflict or its
@@ -307,7 +310,7 @@ func okAfterConditionalWrite(ctx context.Context, rw http.ResponseWriter, err er
 		httpapi.InternalServerError(rw, readErr)
 		return false
 	}
-	if expectID.Valid && xerrors.Is(err, sql.ErrNoRows) {
+	if expectID.Valid && xerrors.Is(err, sql.ErrNoRows) && !dbauthz.IsForkFetchNoRows(err) {
 		// The write already authorized this caller, so the conflict check
 		// reads as the system and a delete-only caller still learns of a
 		// mismatch instead of a missing workflow.
