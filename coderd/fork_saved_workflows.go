@@ -349,7 +349,7 @@ func okAfterConditionalWrite(ctx context.Context, rw http.ResponseWriter, err er
 			writeForkSavedWorkflowWriteError(ctx, rw, err)
 			return false
 		}
-		if httpapi.Is404Error(readErr) {
+		if httpapi.Is404Error(readErr) || httperror.StatusCode(readErr) == http.StatusNotFound {
 			// The caller cannot read the workflow either, so it learns
 			// nothing beyond a missing resource: 404.
 			httpapi.ResourceNotFound(rw)
@@ -368,7 +368,7 @@ func okAfterConditionalWrite(ctx context.Context, rw http.ResponseWriter, err er
 				Detail:  "Read the workflow again and retry with its current id.",
 			})
 			return false
-		case httpapi.Is404Error(readErr):
+		case httpapi.Is404Error(readErr) || httperror.StatusCode(readErr) == http.StatusNotFound:
 			// The caller may not touch the row, whether it is gone or a
 			// hidden replacement: the write error below answers 404.
 		default:
