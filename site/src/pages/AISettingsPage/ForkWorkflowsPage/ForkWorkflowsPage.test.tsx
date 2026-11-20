@@ -339,15 +339,35 @@ it("keeps the draft and refetches when the server rejects the save with 409", as
 		forkSavedWorkflowsApi,
 		"getOrganizationSavedWorkflows",
 	).mockResolvedValue([]);
-	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow").mockResolvedValue(
-		MockForkSavedWorkflow,
-	);
+	const detail = vi
+		.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow")
+		.mockResolvedValue(MockForkSavedWorkflow);
 	// Another tab replaced the workflow after the editor loaded it, so the
-	// conditional save refuses with 409.
+	// conditional save refuses with 409, and from that moment the list and
+	// detail read the replacement it stored under the same name, so the
+	// refetches the mutation triggers model the server state.
+	const replacement = {
+		...MockForkSavedWorkflowMetadata,
+		id: "saved-workflow-replacement",
+		description: "Replaced in another tab.",
+		updated_at: "2030-01-01T00:00:00Z",
+	};
+	let serverHasReplacement = false;
 	const update = vi
 		.spyOn(forkSavedWorkflowsApi, "updateUserSavedWorkflow")
-		.mockRejectedValue(mockApiError({ message: "Conflict.", status: 409 }));
-	renderPage(`?org=${MockOrganization2.name}`);
+		.mockImplementation(async () => {
+			serverHasReplacement = true;
+			throw mockApiError({ message: "Conflict.", status: 409 });
+		});
+	list.mockImplementation(async () =>
+		serverHasReplacement ? [replacement] : [MockForkSavedWorkflowMetadata],
+	);
+	detail.mockImplementation(async () =>
+		serverHasReplacement
+			? { ...MockForkSavedWorkflow, ...replacement }
+			: MockForkSavedWorkflow,
+	);
+	const { queryClient } = renderPage(`?org=${MockOrganization2.name}`);
 
 	await user.click(
 		await screen.findByRole("button", {
@@ -373,29 +393,37 @@ it("keeps the draft and refetches when the server rejects the save with 409", as
 		{ expect_id: MockForkSavedWorkflow.id },
 	);
 	// The conflict invalidates the list and detail queries, and the
-	// refetches bring the editor the state the name holds now.
+	// refetches bring the editor the state the name holds now: the cache
+	// names the replacement, and the toast explains the rejection.
 	await waitFor(() =>
 		expect(list.mock.calls.length).toBeGreaterThan(listCallsBeforeSave),
 	);
 	await waitFor(() => expect(info).toHaveBeenCalled());
-	// The draft stays and the editor stays open with the retained values,
-	// so a retry still addresses the workflow the editor loaded.
-	expect(description).toHaveValue(
-		`${MockForkSavedWorkflowMetadata.description} even harder`,
+	await waitFor(() =>
+		expect(
+			queryClient
+				.getQueryData<ForkSavedWorkflowMetadata[]>(
+					savedWorkflowsKey({
+						tier: "user",
+						organizationId: MockOrganization2.id,
+					}),
+				)
+				?.some((workflow) => workflow.id === "saved-workflow-replacement"),
+		).toBe(true),
 	);
-	expect(screen.queryByRole("dialog")).not.toBeNull();
+	// The stale row blocks further saves, so a retry of the draft cannot
+	// overwrite the replacement and the user copies it out instead.
 	await user.clear(description);
 	await user.type(description, "retained");
 	await user.click(
 		within(dialog).getByRole("button", { name: "Save workflow" }),
 	);
-	await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
-	expect(update).toHaveBeenLastCalledWith(
-		MockOrganization2.id,
-		MockForkSavedWorkflowMetadata.name,
-		expect.objectContaining({ description: "retained" }),
-		{ expect_id: MockForkSavedWorkflow.id },
-	);
+	// The click reaches the editor, but the stale guard stops it before the
+	// mutation: no second request, and the banner explains why.
+	expect(update).toHaveBeenCalledTimes(1);
+	expect(
+		within(dialog).getByText(/changed or was deleted after you opened it/i),
+	).toBeInTheDocument();
 });
 
 it("keeps the editor open with the draft after a failed save", async () => {
@@ -456,10 +484,19 @@ it("keeps the draft and refetches when the server rejects the save with 404", as
 		MockForkSavedWorkflow,
 	);
 	// Another tab deleted the workflow after the editor loaded it, so the
-	// conditional save refuses with 404.
+	// conditional save refuses with 404, and from that moment the list no
+	// longer holds the row, so the refetches the mutation triggers model
+	// the server state.
+	let serverDeleted = false;
 	const update = vi
 		.spyOn(forkSavedWorkflowsApi, "updateUserSavedWorkflow")
-		.mockRejectedValue(mockApiError({ message: "Not found.", status: 404 }));
+		.mockImplementation(async () => {
+			serverDeleted = true;
+			throw mockApiError({ message: "Not found.", status: 404 });
+		});
+	list.mockImplementation(async () =>
+		serverDeleted ? [] : [MockForkSavedWorkflowMetadata],
+	);
 	renderPage(`?org=${MockOrganization2.name}`);
 
 	await user.click(
@@ -480,7 +517,8 @@ it("keeps the draft and refetches when the server rejects the save with 404", as
 
 	await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
 	// The 404 invalidates the list and detail queries, and the refetches
-	// bring the editor the state the name holds now.
+	// bring the editor the state the name holds now: the row is gone, and
+	// the toast explains the rejection.
 	await waitFor(() =>
 		expect(list.mock.calls.length).toBeGreaterThan(listCallsBeforeSave),
 	);
@@ -488,18 +526,15 @@ it("keeps the draft and refetches when the server rejects the save with 404", as
 	expect(description).toHaveValue(
 		`${MockForkSavedWorkflowMetadata.description} even harder`,
 	);
-	// The retained editor still works: a retry of the draft reaches the
-	// server with the same conditional guard.
+	// The stale row blocks further saves, so the draft cannot overwrite
+	// anything and the user copies it out instead.
 	await user.click(
 		within(dialog).getByRole("button", { name: "Save workflow" }),
 	);
-	await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
-	expect(update).toHaveBeenLastCalledWith(
-		MockOrganization2.id,
-		MockForkSavedWorkflowMetadata.name,
-		expect.anything(),
-		{ expect_id: MockForkSavedWorkflow.id },
-	);
+	expect(update).toHaveBeenCalledTimes(1);
+	expect(
+		within(dialog).getByText(/changed or was deleted after you opened it/i),
+	).toBeInTheDocument();
 });
 
 it("seeds the editor from a fresh fetch, not the cached workflow", async () => {
