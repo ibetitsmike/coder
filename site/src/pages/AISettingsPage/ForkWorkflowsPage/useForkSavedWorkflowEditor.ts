@@ -249,9 +249,12 @@ export const useForkSavedWorkflowEditor = (scope: SavedWorkflowScope) => {
 						onError: (error) => {
 							if (
 								isAxiosError(error) &&
-								error.response?.status === 409
+								(error.response?.status === 409 ||
+									error.response?.status === 404)
 							) {
-								void refetchForEdit(name);
+								// The mutation's own invalidation already refetches
+								// the list and detail queries, so the editor seeds
+								// from what the name holds now.
 								toast.info(
 									`${name} changed or was deleted after you opened it, so the save was rejected. Your changes are still in the editor.`,
 								);

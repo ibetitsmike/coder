@@ -45,6 +45,15 @@ describe("conditional saved workflow writes", () => {
 		);
 	});
 
+	it("sends no expect_id when the write stays unconditional", async () => {
+		await updateUserSavedWorkflow("org-1", "deploy", { description: "x" });
+		expect(axiosSpies.patch.mock.calls[0][0]).not.toContain("expect_id");
+		// The empty params object is the generated contract for an
+		// unconditional write, so it must not fail.
+		await updateUserSavedWorkflow("org-1", "deploy", { description: "x" }, {});
+		expect(axiosSpies.patch.mock.calls[1][0]).not.toContain("expect_id");
+	});
+
 	it("rejects an empty expect_id instead of dropping the guard", async () => {
 		await expect(
 			updateUserSavedWorkflow(

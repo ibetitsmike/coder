@@ -372,18 +372,30 @@ it("keeps the draft and refetches when the server rejects the save with 409", as
 		expect.anything(),
 		{ expect_id: MockForkSavedWorkflow.id },
 	);
-	// The conflict refetches the list so the row shows what the name
-	// holds now.
+	// The conflict invalidates the list and detail queries, and the
+	// refetches bring the editor the state the name holds now.
 	await waitFor(() =>
 		expect(list.mock.calls.length).toBeGreaterThan(listCallsBeforeSave),
 	);
 	await waitFor(() => expect(info).toHaveBeenCalled());
-	// The draft stays, the editor stays open, and the list refetches what
-	// the name holds now.
+	// The draft stays and the editor stays open with the retained values,
+	// so a retry still addresses the workflow the editor loaded.
 	expect(description).toHaveValue(
 		`${MockForkSavedWorkflowMetadata.description} even harder`,
 	);
 	expect(screen.queryByRole("dialog")).not.toBeNull();
+	await user.clear(description);
+	await user.type(description, "retained");
+	await user.click(
+		within(dialog).getByRole("button", { name: "Save workflow" }),
+	);
+	await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+	expect(update).toHaveBeenLastCalledWith(
+		MockOrganization2.id,
+		MockForkSavedWorkflowMetadata.name,
+		expect.objectContaining({ description: "retained" }),
+		{ expect_id: MockForkSavedWorkflow.id },
+	);
 });
 
 it("keeps the editor open with the draft after a failed save", async () => {

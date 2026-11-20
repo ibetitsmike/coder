@@ -63,19 +63,20 @@ export const createUserSavedWorkflow = async (
 };
 
 /**
- * The query parameters of a conditional saved workflow write. Undefined
- * leaves the write unconditional. An explicit but empty expect_id is a
- * caller error: the search-param builder drops empty strings, so it would
- * silently turn a guarded write into an unconditional one, the failure the
- * server's 400-on-empty rule exists to prevent.
+ * The query parameters of a conditional saved workflow write. Undefined, or
+ * a params object without expect_id, leaves the write unconditional. An
+ * explicit but empty expect_id is a caller error: the search-param builder
+ * drops empty strings, so it would silently turn a guarded write into an
+ * unconditional one, the failure the server's 400-on-empty rule exists to
+ * prevent.
  */
 const savedWorkflowWriteSearchParams = (
 	params?: ForkSavedWorkflowWriteParams,
 ): Record<string, string | undefined> => {
-	if (!params) {
+	if (params?.expect_id === undefined) {
 		return {};
 	}
-	if (!params.expect_id) {
+	if (params.expect_id === "") {
 		throw new Error("expect_id must be a UUID.");
 	}
 	return { expect_id: params.expect_id };
