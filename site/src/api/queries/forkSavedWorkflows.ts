@@ -263,7 +263,9 @@ export const deleteSavedWorkflow = (queryClient: QueryClient) =>
 			try {
 				await scopeEndpoints(scope).remove(name, { expect_id: id });
 			} catch (error) {
-				// The workflow was deleted after the user picked it.
+				// The name no longer resolves to the picked workflow: it was
+				// deleted, or the server hides the stored row or its hidden
+				// replacement from the caller and answers not-found for that.
 				if (isAxiosError(error) && error.response?.status === 404) {
 					throw new SavedWorkflowChangedError();
 				}
