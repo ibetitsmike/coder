@@ -2,8 +2,10 @@
 // editor (fork-workflows experiment).
 
 import type { ForkSavedWorkflowSchema } from "#/api/forkSavedWorkflowSchema";
-import type { UpdateSavedWorkflowRequest } from "#/api/forkSavedWorkflows";
-import type { CreateForkSavedWorkflowRequest } from "#/api/typesGenerated";
+import type {
+	CreateSavedWorkflowRequest,
+	UpdateSavedWorkflowRequest,
+} from "#/api/forkSavedWorkflows";
 import { getSkillContentSizeBytes } from "#/pages/AgentsPage/utils/skills";
 
 // The backend limits, from coderd/fork_saved_workflows.go, except the
@@ -197,7 +199,7 @@ export const savedWorkflowFormErrors = (
  */
 export const buildCreateSavedWorkflowRequest = (
 	values: SavedWorkflowFormValues,
-): CreateForkSavedWorkflowRequest => {
+): CreateSavedWorkflowRequest => {
 	const argsSchema = toArgsSchemaObject(values.argsSchema);
 	const phases = parseSavedWorkflowPhases(values.phases);
 	return {

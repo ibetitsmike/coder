@@ -15,6 +15,16 @@ import type {
 } from "./typesGenerated";
 
 /**
+ * The same create request as the generated type, with args_schema narrowed
+ * to the object shape the backend validates, so a string or array fails to
+ * compile instead of failing on the server.
+ */
+export type CreateSavedWorkflowRequest = Omit<
+	CreateForkSavedWorkflowRequest,
+	"args_schema"
+> & { args_schema?: ForkSavedWorkflowSchema };
+
+/**
  * The same update request as the generated type, with args_schema widened
  * to null, which removes the schema where an absent key leaves it.
  */
@@ -53,7 +63,7 @@ export const getUserSavedWorkflow = async (
 /** Creates a personal saved workflow for the signed-in member. */
 export const createUserSavedWorkflow = async (
 	organizationId: string,
-	req: CreateForkSavedWorkflowRequest,
+	req: CreateSavedWorkflowRequest,
 ): Promise<ForkSavedWorkflow> => {
 	const response = await API.getAxiosInstance().post<ForkSavedWorkflow>(
 		userSavedWorkflowsPath(organizationId),
@@ -114,7 +124,7 @@ export const getOrganizationSavedWorkflow = async (
 /** Creates an organization saved workflow; requires the create permission. */
 export const createOrganizationSavedWorkflow = async (
 	organizationId: string,
-	req: CreateForkSavedWorkflowRequest,
+	req: CreateSavedWorkflowRequest,
 ): Promise<ForkSavedWorkflow> => {
 	const response = await API.getAxiosInstance().post<ForkSavedWorkflow>(
 		organizationSavedWorkflowsPath(organizationId),

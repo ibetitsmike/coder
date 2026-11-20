@@ -8,7 +8,10 @@ import {
 	type QueryClient,
 	queryOptions,
 } from "react-query";
-import type { UpdateSavedWorkflowRequest } from "#/api/forkSavedWorkflows";
+import type {
+	CreateSavedWorkflowRequest,
+	UpdateSavedWorkflowRequest,
+} from "#/api/forkSavedWorkflows";
 import {
 	createOrganizationSavedWorkflow,
 	createUserSavedWorkflow,
@@ -26,7 +29,6 @@ import {
 } from "#/api/forkSavedWorkflows";
 import type {
 	ACLAvailable,
-	CreateForkSavedWorkflowRequest,
 	ForkSavedWorkflow,
 	ForkSavedWorkflowMetadata,
 	UpdateOrganizationSkillACLRequest,
@@ -54,7 +56,7 @@ export const isSameScope = (a: SavedWorkflowScope, b: SavedWorkflowScope) =>
 type ScopeEndpoints = {
 	list: () => Promise<ForkSavedWorkflowMetadata[]>;
 	get: (name: string) => Promise<ForkSavedWorkflow>;
-	create: (req: CreateForkSavedWorkflowRequest) => Promise<ForkSavedWorkflow>;
+	create: (req: CreateSavedWorkflowRequest) => Promise<ForkSavedWorkflow>;
 	update: (
 		name: string,
 		req: UpdateSavedWorkflowRequest,
@@ -129,7 +131,7 @@ export const savedWorkflow = (
 
 type CreateSavedWorkflowArgs = {
 	scope: SavedWorkflowScope;
-	req: CreateForkSavedWorkflowRequest;
+	req: CreateSavedWorkflowRequest;
 };
 
 /** Mutation options that create a saved workflow in a scope. */
