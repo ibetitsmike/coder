@@ -616,14 +616,16 @@ parameter for a conditional write: the request writes only when the stored
 workflow still has that id. A stored id that differs answers 409 when the
 stored workflow exists and the caller may write it, so a stale writer cannot
 overwrite a replacement under the same name; a workflow deleted before the
-write, or one the caller may not see or touch, answers the plain not-found
-404 instead of a conflict. An explicit but invalid
+write, or a row or replacement the caller may not see, answers the plain
+not-found 404 instead of a conflict. A caller who reads the row but may not
+write it gets 403. An explicit but invalid
 expect_id, including an empty one, is a 400, and so is a query string that
 does not parse, so a client can never silently drop its concurrency guard.
 The conditional check lives in the authorized write query for the member PATCH
 and organization DELETE routes, so there a caller whose read scope cannot see
 the row still gets its write: a mismatch answers 409 when the caller may write
-the row and 404 when it may not, never a conflict that reveals a hidden
+the row, 403 when the caller reads it but may not write it, and 404 when the
+row is hidden from the caller, never a conflict that reveals a hidden
 replacement. The organization PATCH route reads the row first, so a caller who
 cannot read it gets a 404 before the conditional write runs.
 

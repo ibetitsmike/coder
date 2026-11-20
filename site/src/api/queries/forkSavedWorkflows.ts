@@ -184,9 +184,10 @@ type UpdateSavedWorkflowArgs = {
 	/**
 	 * The revision the caller opened: the write goes through only when the
 	 * stored workflow still has this id, and the server rejects it with 409
-	 * otherwise. Only an absent id writes unconditionally; anything else,
-	 * including an empty string, must reach the server as an explicit
-	 * expect_id.
+	 * otherwise. Only an absent id writes unconditionally. Any other value
+	 * is sent as an explicit expect_id, except an empty string, which the
+	 * request builder rejects before any request leaves the page because
+	 * the search-param builder would otherwise silently drop the guard.
 	 */
 	id?: string;
 };
