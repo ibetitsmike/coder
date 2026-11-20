@@ -46,8 +46,8 @@ func TestForkShareUserSavedWorkflow(t *testing.T) {
 		require.NoError(t, err)
 
 		// Another member cannot share a personal workflow. The denial comes
-		// from the owner's tier before any row is read, like a personal
-		// delete, so it says nothing about whether the workflow exists.
+		// before any row is read, so it says nothing about whether the
+		// workflow exists.
 		_, err = reader.ShareForkUserSavedWorkflow(ctx, orgID, authorUser.ID.String(), "triage")
 		_ = requireSDKError(t, err, http.StatusForbidden)
 		_, err = reader.ShareForkUserSavedWorkflow(ctx, orgID, authorUser.ID.String(), "missing")
@@ -134,6 +134,27 @@ func TestForkShareUserSavedWorkflow(t *testing.T) {
 		_ = requireSDKError(t, author.DeleteForkOrganizationSavedWorkflow(ctx, orgID, "triage"), http.StatusForbidden)
 	})
 
+	// A site owner may delete any member's personal workflow, but it must not
+	// publish one under the member's name.
+	t.Run("AdminCannotShareForMember", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client, orgID := setup(t)
+		author, authorUser := coderdtest.CreateAnotherUser(t, client, orgID)
+
+		personal, err := author.CreateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, codersdk.CreateForkSavedWorkflowRequest{Name: "triage", Script: savedWorkflowScript})
+		require.NoError(t, err)
+
+		_, err = client.ShareForkUserSavedWorkflow(ctx, orgID, authorUser.ID.String(), "triage")
+		_ = requireSDKError(t, err, http.StatusForbidden)
+		got, err := author.ForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage")
+		require.NoError(t, err)
+		require.Equal(t, personal, got, "a refused share keeps the personal workflow")
+		_, err = client.ForkOrganizationSavedWorkflow(ctx, orgID, "triage")
+		_ = requireSDKError(t, err, http.StatusNotFound)
+	})
+
 	t.Run("NameTakenKeepsPersonal", func(t *testing.T) {
 		t.Parallel()
 
@@ -147,7 +168,8 @@ func TestForkShareUserSavedWorkflow(t *testing.T) {
 		require.NoError(t, err)
 
 		_, err = author.ShareForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "release")
-		_ = requireSDKError(t, err, http.StatusConflict)
+		sdkErr := requireSDKError(t, err, http.StatusConflict)
+		require.Equal(t, "The organization already has a workflow with this name.", sdkErr.Message)
 		got, err := author.ForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "release")
 		require.NoError(t, err)
 		require.Equal(t, personal, got, "a failed share rolls back the move")

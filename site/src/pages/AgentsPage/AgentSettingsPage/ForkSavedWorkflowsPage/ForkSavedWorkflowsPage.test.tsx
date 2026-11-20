@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkSavedWorkflowsApi from "#/api/forkSavedWorkflows";
 import type { Experiment } from "#/api/typesGenerated";
+import { toast } from "#/components/Toaster/toast";
 import {
 	MockDefaultOrganization,
 	MockOrganization2,
@@ -195,7 +196,7 @@ describe("ForkSavedWorkflowsPage", () => {
 		renderPage();
 		vi.spyOn(forkSavedWorkflowsApi, "shareUserSavedWorkflow").mockRejectedValue(
 			mockApiError({
-				message: "An organization workflow with this name already exists.",
+				message: "The organization already has a workflow with this name.",
 				status: 409,
 			}),
 		);
@@ -217,10 +218,50 @@ describe("ForkSavedWorkflowsPage", () => {
 		await user.click(within(dialog).getByRole("button", { name: "Share" }));
 
 		await within(dialog).findByText(
-			"An organization workflow with this name already exists.",
+			"The organization already has a workflow with this name.",
 		);
 		expect(screen.getByRole("dialog")).toBeInTheDocument();
 		within(personal).getByText(MockForkSavedWorkflowMetadata.name);
+	});
+
+	it("closes the share dialog when the workflow is already gone", async () => {
+		const user = userEvent.setup();
+		const info = vi.spyOn(toast, "info");
+		const { listUser } = renderPage();
+		vi.spyOn(
+			forkSavedWorkflowsApi,
+			"shareUserSavedWorkflow",
+		).mockImplementation(async () => {
+			// Another tab shared or deleted it.
+			listUser.mockResolvedValue([]);
+			throw mockApiError({ message: "Resource not found", status: 404 });
+		});
+
+		const personal = await screen.findByRole("table", {
+			name: "Personal workflows",
+		});
+		await user.click(
+			await within(personal).findByRole("button", {
+				name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
+			}),
+		);
+		await user.click(
+			await screen.findByRole("menuitem", {
+				name: "Share with organization…",
+			}),
+		);
+		const dialog = await screen.findByRole("dialog");
+		await user.click(within(dialog).getByRole("button", { name: "Share" }));
+
+		await waitFor(() =>
+			expect(info).toHaveBeenCalledWith(
+				`${MockForkSavedWorkflowMetadata.name} was deleted or moved since you picked it, so nothing was shared.`,
+			),
+		);
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		await within(personal).findByText(
+			"No personal workflows in this organization yet.",
+		);
 	});
 
 	it("offers only the member's organizations in the picker", async () => {

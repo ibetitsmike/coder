@@ -96,7 +96,7 @@ export const ShareError: Story = {
 		shareState: {
 			workflow: MockForkSavedWorkflowMetadata,
 			error: mockApiError({
-				message: "An organization workflow with this name already exists.",
+				message: "The organization already has a workflow with this name.",
 				status: 409,
 			}),
 			isSharing: false,

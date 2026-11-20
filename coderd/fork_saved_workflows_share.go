@@ -5,7 +5,6 @@ package coderd
 
 import (
 	"context"
-	"database/sql"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -17,7 +16,12 @@ import (
 	"github.com/coder/coder/v2/coderd/httpapi"
 	"github.com/coder/coder/v2/coderd/httpmw"
 	"github.com/coder/coder/v2/coderd/rbac/policy"
+	"github.com/coder/coder/v2/codersdk"
 )
+
+// errForkShareMemberGone reports that the owner left the organization
+// between the membership lookup and the lock.
+var errForkShareMemberGone = xerrors.New("organization member not found")
 
 // @Summary Share a user saved workflow with the organization
 // @ID share-a-user-saved-workflow-with-the-organization
@@ -36,6 +40,14 @@ import (
 func (api *API) postForkShareUserSavedWorkflow(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	member := httpmw.OrganizationMemberParam(r)
+	// Only the owner publishes a personal workflow. An admin who may delete
+	// it must not move it into the organization under the owner's name.
+	if httpmw.APIKey(r).UserID != member.UserID {
+		httpapi.Write(ctx, rw, http.StatusForbidden, codersdk.Response{
+			Message: "You can share only your own workflows.",
+		})
+		return
+	}
 	name, ok := forkSavedWorkflowPathName(rw, r)
 	if !ok {
 		return
@@ -62,7 +74,7 @@ func (api *API) postForkShareUserSavedWorkflow(rw http.ResponseWriter, r *http.R
 			return xerrors.Errorf("lock organization member: %w", err)
 		}
 		if len(locked) == 0 {
-			return sql.ErrNoRows
+			return errForkShareMemberGone
 		}
 		shared, err = ftx.ShareUserSavedWorkflowByName(ctx, forkdb.ShareUserSavedWorkflowByNameParams{
 			OrganizationID: member.OrganizationID,
@@ -72,6 +84,10 @@ func (api *API) postForkShareUserSavedWorkflow(rw http.ResponseWriter, r *http.R
 		})
 		return err
 	}, nil)
+	if xerrors.Is(err, errForkShareMemberGone) {
+		httpapi.ResourceNotFound(rw)
+		return
+	}
 	probe := func(ctx context.Context) (uuid.UUID, error) {
 		row, err := fdb.GetUserSavedWorkflowByName(ctx, forkdb.GetUserSavedWorkflowByNameParams{
 			OrganizationID: member.OrganizationID,
@@ -79,6 +95,13 @@ func (api *API) postForkShareUserSavedWorkflow(rw http.ResponseWriter, r *http.R
 			Name:           name,
 		})
 		return row.ID, err
+	}
+	if database.IsUniqueViolation(err, "saved_workflows_organization_name_idx") {
+		httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{
+			Message: "The organization already has a workflow with this name.",
+			Detail:  "Rename your workflow, then share it.",
+		})
+		return
 	}
 	conflict := api.forkUserSavedWorkflowConflictProbe(r, member.OrganizationID, member.UserID, name, policy.ActionDelete)
 	// A taken organization name or a full organization reaches the write

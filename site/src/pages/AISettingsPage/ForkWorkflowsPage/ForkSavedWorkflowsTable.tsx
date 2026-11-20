@@ -155,6 +155,17 @@ export const ForkSavedWorkflowsTable: React.FC<
 								`${activeShareTarget.name} is now an organization workflow.`,
 							);
 						},
+						// The personal workflow is gone, for example shared or
+						// deleted in another tab. The list refetch shows that, so
+						// the stale confirmation closes.
+						onError: (error) => {
+							if (isAxiosError(error) && error.response?.status === 404) {
+								setShareTarget(undefined);
+								toast.info(
+									`${activeShareTarget.name} was deleted or moved since you picked it, so nothing was shared.`,
+								);
+							}
+						},
 					},
 				),
 			onClose: () => {

@@ -433,7 +433,7 @@ describe("shareSavedWorkflow", () => {
 		queryClient.setQueryData(detailKey, MockForkSavedWorkflowCreated);
 		vi.spyOn(forkSavedWorkflowsApi, "shareUserSavedWorkflow").mockRejectedValue(
 			mockApiError({
-				message: "An organization workflow with this name already exists.",
+				message: "The organization already has a workflow with this name.",
 				status: 409,
 			}),
 		);
