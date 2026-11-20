@@ -7,6 +7,7 @@ import type {
 } from "#/api/typesGenerated";
 import { mockApiError } from "#/testHelpers/entities";
 import {
+	MockForkOrganizationSavedWorkflowMetadata,
 	MockForkSavedWorkflow,
 	MockForkSavedWorkflowMetadata,
 } from "#/testHelpers/forkSavedWorkflows";
@@ -384,21 +385,26 @@ describe("shareSavedWorkflow", () => {
 		tier: "organization",
 	};
 
-	it("moves the workflow out of the personal list and refetches both lists", async () => {
+	it("moves the workflow from the personal list to the organization list and refetches both", async () => {
 		const queryClient = createQueryClient();
 		const listKey = savedWorkflowsKey(scope);
 		const detailKey = savedWorkflowKey(scope, name);
+		const organizationListKey = savedWorkflowsKey(organizationScope);
 		queryClient.setQueryData(listKey, [
 			metadataOf(MockForkSavedWorkflowCreated),
 		]);
 		queryClient.setQueryData(detailKey, MockForkSavedWorkflowCreated);
+		queryClient.setQueryData(organizationListKey, [
+			MockForkOrganizationSavedWorkflowMetadata,
+		]);
+		const shared: ForkSavedWorkflow = {
+			...MockForkSavedWorkflowCreated,
+			id: "saved-workflow-shared",
+			user_id: undefined,
+		};
 		const share = vi
 			.spyOn(forkSavedWorkflowsApi, "shareUserSavedWorkflow")
-			.mockResolvedValue({
-				...MockForkSavedWorkflowCreated,
-				id: "saved-workflow-shared",
-				user_id: undefined,
-			});
+			.mockResolvedValue(shared);
 
 		await new MutationObserver(
 			queryClient,
@@ -416,6 +422,14 @@ describe("shareSavedWorkflow", () => {
 		);
 		expect(queryClient.getQueryData(listKey)).toEqual([]);
 		expect(queryClient.getQueryData(detailKey)).toBeUndefined();
+		// The response stays listed if the organization refetch fails.
+		expect(queryClient.getQueryData(organizationListKey)).toEqual([
+			metadataOf(shared),
+			MockForkOrganizationSavedWorkflowMetadata,
+		]);
+		expect(
+			queryClient.getQueryData(savedWorkflowKey(organizationScope, name)),
+		).toEqual(shared);
 		expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
 			queryKey: listKey,
 		});

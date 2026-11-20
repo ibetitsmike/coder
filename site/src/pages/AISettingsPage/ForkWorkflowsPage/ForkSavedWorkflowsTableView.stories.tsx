@@ -2,8 +2,10 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn, screen, userEvent } from "storybook/test";
 import { mockApiError } from "#/testHelpers/entities";
 import {
+	MockForkOrganizationSavedWorkflowMetadata,
 	MockForkSavedWorkflow,
 	MockForkSavedWorkflowMetadata,
+	MockForkSharedSavedWorkflowMetadata,
 } from "#/testHelpers/forkSavedWorkflows";
 import { ForkSavedWorkflowsTableView } from "./ForkSavedWorkflowsTableView";
 
@@ -64,16 +66,12 @@ export const RowAccess: Story = {
 	args: {
 		title: "Organization workflows",
 		workflows: [
-			MockForkSavedWorkflowMetadata,
-			{
-				...MockForkSavedWorkflowMetadata,
-				id: "saved-workflow-other",
-				name: "rotate-keys",
-			},
+			MockForkSharedSavedWorkflowMetadata,
+			MockForkOrganizationSavedWorkflowMetadata,
 		],
 		access: { create: false, update: false, delete: false },
 		rowAccess: (workflow) =>
-			workflow.id === MockForkSavedWorkflowMetadata.id
+			workflow.id === MockForkSharedSavedWorkflowMetadata.id
 				? { create: false, update: true, delete: true }
 				: { create: false, update: false, delete: false },
 	},

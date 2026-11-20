@@ -128,6 +128,36 @@ export const savedWorkflow = (
 		},
 	});
 
+/**
+ * Writes a workflow the server just created into the caches of its scope.
+ * A detail or row cached under the name may hold an older workflow of that
+ * name, so the response replaces it unless that one is newer.
+ */
+const cacheCreatedSavedWorkflow = (
+	queryClient: QueryClient,
+	scope: SavedWorkflowScope,
+	workflow: ForkSavedWorkflow,
+) => {
+	queryClient.setQueryData<ForkSavedWorkflow>(
+		savedWorkflowKey(scope, workflow.name),
+		(cached) => (cached && isNewer(cached, workflow) ? cached : workflow),
+	);
+	const { script: _script, ...created } = workflow;
+	queryClient.setQueryData(savedWorkflows(scope).queryKey, (workflows) => {
+		const listed = workflows?.find(
+			(workflow) =>
+				workflow.id === created.id || workflow.name === created.name,
+		);
+		if (!workflows || (listed && isNewer(listed, created))) {
+			return workflows;
+		}
+		return [
+			...workflows.filter((workflow) => workflow !== listed),
+			created,
+		].sort((a, b) => (a.name < b.name ? -1 : 1));
+	});
+};
+
 type CreateSavedWorkflowArgs = {
 	scope: SavedWorkflowScope;
 	req: CreateForkSavedWorkflowRequest;
@@ -142,26 +172,7 @@ export const createSavedWorkflow = (queryClient: QueryClient) =>
 		// without the name may predate the commit or follow a delete, and
 		// only the refetch can tell. The rows keep the API's order by name.
 		onSuccess: (workflow, { scope }) => {
-			// A detail cached under the name may hold an older workflow of that
-			// name, so the full response replaces it unless it is newer.
-			queryClient.setQueryData<ForkSavedWorkflow>(
-				savedWorkflowKey(scope, workflow.name),
-				(cached) => (cached && isNewer(cached, workflow) ? cached : workflow),
-			);
-			const { script: _script, ...created } = workflow;
-			queryClient.setQueryData(savedWorkflows(scope).queryKey, (workflows) => {
-				const listed = workflows?.find(
-					(workflow) =>
-						workflow.id === created.id || workflow.name === created.name,
-				);
-				if (!workflows || (listed && isNewer(listed, created))) {
-					return workflows;
-				}
-				return [
-					...workflows.filter((workflow) => workflow !== listed),
-					created,
-				].sort((a, b) => (a.name < b.name ? -1 : 1));
-			});
+			cacheCreatedSavedWorkflow(queryClient, scope, workflow);
 		},
 		onSettled: (_data, _error, { scope }) => {
 			void queryClient.invalidateQueries({
@@ -297,7 +308,12 @@ export const shareSavedWorkflow = (queryClient: QueryClient) =>
 	mutationOptions({
 		mutationFn: ({ organizationId, name, id }: ShareSavedWorkflowArgs) =>
 			shareUserSavedWorkflow(organizationId, name, id),
-		onSuccess: (_data, { organizationId, name, id }) => {
+		onSuccess: (workflow, { organizationId, name, id }) => {
+			cacheCreatedSavedWorkflow(
+				queryClient,
+				{ tier: "organization", organizationId },
+				workflow,
+			);
 			const scope: SavedWorkflowScope = { tier: "user", organizationId };
 			queryClient.setQueryData(savedWorkflows(scope).queryKey, (workflows) =>
 				workflows?.filter((workflow) => workflow.id !== id),
