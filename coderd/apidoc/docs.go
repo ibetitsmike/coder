@@ -477,7 +477,7 @@ const docTemplate = `{
         },
         "/api/experimental/organizations/{organization}/ai/spend/users": {
             "get": {
-                "description": "Returns one page of per-user AI spend for the organization, most expensive first, built from the same raw AI Gateway token usage as the CSV export so the two reconcile. Each user lists the providers and clients they spent through, and the response carries the user count, total spend, and unpriced usage count over every matching user.\nThe optional period_start and period_end query parameters bound the period and are interpreted as UTC. They must be provided together and span at most 31 days. When both are omitted, the current UTC monthly period is used.\nAn explicit period_start must fall within the configured AI Gateway data retention window, since older token usage is purged. The default period is narrowed to that window instead. The response echoes the applied bounds and, when retention is enabled, the start of the retention window.\nThe optional provider_name, model, and client query parameters restrict the spend report to usage matching all supplied filters. Use client=Unknown for usage with an unknown or missing client.\nUnknown query parameters are rejected.\nRequires organization-level administrator permissions.",
+                "description": "Returns one page of per-user AI spend for the organization, most expensive first, built from the same raw AI Gateway token usage as the CSV export so the two reconcile. Each user lists their spend per provider, model, and client, most expensive first, and the number of models with unpriced usage. The response carries the user count, total spend, and whether any usage is unpriced over every matching user.\nThe optional period_start and period_end query parameters bound the period and are interpreted as UTC. They must be provided together and span at most 31 days. When both are omitted, the current UTC monthly period is used.\nAn explicit period_start must fall within the configured AI Gateway data retention window, since older token usage is purged. The default period is narrowed to that window instead. The response echoes the applied bounds and, when retention is enabled, the start of the retention window.\nThe optional user_ids, group_id, provider_name, model, and client query parameters restrict the spend report to usage matching all supplied filters. Use client=Unknown for usage with an unknown or missing client.\nUnknown query parameters are rejected.\nRequires organization-level administrator permissions.",
                 "produces": [
                     "application/json"
                 ],
@@ -507,6 +507,19 @@ const docTemplate = `{
                         "format": "date-time",
                         "description": "Exclusive upper bound (RFC3339)",
                         "name": "period_end",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated list of user IDs (maximum 100)",
+                        "name": "user_ids",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Effective group ID",
+                        "name": "group_id",
                         "in": "query"
                     },
                     {
@@ -3149,7 +3162,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Search query in the format ` + "`" + `key:value` + "`" + `. Available keys are: initiator, provider, provider_name, model, client, session_id, started_after, started_before.",
+                        "description": "Search query in the format ` + "`" + `key:value` + "`" + `. Available keys are: initiator, provider, provider_name, model, client, session_id, organization, started_after, started_before.",
                         "name": "q",
                         "in": "query"
                     },
@@ -5780,11 +5793,30 @@ const docTemplate = `{
                         "name": "workflow",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Expected workflow ID, as a UUID",
+                        "name": "expect_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "204": {
                         "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
                     }
                 },
                 "security": [
@@ -5831,6 +5863,13 @@ const docTemplate = `{
                         "required": true
                     },
                     {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Expected workflow ID, as a UUID",
+                        "name": "expect_id",
+                        "in": "query"
+                    },
+                    {
                         "description": "Request body",
                         "name": "request",
                         "in": "body",
@@ -5845,6 +5884,18 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/codersdk.ForkSavedWorkflow"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
                         }
                     }
                 },
@@ -6959,11 +7010,30 @@ const docTemplate = `{
                         "name": "workflow",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Expected workflow ID, as a UUID",
+                        "name": "expect_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "204": {
                         "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
                     }
                 },
                 "security": [
@@ -7003,6 +7073,13 @@ const docTemplate = `{
                         "required": true
                     },
                     {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Expected workflow ID, as a UUID",
+                        "name": "expect_id",
+                        "in": "query"
+                    },
+                    {
                         "description": "Request body",
                         "name": "request",
                         "in": "body",
@@ -7017,6 +7094,18 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/codersdk.ForkSavedWorkflow"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
                         }
                     }
                 },
@@ -23483,6 +23572,14 @@ const docTemplate = `{
                 "model": {
                     "type": "string"
                 },
+                "organization": {
+                    "description": "Organization is the organization of this interception. Nil when none\nwas stored.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.AIBridgeInterceptionOrganization"
+                        }
+                    ]
+                },
                 "priced_model": {
                     "description": "PricedModel is the model and prices used for this interception. Nil\nwhen it was not priced.",
                     "allOf": [
@@ -23591,6 +23688,43 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "codersdk.AIBridgeInterceptionOrganization": {
+            "type": "object",
+            "required": [
+                "id"
+            ],
+            "properties": {
+                "display_name": {
+                    "type": "string"
+                },
+                "icon": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "source": {
+                    "$ref": "#/definitions/codersdk.AIBridgeInterceptionOrganizationSource"
+                }
+            }
+        },
+        "codersdk.AIBridgeInterceptionOrganizationSource": {
+            "type": "string",
+            "enum": [
+                "workspace",
+                "chatd",
+                "effective_group"
+            ],
+            "x-enum-varnames": [
+                "AIBridgeInterceptionOrganizationSourceWorkspace",
+                "AIBridgeInterceptionOrganizationSourceChatd",
+                "AIBridgeInterceptionOrganizationSourceEffectiveGroup"
+            ]
         },
         "codersdk.AIBridgeListSessionsResponse": {
             "type": "object",
@@ -23740,6 +23874,13 @@ const docTemplate = `{
                         }
                     ]
                 },
+                "organizations": {
+                    "description": "Organizations are the organizations this session's interceptions were\nattributed to.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.AIBridgeSessionOrganization"
+                    }
+                },
                 "providers": {
                     "type": "array",
                     "items": {
@@ -23777,6 +23918,33 @@ const docTemplate = `{
                 },
                 "domain": {
                     "type": "string"
+                }
+            }
+        },
+        "codersdk.AIBridgeSessionOrganization": {
+            "type": "object",
+            "required": [
+                "id"
+            ],
+            "properties": {
+                "display_name": {
+                    "type": "string"
+                },
+                "icon": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.AIBridgeInterceptionOrganizationSource"
+                    }
                 }
             }
         },
@@ -23829,6 +23997,13 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/codersdk.AIBridgeSessionNetworkDomain"
+                    }
+                },
+                "organizations": {
+                    "description": "Organizations are the organizations this session's interceptions were\nattributed to.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.AIBridgeSessionOrganization"
                     }
                 },
                 "page_ended_at": {
@@ -23956,6 +24131,14 @@ const docTemplate = `{
                 },
                 "model": {
                     "type": "string"
+                },
+                "organization": {
+                    "description": "Organization is the organization of the root interception. Nil when\nnone was stored.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.AIBridgeInterceptionOrganization"
+                        }
+                    ]
                 },
                 "priced_model": {
                     "description": "PricedModel is the model and prices used for the root interception\n(the prompt). Other requests in the thread may use different models\nand prices, see agentic_actions[].priced_model. Nil when the root\ninterception was not priced.",
@@ -26072,20 +26255,20 @@ const docTemplate = `{
         "codersdk.ChatContextResourceKind": {
             "type": "string",
             "enum": [
+                "subagent",
                 "instruction_file",
                 "skill",
                 "mcp_config",
                 "mcp_server",
-                "acp_harness",
-                "subagent"
+                "acp_harness"
             ],
             "x-enum-varnames": [
+                "ChatContextResourceKindSubagent",
                 "ChatContextResourceKindInstructionFile",
                 "ChatContextResourceKindSkill",
                 "ChatContextResourceKindMCPConfig",
                 "ChatContextResourceKindMCPServer",
-                "ChatContextResourceKindACPHarness",
-                "ChatContextResourceKindSubagent"
+                "ChatContextResourceKindACPHarness"
             ]
         },
         "codersdk.ChatContextResourceStatus": {
@@ -29445,6 +29628,10 @@ const docTemplate = `{
                             "$ref": "#/definitions/codersdk.TemplateAutostopRequirement"
                         }
                     ]
+                },
+                "browser_only": {
+                    "description": "BrowserOnly makes coderd refuse non-browser client connections, such as\nSSH, port forwarding and desktop IDEs, to workspaces built from this\ntemplate. Defaults to false. Enabling it requires the browser-only\nentitlement.",
+                    "type": "boolean"
                 },
                 "cors_behavior": {
                     "description": "CORSBehavior allows optionally specifying the CORS behavior for all shared ports.",
@@ -33991,6 +34178,40 @@ const docTemplate = `{
                 }
             }
         },
+        "codersdk.OrganizationAISpendClient": {
+            "type": "object",
+            "properties": {
+                "cost_micros": {
+                    "description": "CostMicros is the priced spend from the client over the period.",
+                    "type": "integer"
+                },
+                "has_unpriced_usage": {
+                    "description": "HasUnpricedUsage reports whether any token usage from the client was\nrecorded without a price.",
+                    "type": "boolean"
+                },
+                "name": {
+                    "description": "Name is the client recorded on the intercepted request. Usage without a\nrecorded client is reported as Unknown.",
+                    "type": "string"
+                }
+            }
+        },
+        "codersdk.OrganizationAISpendModel": {
+            "type": "object",
+            "properties": {
+                "cost_micros": {
+                    "description": "CostMicros is the priced spend on the model over the period.",
+                    "type": "integer"
+                },
+                "has_unpriced_usage": {
+                    "description": "HasUnpricedUsage reports whether any token usage of the model was\nrecorded without a price.",
+                    "type": "boolean"
+                },
+                "name": {
+                    "description": "Name is the model the client requested.",
+                    "type": "string"
+                }
+            }
+        },
         "codersdk.OrganizationAISpendOverview": {
             "type": "object",
             "properties": {
@@ -34104,6 +34325,39 @@ const docTemplate = `{
                 }
             }
         },
+        "codersdk.OrganizationAISpendProvider": {
+            "type": "object",
+            "properties": {
+                "cost_micros": {
+                    "description": "CostMicros is the priced spend through the provider over the period.",
+                    "type": "integer"
+                },
+                "display_name": {
+                    "description": "DisplayName falls back to the provider name when unset.",
+                    "type": "string"
+                },
+                "has_unpriced_usage": {
+                    "description": "HasUnpricedUsage reports whether any token usage through the provider\nwas recorded without a price.",
+                    "type": "boolean"
+                },
+                "icon": {
+                    "description": "Icon is empty when the provider has no configured icon.",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Name is the name of the configured provider.",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "Type is omitted when the provider name was never configured.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.AIProviderType"
+                        }
+                    ]
+                }
+            }
+        },
         "codersdk.OrganizationAISpendReport": {
             "type": "object",
             "properties": {
@@ -34145,9 +34399,9 @@ const docTemplate = `{
                     "description": "CostMicros is the priced spend of every matching user.",
                     "type": "integer"
                 },
-                "unpriced_usage_count": {
-                    "description": "UnpricedUsageCount is the number of token usage records without a cost\nacross every matching user.",
-                    "type": "integer"
+                "has_unpriced_usage": {
+                    "description": "HasUnpricedUsage reports whether any matching token usage was recorded\nwithout a price.",
+                    "type": "boolean"
                 }
             }
         },
@@ -34157,37 +34411,33 @@ const docTemplate = `{
                 "avatar_url": {
                     "type": "string"
                 },
-                "clients": {
-                    "description": "Clients are the clients the user spent through, sorted. Usage without a\nrecorded client is reported as Unknown.",
+                "client_spend": {
+                    "description": "ClientSpend is the user's spend per client, most expensive first. Usage\nwithout a recorded client is reported as Unknown.",
                     "type": "array",
                     "items": {
-                        "type": "string"
+                        "$ref": "#/definitions/codersdk.OrganizationAISpendClient"
                     }
                 },
                 "cost_micros": {
-                    "description": "CostMicros is the user's priced spend over the period.",
+                    "description": "CostMicros is the user's priced spend over the period. It is a lower\nbound when any entry in ModelSpend has unpriced usage.",
                     "type": "integer"
                 },
-                "models": {
-                    "description": "Models are the models the user spent through, sorted.",
+                "model_spend": {
+                    "description": "ModelSpend is the user's spend per model, most expensive first.",
                     "type": "array",
                     "items": {
-                        "type": "string"
+                        "$ref": "#/definitions/codersdk.OrganizationAISpendModel"
                     }
                 },
                 "name": {
                     "type": "string"
                 },
-                "providers": {
-                    "description": "Providers are the configured provider names the user spent through,\nsorted.",
+                "provider_spend": {
+                    "description": "ProviderSpend is the user's spend per configured provider, most\nexpensive first.",
                     "type": "array",
                     "items": {
-                        "type": "string"
+                        "$ref": "#/definitions/codersdk.OrganizationAISpendProvider"
                     }
-                },
-                "unpriced_usage_count": {
-                    "description": "UnpricedUsageCount is the number of the user's token usage records that\ncarry no cost because their model had no price when they were recorded.",
-                    "type": "integer"
                 },
                 "user_id": {
                     "type": "string",
@@ -36859,6 +37109,10 @@ const docTemplate = `{
                         }
                     ]
                 },
+                "browser_only": {
+                    "description": "BrowserOnly makes coderd refuse non-browser client connections, such as\nSSH, port forwarding and desktop IDEs, to workspaces built from this\ntemplate. The deployment-wide browser-only setting applies on top of\nthis one.",
+                    "type": "boolean"
+                },
                 "build_time_stats": {
                     "$ref": "#/definitions/codersdk.TemplateBuildTimeStats"
                 },
@@ -38817,6 +39071,10 @@ const docTemplate = `{
                             "$ref": "#/definitions/codersdk.TemplateAutostopRequirement"
                         }
                     ]
+                },
+                "browser_only": {
+                    "description": "BrowserOnly makes coderd refuse non-browser client connections, such as\nSSH, port forwarding and desktop IDEs, to workspaces built from this\ntemplate. Enabling it requires the browser-only entitlement; disabling it\ndoes not.",
+                    "type": "boolean"
                 },
                 "cors_behavior": {
                     "$ref": "#/definitions/codersdk.CORSBehavior"
