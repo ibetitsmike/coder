@@ -488,7 +488,18 @@ it("keeps the draft and refetches when the server rejects the save with 404", as
 	expect(description).toHaveValue(
 		`${MockForkSavedWorkflowMetadata.description} even harder`,
 	);
-	expect(screen.queryByRole("dialog")).not.toBeNull();
+	// The retained editor still works: a retry of the draft reaches the
+	// server with the same conditional guard.
+	await user.click(
+		within(dialog).getByRole("button", { name: "Save workflow" }),
+	);
+	await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+	expect(update).toHaveBeenLastCalledWith(
+		MockOrganization2.id,
+		MockForkSavedWorkflowMetadata.name,
+		expect.anything(),
+		{ expect_id: MockForkSavedWorkflow.id },
+	);
 });
 
 it("seeds the editor from a fresh fetch, not the cached workflow", async () => {

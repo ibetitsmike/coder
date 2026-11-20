@@ -613,8 +613,11 @@ With fork-workflows on, the mount also serves saved workflows, stored in `chatd.
 
 The saved workflow PATCH and DELETE routes take an optional expect_id query
 parameter for a conditional write: the request writes only when the stored
-workflow still has that id, and answers 409 otherwise, so a stale writer
-cannot overwrite a replacement under the same name. An explicit but invalid
+workflow still has that id. A stored id that differs answers 409 when the
+stored workflow exists and the caller may write it, so a stale writer cannot
+overwrite a replacement under the same name; a workflow deleted before the
+write, or one the caller may not see or touch, answers the plain not-found
+404 instead of a conflict. An explicit but invalid
 expect_id, including an empty one, is a 400, and so is a query string that
 does not parse, so a client can never silently drop its concurrency guard.
 The conditional check lives in the authorized write query for the member PATCH
