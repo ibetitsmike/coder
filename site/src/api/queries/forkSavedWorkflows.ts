@@ -256,6 +256,10 @@ export class SavedWorkflowChangedError extends Error {
  * rejects the delete with 409 when the name holds another workflow. A
  * success also removes the row's detail query, so a failed refetch cannot
  * leave it actionable.
+ *
+ * A 404 or 409 both mean the picked workflow is gone: the name holds another
+ * workflow, the row was deleted, or the server hides it and answers not-found
+ * for that. The UI answers both the same way.
  */
 export const deleteSavedWorkflow = (queryClient: QueryClient) =>
 	mutationOptions({
@@ -263,14 +267,10 @@ export const deleteSavedWorkflow = (queryClient: QueryClient) =>
 			try {
 				await scopeEndpoints(scope).remove(name, { expect_id: id });
 			} catch (error) {
-				// The name no longer resolves to the picked workflow: it was
-				// deleted, or the server hides the stored row or its hidden
-				// replacement from the caller and answers not-found for that.
+				// Deleted or hidden server side, see okAfterConditionalWrite.
 				if (isAxiosError(error) && error.response?.status === 404) {
 					throw new SavedWorkflowChangedError();
 				}
-				// The name holds another workflow now, so the conditional
-				// delete refused to remove it.
 				if (isAxiosError(error) && error.response?.status === 409) {
 					throw new SavedWorkflowChangedError();
 				}
