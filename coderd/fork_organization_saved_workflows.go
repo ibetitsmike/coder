@@ -5,6 +5,7 @@ package coderd
 // request and response types of the organization skill ACL routes.
 
 import (
+	"context"
 	"errors"
 	"maps"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/httpapi"
+	"github.com/coder/coder/v2/coderd/httpapi/httperror"
 	"github.com/coder/coder/v2/coderd/httpmw"
 	"github.com/coder/coder/v2/coderd/rbac/policy"
 	"github.com/coder/coder/v2/codersdk"
@@ -122,13 +124,20 @@ func (api *API) forkOrganizationSavedWorkflow(rw http.ResponseWriter, r *http.Re
 // @Produce json
 // @Param organization path string true "Organization ID or name"
 // @Param workflow path string true "Workflow name"
+// @Param expect_id query string false "Expected workflow ID, as a UUID" format(uuid)
 // @Param request body codersdk.UpdateForkSavedWorkflowRequest true "Request body"
+// @Failure 400 {object} codersdk.Response
+// @Failure 409 {object} codersdk.Response
 // @Success 200 {object} codersdk.ForkSavedWorkflow
 // @Router /api/v2/chats/fork/organizations/{organization}/workflows/{workflow} [patch]
 // @x-apidocgen {"skip": true}
 func (api *API) patchForkOrganizationSavedWorkflow(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	current, ok := api.readForkOrganizationSavedWorkflow(rw, r)
+	if !ok {
+		return
+	}
+	expectID, ok := readForkSavedWorkflowExpectID(rw, r)
 	if !ok {
 		return
 	}
@@ -148,9 +157,36 @@ func (api *API) patchForkOrganizationSavedWorkflow(rw http.ResponseWriter, r *ht
 		Phases:         update.Phases,
 		OrganizationID: current.OrganizationID,
 		Name:           current.Name,
+		ExpectID:       expectID,
 	})
-	if err != nil {
-		writeForkSavedWorkflowWriteError(ctx, rw, err)
+	probe := func(ctx context.Context) (uuid.UUID, error) {
+		row, err := fdb.GetOrganizationSavedWorkflowByName(ctx, forkdb.GetOrganizationSavedWorkflowByNameParams{
+			OrganizationID: current.OrganizationID,
+			Name:           current.Name,
+		})
+		return row.ID, err
+	}
+	if !okAfterConditionalWrite(ctx, rw, err, expectID, true, probe, func(ctx context.Context) (uuid.UUID, error) {
+		// The conditional write authorized this caller for the row as it
+		// was, so the conflict probe fetches the current row and authorizes
+		// it again for the same action. The fetch is system restricted,
+		// because a write-only API key scope cannot read, and the
+		// reauthorization keeps a replacement under the same name that
+		// hides from this caller at 404, never a conflict that proves it
+		// exists.
+		//nolint:gocritic // See above, the fetch only feeds the reauthorization below.
+		row, err := fdb.GetOrganizationSavedWorkflowByName(dbauthz.AsSystemRestricted(ctx), forkdb.GetOrganizationSavedWorkflowByNameParams{
+			OrganizationID: current.OrganizationID,
+			Name:           current.Name,
+		})
+		if err != nil {
+			return uuid.UUID{}, err
+		}
+		if !api.Authorize(r, policy.ActionUpdate, row) {
+			return uuid.UUID{}, httperror.ErrResourceNotFound
+		}
+		return row.ID, nil
+	}) {
 		return
 	}
 	httpapi.Write(ctx, rw, http.StatusOK, convertForkSavedWorkflow(row))
@@ -162,6 +198,9 @@ func (api *API) patchForkOrganizationSavedWorkflow(rw http.ResponseWriter, r *ht
 // @Tags Chats
 // @Param organization path string true "Organization ID or name"
 // @Param workflow path string true "Workflow name"
+// @Param expect_id query string false "Expected workflow ID, as a UUID" format(uuid)
+// @Failure 400 {object} codersdk.Response
+// @Failure 409 {object} codersdk.Response
 // @Success 204
 // @Router /api/v2/chats/fork/organizations/{organization}/workflows/{workflow} [delete]
 // @x-apidocgen {"skip": true}
@@ -171,23 +210,52 @@ func (api *API) deleteForkOrganizationSavedWorkflow(rw http.ResponseWriter, r *h
 	if !ok {
 		return
 	}
+	expectID, ok := readForkSavedWorkflowExpectID(rw, r)
+	if !ok {
+		return
+	}
 	fdb, ok := forkAgentDefinitionStore(rw, api.Database)
 	if !ok {
 		return
 	}
+	organizationID := httpmw.OrganizationParam(r).ID
 	// Delete authorizes before reading so that delete-only API key scopes
-	// work. A caller who can neither delete nor read gets 404.
+	// work. A caller who can neither delete nor read gets 404, also when the
+	// stored id differs from the expected one, because the conflict check
+	// lives in the same query as the authorized delete.
 	_, err := fdb.DeleteOrganizationSavedWorkflowByName(ctx, forkdb.DeleteOrganizationSavedWorkflowByNameParams{
-		OrganizationID: httpmw.OrganizationParam(r).ID,
+		OrganizationID: organizationID,
 		Name:           name,
+		ExpectID:       expectID,
 	})
-	if httpapi.IsUnauthorizedError(err) {
-		if _, ok := api.readForkOrganizationSavedWorkflow(rw, r); !ok {
-			return
-		}
+	probe := func(ctx context.Context) (uuid.UUID, error) {
+		row, err := fdb.GetOrganizationSavedWorkflowByName(ctx, forkdb.GetOrganizationSavedWorkflowByNameParams{
+			OrganizationID: organizationID,
+			Name:           name,
+		})
+		return row.ID, err
 	}
-	if err != nil {
-		writeForkSavedWorkflowWriteError(ctx, rw, err)
+	if !okAfterConditionalWrite(ctx, rw, err, expectID, true, probe, func(ctx context.Context) (uuid.UUID, error) {
+		// The conditional write authorized this caller for the row as it
+		// was, so the conflict probe fetches the current row and authorizes
+		// it again for the same action. The fetch is system restricted,
+		// because a write-only API key scope cannot read, and the
+		// reauthorization keeps a replacement under the same name that
+		// hides from this caller at 404, never a conflict that proves it
+		// exists.
+		//nolint:gocritic // See above, the fetch only feeds the reauthorization below.
+		row, err := fdb.GetOrganizationSavedWorkflowByName(dbauthz.AsSystemRestricted(ctx), forkdb.GetOrganizationSavedWorkflowByNameParams{
+			OrganizationID: organizationID,
+			Name:           name,
+		})
+		if err != nil {
+			return uuid.UUID{}, err
+		}
+		if !api.Authorize(r, policy.ActionDelete, row) {
+			return uuid.UUID{}, httperror.ErrResourceNotFound
+		}
+		return row.ID, nil
+	}) {
 		return
 	}
 	rw.WriteHeader(http.StatusNoContent)

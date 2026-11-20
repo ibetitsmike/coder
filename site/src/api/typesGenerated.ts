@@ -5261,6 +5261,13 @@ export interface CreateTemplateRequest {
 	 * references the workspace name, so this defaults to false.
 	 */
 	readonly allow_workspace_renames?: boolean;
+	/**
+	 * BrowserOnly makes coderd refuse non-browser client connections, such as
+	 * SSH, port forwarding and desktop IDEs, to workspaces built from this
+	 * template. Defaults to false. Enabling it requires the browser-only
+	 * entitlement.
+	 */
+	readonly browser_only?: boolean;
 }
 
 // From codersdk/templateversions.go
@@ -7019,6 +7026,19 @@ export interface ForkSavedWorkflowMetadata {
 	readonly phases: readonly string[];
 	readonly created_at: string;
 	readonly updated_at: string;
+}
+
+// From codersdk/fork_saved_workflows.go
+/**
+ * ForkSavedWorkflowWriteParams holds the optional conditions of a saved
+ * workflow update or delete.
+ */
+export interface ForkSavedWorkflowWriteParams {
+	/**
+	 * ExpectID rejects the write with 409 Conflict when the stored workflow
+	 * has another ID. Nil leaves the write unconditional.
+	 */
+	readonly expect_id?: string;
 }
 
 // From codersdk/fork_subagent_limits.go
@@ -11540,6 +11560,13 @@ export interface Template {
 	 * references the workspace name.
 	 */
 	readonly allow_workspace_renames: boolean;
+	/**
+	 * BrowserOnly makes coderd refuse non-browser client connections, such as
+	 * SSH, port forwarding and desktop IDEs, to workspaces built from this
+	 * template. The deployment-wide browser-only setting applies on top of
+	 * this one.
+	 */
+	readonly browser_only: boolean;
 }
 
 // From codersdk/templates.go
@@ -12790,6 +12817,13 @@ export interface UpdateTemplateMeta {
 	 * references the workspace name.
 	 */
 	readonly allow_workspace_renames?: boolean;
+	/**
+	 * BrowserOnly makes coderd refuse non-browser client connections, such as
+	 * SSH, port forwarding and desktop IDEs, to workspaces built from this
+	 * template. Enabling it requires the browser-only entitlement; disabling it
+	 * does not.
+	 */
+	readonly browser_only?: boolean;
 }
 
 // From codersdk/users.go

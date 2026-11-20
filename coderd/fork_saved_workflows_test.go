@@ -3,10 +3,12 @@ package coderd_test
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/coderdtest"
@@ -551,6 +553,7 @@ func TestForkOrganizationSavedWorkflows(t *testing.T) {
 		require.NoError(t, err)
 		_, err = auditor.UpdateForkOrganizationSavedWorkflow(ctx, orgID, "release", codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("x")})
 		_ = requireSDKError(t, err, http.StatusForbidden)
+		_ = err
 	})
 
 	t.Run("ScopedAPIKeys", func(t *testing.T) {
@@ -606,5 +609,294 @@ func TestForkOrganizationSavedWorkflows(t *testing.T) {
 		_ = requireSDKError(t, err, http.StatusForbidden)
 		_, err = client.ForkOrganizationSavedWorkflowACL(ctx, owner.OrganizationID, "release")
 		_ = requireSDKError(t, err, http.StatusForbidden)
+	})
+}
+
+// TestForkSavedWorkflowConditionalWrites covers the optional expect_id
+// condition of the saved workflow PATCH and DELETE endpoints.
+//
+//nolint:paralleltest,tparallel // Subtests share one coderdtest server per tier and run sequentially.
+func TestForkSavedWorkflowConditionalWrites(t *testing.T) {
+	t.Parallel()
+
+	t.Run("User", func(t *testing.T) {
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client, db := coderdtest.NewWithDatabase(t, &coderdtest.Options{
+			DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
+				dv.Experiments = []string{string(codersdk.ExperimentForkWorkflows)}
+			}),
+		})
+		owner := coderdtest.CreateFirstUser(t, client)
+		orgID := owner.OrganizationID
+		member, _ := coderdtest.CreateAnotherUser(t, client, orgID)
+
+		created, err := member.CreateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, codersdk.CreateForkSavedWorkflowRequest{
+			Name:        "triage",
+			Description: "Triage new issues.",
+			Script:      savedWorkflowScript,
+		})
+		require.NoError(t, err)
+
+		t.Run("PatchMismatchConflicts", func(t *testing.T) {
+			ctx := testutil.Context(t, testutil.WaitLong)
+			_, err := member.UpdateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage",
+				codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("changed")},
+				codersdk.ForkSavedWorkflowWriteParams{ExpectID: ptr.Ref(uuid.New())},
+			)
+			_ = requireSDKError(t, err, http.StatusConflict)
+			got, err := member.ForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage")
+			require.NoError(t, err)
+			require.Equal(t, created, got, "the rejected update changed nothing")
+		})
+
+		t.Run("PatchMatchSucceeds", func(t *testing.T) {
+			ctx := testutil.Context(t, testutil.WaitLong)
+			updated, err := member.UpdateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage",
+				codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("changed")},
+				codersdk.ForkSavedWorkflowWriteParams{ExpectID: ptr.Ref(created.ID)},
+			)
+			require.NoError(t, err)
+			require.Equal(t, "changed", updated.Description)
+		})
+
+		// A key without user_skill:read cannot read the workflow, so the old
+		// pre-write check answered 403 with any expect_id, even the correct
+		// one. The check lives in the authorized write query now, so the key
+		// that may update still gets its conditional write.
+		t.Run("PatchMatchSucceedsForUpdateOnlyScope", func(t *testing.T) {
+			ctx := testutil.Context(t, testutil.WaitLong)
+			_, token := dbgen.APIKey(t, db, database.APIKey{
+				UserID: owner.UserID,
+				Scopes: database.APIKeyScopes{"organization:read", "organization_member:read", "user_skill:update"},
+			})
+			updator := codersdk.New(client.URL)
+			updator.SetSessionToken(token)
+			// Give the owner's key a workflow to patch: the member's "triage"
+			// belongs to another user, so create one under "me".
+			mine, err := client.CreateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, codersdk.CreateForkSavedWorkflowRequest{
+				Name:   "mine",
+				Script: savedWorkflowScript,
+			})
+			require.NoError(t, err)
+			updated, err := updator.UpdateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "mine",
+				codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("scoped")},
+				codersdk.ForkSavedWorkflowWriteParams{ExpectID: ptr.Ref(mine.ID)},
+			)
+			require.NoError(t, err)
+			require.Equal(t, "scoped", updated.Description)
+			// The delete probe reads with the caller's authorization, and the
+			// scoped key cannot read, so the delete looks missing rather than
+			// forbidden.
+			err = updator.DeleteForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "mine",
+				codersdk.ForkSavedWorkflowWriteParams{ExpectID: ptr.Ref(mine.ID)},
+			)
+			_ = requireSDKError(t, err, http.StatusNotFound)
+		})
+
+		t.Run("PatchWithoutIDKeepsOldBehavior", func(t *testing.T) {
+			ctx := testutil.Context(t, testutil.WaitLong)
+			updated, err := member.UpdateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage",
+				codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("unconditional")},
+			)
+			require.NoError(t, err)
+			require.Equal(t, "unconditional", updated.Description)
+		})
+
+		t.Run("PatchInvalidIDIsBadRequest", func(t *testing.T) {
+			ctx := testutil.Context(t, testutil.WaitLong)
+			res, err := member.Request(ctx, http.MethodPatch,
+				fmt.Sprintf("/api/v2/chats/fork/organizations/%s/members/me/workflows/triage?expect_id=not-a-uuid", orgID),
+				codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("changed")})
+			require.NoError(t, err)
+			_ = res.Body.Close()
+			require.Equal(t, http.StatusBadRequest, res.StatusCode)
+			// An explicitly empty value is also a bad request, so a client
+			// can never silently drop its concurrency guard.
+			res, err = member.Request(ctx, http.MethodPatch,
+				fmt.Sprintf("/api/v2/chats/fork/organizations/%s/members/me/workflows/triage?expect_id=", orgID),
+				codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("changed")})
+			require.NoError(t, err)
+			_ = res.Body.Close()
+			require.Equal(t, http.StatusBadRequest, res.StatusCode)
+			got, err := member.ForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage")
+			require.NoError(t, err)
+			require.NotEqual(t, "changed", got.Description, "the rejected patch changed nothing")
+		})
+
+		t.Run("PatchConflictOmitsStoredID", func(t *testing.T) {
+			ctx := testutil.Context(t, testutil.WaitLong)
+			res, err := member.Request(ctx, http.MethodPatch,
+				fmt.Sprintf("/api/v2/chats/fork/organizations/%s/members/me/workflows/triage?expect_id=%s", orgID, uuid.New()),
+				codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("changed")})
+			require.NoError(t, err)
+			defer res.Body.Close()
+			require.Equal(t, http.StatusConflict, res.StatusCode)
+			body, err := io.ReadAll(res.Body)
+			require.NoError(t, err)
+			require.NotContains(t, string(body), created.ID.String(), "the conflict response must not reveal the stored id")
+		})
+
+		t.Run("PatchMissingWorkflowStaysNotFound", func(t *testing.T) {
+			ctx := testutil.Context(t, testutil.WaitLong)
+			_, err := member.UpdateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "missing",
+				codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("changed")},
+				codersdk.ForkSavedWorkflowWriteParams{ExpectID: ptr.Ref(uuid.New())},
+			)
+			_ = requireSDKError(t, err, http.StatusNotFound)
+		})
+
+		t.Run("DeleteMismatchConflicts", func(t *testing.T) {
+			ctx := testutil.Context(t, testutil.WaitLong)
+			err := member.DeleteForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage",
+				codersdk.ForkSavedWorkflowWriteParams{ExpectID: ptr.Ref(uuid.New())},
+			)
+			_ = requireSDKError(t, err, http.StatusConflict)
+			_, err = member.ForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage")
+			require.NoError(t, err, "the rejected delete kept the workflow")
+		})
+
+		t.Run("DeleteMatchSucceeds", func(t *testing.T) {
+			ctx := testutil.Context(t, testutil.WaitLong)
+			got, err := member.ForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage")
+			require.NoError(t, err)
+			require.NoError(t, member.DeleteForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage",
+				codersdk.ForkSavedWorkflowWriteParams{ExpectID: ptr.Ref(got.ID)},
+			))
+			_, err = member.ForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage")
+			_ = requireSDKError(t, err, http.StatusNotFound)
+		})
+
+		t.Run("DeleteWithoutIDKeepsOldBehavior", func(t *testing.T) {
+			ctx := testutil.Context(t, testutil.WaitLong)
+			_, err := member.CreateForkUserSavedWorkflow(ctx, orgID, codersdk.Me, codersdk.CreateForkSavedWorkflowRequest{
+				Name:   "triage",
+				Script: savedWorkflowScript,
+			})
+			require.NoError(t, err)
+			require.NoError(t, member.DeleteForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage"))
+			_, err = member.ForkUserSavedWorkflow(ctx, orgID, codersdk.Me, "triage")
+			_ = requireSDKError(t, err, http.StatusNotFound)
+		})
+	})
+
+	t.Run("Organization", func(t *testing.T) {
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client, db := coderdtest.NewWithDatabase(t, &coderdtest.Options{
+			DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
+				dv.Experiments = []string{string(codersdk.ExperimentForkWorkflows)}
+			}),
+		})
+		owner := coderdtest.CreateFirstUser(t, client)
+		orgID := owner.OrganizationID
+		_, memberUser := coderdtest.CreateAnotherUser(t, client, orgID)
+
+		created, err := client.CreateForkOrganizationSavedWorkflow(ctx, orgID, codersdk.CreateForkSavedWorkflowRequest{
+			Name:   "release",
+			Script: savedWorkflowScript,
+		})
+		require.NoError(t, err)
+
+		scopedClient := func(scope database.APIKeyScope) *codersdk.Client {
+			_, token := dbgen.APIKey(t, db, database.APIKey{
+				UserID: owner.UserID,
+				Scopes: database.APIKeyScopes{"organization:read", scope},
+			})
+			scoped := codersdk.New(client.URL)
+			scoped.SetSessionToken(token)
+			return scoped
+		}
+
+		t.Run("PatchMismatchConflicts", func(t *testing.T) {
+			ctx := testutil.Context(t, testutil.WaitLong)
+			_, err := client.UpdateForkOrganizationSavedWorkflow(ctx, orgID, "release",
+				codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("changed")},
+				codersdk.ForkSavedWorkflowWriteParams{ExpectID: ptr.Ref(uuid.New())},
+			)
+			_ = requireSDKError(t, err, http.StatusConflict)
+			got, err := client.ForkOrganizationSavedWorkflow(ctx, orgID, "release")
+			require.NoError(t, err)
+			require.Equal(t, created, got, "the rejected update changed nothing")
+		})
+
+		t.Run("PatchMatchSucceeds", func(t *testing.T) {
+			ctx := testutil.Context(t, testutil.WaitLong)
+			updated, err := client.UpdateForkOrganizationSavedWorkflow(ctx, orgID, "release",
+				codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("changed")},
+				codersdk.ForkSavedWorkflowWriteParams{ExpectID: ptr.Ref(created.ID)},
+			)
+			require.NoError(t, err)
+			require.Equal(t, "changed", updated.Description)
+		})
+
+		t.Run("PatchWithoutIDKeepsOldBehavior", func(t *testing.T) {
+			ctx := testutil.Context(t, testutil.WaitLong)
+			updated, err := client.UpdateForkOrganizationSavedWorkflow(ctx, orgID, "release",
+				codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("unconditional")},
+			)
+			require.NoError(t, err)
+			require.Equal(t, "unconditional", updated.Description)
+		})
+
+		// A delete-only key cannot read the workflow, so its conditional
+		// check must still answer 409 on a mismatch rather than 403 or 404.
+		t.Run("DeleteMismatchConflictsForDeleteOnlyScope", func(t *testing.T) {
+			ctx := testutil.Context(t, testutil.WaitLong)
+			err := scopedClient("organization_skill:delete").DeleteForkOrganizationSavedWorkflow(ctx, orgID, "release",
+				codersdk.ForkSavedWorkflowWriteParams{ExpectID: ptr.Ref(uuid.New())},
+			)
+			_ = requireSDKError(t, err, http.StatusConflict)
+			_, err = client.ForkOrganizationSavedWorkflow(ctx, orgID, "release")
+			require.NoError(t, err, "the rejected delete kept the workflow")
+		})
+
+		// A member with an update-only key cannot delete and cannot read the
+		// hidden workflow. The delete authorizes first, so the caller keeps
+		// getting 404 for a workflow it cannot see, never a conflict.
+		t.Run("DeleteMismatchHiddenWorkflowStaysNotFound", func(t *testing.T) {
+			ctx := testutil.Context(t, testutil.WaitLong)
+			// Hide the workflow from everyone but the owner by dropping the
+			// Everyone grant, then probe it with a member key that cannot
+			// read or delete it.
+			err := client.UpdateForkOrganizationSavedWorkflowACL(ctx, orgID, "release", codersdk.UpdateOrganizationSkillACLRequest{
+				GroupRoles: map[string]codersdk.OrganizationSkillRole{orgID.String(): codersdk.OrganizationSkillRoleDeleted},
+			})
+			require.NoError(t, err)
+			_, token := dbgen.APIKey(t, db, database.APIKey{
+				UserID: memberUser.ID,
+				Scopes: database.APIKeyScopes{"organization:read", "organization_member:read", "organization_skill:update"},
+			})
+			updator := codersdk.New(client.URL)
+			updator.SetSessionToken(token)
+			err = updator.DeleteForkOrganizationSavedWorkflow(ctx, orgID, "release",
+				codersdk.ForkSavedWorkflowWriteParams{ExpectID: ptr.Ref(uuid.New())},
+			)
+			// The org delete keeps the unconditional-deny behavior: a member
+			// who can neither read nor delete gets 404, never a conflict or
+			// anything else that the workflow exists.
+			_ = requireSDKError(t, err, http.StatusNotFound)
+			_, err = client.ForkOrganizationSavedWorkflow(ctx, orgID, "release")
+			require.NoError(t, err, "the rejected delete kept the workflow")
+		})
+
+		t.Run("DeleteMatchSucceeds", func(t *testing.T) {
+			ctx := testutil.Context(t, testutil.WaitLong)
+			require.NoError(t, client.DeleteForkOrganizationSavedWorkflow(ctx, orgID, "release",
+				codersdk.ForkSavedWorkflowWriteParams{ExpectID: ptr.Ref(created.ID)},
+			))
+			_, err := client.ForkOrganizationSavedWorkflow(ctx, orgID, "release")
+			_ = requireSDKError(t, err, http.StatusNotFound)
+		})
+
+		t.Run("DeleteWithoutIDKeepsOldBehavior", func(t *testing.T) {
+			ctx := testutil.Context(t, testutil.WaitLong)
+			_, err := client.CreateForkOrganizationSavedWorkflow(ctx, orgID, codersdk.CreateForkSavedWorkflowRequest{
+				Name:   "release",
+				Script: savedWorkflowScript,
+			})
+			require.NoError(t, err)
+			require.NoError(t, client.DeleteForkOrganizationSavedWorkflow(ctx, orgID, "release"))
+			_, err = client.ForkOrganizationSavedWorkflow(ctx, orgID, "release")
+			_ = requireSDKError(t, err, http.StatusNotFound)
+		})
 	})
 }

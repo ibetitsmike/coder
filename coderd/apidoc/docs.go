@@ -5780,11 +5780,30 @@ const docTemplate = `{
                         "name": "workflow",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Expected workflow ID, as a UUID",
+                        "name": "expect_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "204": {
                         "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
                     }
                 },
                 "security": [
@@ -5831,6 +5850,13 @@ const docTemplate = `{
                         "required": true
                     },
                     {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Expected workflow ID, as a UUID",
+                        "name": "expect_id",
+                        "in": "query"
+                    },
+                    {
                         "description": "Request body",
                         "name": "request",
                         "in": "body",
@@ -5845,6 +5871,18 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/codersdk.ForkSavedWorkflow"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
                         }
                     }
                 },
@@ -6959,11 +6997,30 @@ const docTemplate = `{
                         "name": "workflow",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Expected workflow ID, as a UUID",
+                        "name": "expect_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "204": {
                         "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
                     }
                 },
                 "security": [
@@ -7003,6 +7060,13 @@ const docTemplate = `{
                         "required": true
                     },
                     {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Expected workflow ID, as a UUID",
+                        "name": "expect_id",
+                        "in": "query"
+                    },
+                    {
                         "description": "Request body",
                         "name": "request",
                         "in": "body",
@@ -7017,6 +7081,18 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/codersdk.ForkSavedWorkflow"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.Response"
                         }
                     }
                 },
@@ -26072,20 +26148,20 @@ const docTemplate = `{
         "codersdk.ChatContextResourceKind": {
             "type": "string",
             "enum": [
+                "subagent",
                 "instruction_file",
                 "skill",
                 "mcp_config",
                 "mcp_server",
-                "acp_harness",
-                "subagent"
+                "acp_harness"
             ],
             "x-enum-varnames": [
+                "ChatContextResourceKindSubagent",
                 "ChatContextResourceKindInstructionFile",
                 "ChatContextResourceKindSkill",
                 "ChatContextResourceKindMCPConfig",
                 "ChatContextResourceKindMCPServer",
-                "ChatContextResourceKindACPHarness",
-                "ChatContextResourceKindSubagent"
+                "ChatContextResourceKindACPHarness"
             ]
         },
         "codersdk.ChatContextResourceStatus": {
@@ -29445,6 +29521,10 @@ const docTemplate = `{
                             "$ref": "#/definitions/codersdk.TemplateAutostopRequirement"
                         }
                     ]
+                },
+                "browser_only": {
+                    "description": "BrowserOnly makes coderd refuse non-browser client connections, such as\nSSH, port forwarding and desktop IDEs, to workspaces built from this\ntemplate. Defaults to false. Enabling it requires the browser-only\nentitlement.",
+                    "type": "boolean"
                 },
                 "cors_behavior": {
                     "description": "CORSBehavior allows optionally specifying the CORS behavior for all shared ports.",
@@ -36859,6 +36939,10 @@ const docTemplate = `{
                         }
                     ]
                 },
+                "browser_only": {
+                    "description": "BrowserOnly makes coderd refuse non-browser client connections, such as\nSSH, port forwarding and desktop IDEs, to workspaces built from this\ntemplate. The deployment-wide browser-only setting applies on top of\nthis one.",
+                    "type": "boolean"
+                },
                 "build_time_stats": {
                     "$ref": "#/definitions/codersdk.TemplateBuildTimeStats"
                 },
@@ -38817,6 +38901,10 @@ const docTemplate = `{
                             "$ref": "#/definitions/codersdk.TemplateAutostopRequirement"
                         }
                     ]
+                },
+                "browser_only": {
+                    "description": "BrowserOnly makes coderd refuse non-browser client connections, such as\nSSH, port forwarding and desktop IDEs, to workspaces built from this\ntemplate. Enabling it requires the browser-only entitlement; disabling it\ndoes not.",
+                    "type": "boolean"
                 },
                 "cors_behavior": {
                     "$ref": "#/definitions/codersdk.CORSBehavior"
