@@ -232,8 +232,11 @@ export const useForkSavedWorkflowEditor = (scope: SavedWorkflowScope) => {
 						scope,
 						name,
 						req: buildUpdateSavedWorkflowRequest(formValues),
-						// The revision the editor loaded: the server rejects the
-						// save with 409 when the stored workflow has another id.
+						// The revision the editor loaded: the write goes through
+						// only when the stored workflow still has this id. A
+						// mismatch answers 409 when a workflow the caller may
+						// write holds the name, and 404 when the name holds
+						// nothing or a row the caller may not see.
 						id: loadedFrom?.id,
 					},
 					{
