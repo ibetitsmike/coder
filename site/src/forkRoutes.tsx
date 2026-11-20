@@ -30,6 +30,13 @@ const ForkPluginPacksPage = lazy(
 		import("./pages/AISettingsPage/ForkPluginPacksPage/ForkPluginPacksPage"),
 );
 
+const ForkSavedWorkflowsPage = lazy(
+	() =>
+		import(
+			"./pages/AgentsPage/AgentSettingsPage/ForkSavedWorkflowsPage/ForkSavedWorkflowsPage"
+		),
+);
+
 const ForkWorkflowsPage = lazy(
 	() => import("./pages/AISettingsPage/ForkWorkflowsPage/ForkWorkflowsPage"),
 );
@@ -39,6 +46,7 @@ export const forkAgentSettingsRoutes = (
 	<>
 		<Route path="agent-definitions" element={<ForkAgentDefinitionsPage />} />
 		<Route path="available-agents" element={<ForkAvailableAgentsPage />} />
+		<Route path="workflows" element={<ForkSavedWorkflowsPage />} />
 	</>
 );
 
