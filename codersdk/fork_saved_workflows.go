@@ -127,6 +127,14 @@ func (c *Client) DeleteForkUserSavedWorkflow(ctx context.Context, organizationID
 	return requestNoContent(ctx, c, http.MethodDelete, forkUserSavedWorkflowPath(organizationID, user, name), nil, writeParamsOptions(params)...)
 }
 
+// ShareForkUserSavedWorkflow moves a personal workflow to the organization
+// tier under the same name. Every member can then read it, and its owner
+// keeps the right to update and delete it. Optional write conditions come as
+// params and apply to the personal workflow.
+func (c *Client) ShareForkUserSavedWorkflow(ctx context.Context, organizationID uuid.UUID, user, name string, params ...ForkSavedWorkflowWriteParams) (ForkSavedWorkflow, error) {
+	return requestJSON[ForkSavedWorkflow](ctx, c, http.MethodPost, forkUserSavedWorkflowPath(organizationID, user, name)+"/share", http.StatusCreated, nil, writeParamsOptions(params)...)
+}
+
 func forkOrganizationSavedWorkflowsPath(organizationID uuid.UUID) string {
 	return fmt.Sprintf("/api/v2/chats/fork/organizations/%s/workflows", organizationID)
 }

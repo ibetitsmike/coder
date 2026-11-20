@@ -54,6 +54,58 @@ export const ReadOnly: Story = {
 	args: { access: { create: false, update: false, delete: false } },
 };
 
+export const ShareMenuOpen: Story = {
+	args: { onShare: fn() },
+	play: RowMenuOpen.play,
+};
+
+/** Only the row the user shared offers a menu. */
+export const RowAccess: Story = {
+	args: {
+		title: "Organization workflows",
+		workflows: [
+			MockForkSavedWorkflowMetadata,
+			{
+				...MockForkSavedWorkflowMetadata,
+				id: "saved-workflow-other",
+				name: "rotate-keys",
+			},
+		],
+		access: { create: false, update: false, delete: false },
+		rowAccess: (workflow) =>
+			workflow.id === MockForkSavedWorkflowMetadata.id
+				? { create: false, update: true, delete: true }
+				: { create: false, update: false, delete: false },
+	},
+};
+
+export const ShareConfirm: Story = {
+	args: {
+		shareState: {
+			workflow: MockForkSavedWorkflowMetadata,
+			error: undefined,
+			isSharing: false,
+			onConfirm: fn(),
+			onClose: fn(),
+		},
+	},
+};
+
+export const ShareError: Story = {
+	args: {
+		shareState: {
+			workflow: MockForkSavedWorkflowMetadata,
+			error: mockApiError({
+				message: "An organization workflow with this name already exists.",
+				status: 409,
+			}),
+			isSharing: false,
+			onConfirm: fn(),
+			onClose: fn(),
+		},
+	},
+};
+
 export const Empty: Story = {
 	args: { workflows: [] },
 };

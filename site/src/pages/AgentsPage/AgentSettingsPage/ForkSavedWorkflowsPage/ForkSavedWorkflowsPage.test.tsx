@@ -9,6 +9,7 @@ import {
 	MockOrganization2,
 	MockOrganization3,
 	MockUserMember,
+	mockApiError,
 } from "#/testHelpers/entities";
 import {
 	MockForkOrganizationSavedWorkflowMetadata,
@@ -116,6 +117,110 @@ describe("ForkSavedWorkflowsPage", () => {
 			MockDefaultOrganization.id,
 			MockForkOrganizationSavedWorkflowMetadata.name,
 		);
+	});
+
+	it("shares a personal workflow with the organization", async () => {
+		const user = userEvent.setup();
+		const { listUser, listOrganization } = renderPage();
+		const shared = {
+			...MockForkSavedWorkflowMetadata,
+			id: "saved-workflow-shared",
+			user_id: undefined,
+			created_by: MockUserMember.id,
+		};
+		const share = vi
+			.spyOn(forkSavedWorkflowsApi, "shareUserSavedWorkflow")
+			.mockImplementation(async () => {
+				listUser.mockResolvedValue([]);
+				listOrganization.mockResolvedValue([
+					MockForkOrganizationSavedWorkflowMetadata,
+					shared,
+				]);
+				return { ...shared, script: MockForkWorkflowScript };
+			});
+
+		const personal = await screen.findByRole("table", {
+			name: "Personal workflows",
+		});
+		await user.click(
+			await within(personal).findByRole("button", {
+				name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
+			}),
+		);
+		await user.click(
+			await screen.findByRole("menuitem", {
+				name: "Share with organization…",
+			}),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: `Share ${MockForkSavedWorkflowMetadata.name} with the organization?`,
+		});
+		await user.click(within(dialog).getByRole("button", { name: "Share" }));
+
+		await waitFor(() =>
+			expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+		);
+		expect(share).toHaveBeenCalledWith(
+			MockDefaultOrganization.id,
+			MockForkSavedWorkflowMetadata.name,
+			MockForkSavedWorkflowMetadata.id,
+		);
+		await within(personal).findByText(
+			"No personal workflows in this organization yet.",
+		);
+		const organization = screen.getByRole("table", {
+			name: "Organization workflows",
+		});
+		// The member who shared it can edit and delete it; the other
+		// organization workflow stays read-only.
+		await user.click(
+			await within(organization).findByRole("button", {
+				name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
+			}),
+		);
+		await screen.findByRole("menuitem", { name: "Edit" });
+		screen.getByRole("menuitem", { name: "Delete…" });
+		expect(
+			screen.queryByRole("menuitem", { name: "Share with organization…" }),
+		).toBeNull();
+		expect(
+			within(organization).queryByRole("button", {
+				name: `More actions for ${MockForkOrganizationSavedWorkflowMetadata.name}`,
+			}),
+		).toBeNull();
+	});
+
+	it("keeps the share dialog open with the error when the move fails", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		vi.spyOn(forkSavedWorkflowsApi, "shareUserSavedWorkflow").mockRejectedValue(
+			mockApiError({
+				message: "An organization workflow with this name already exists.",
+				status: 409,
+			}),
+		);
+
+		const personal = await screen.findByRole("table", {
+			name: "Personal workflows",
+		});
+		await user.click(
+			await within(personal).findByRole("button", {
+				name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
+			}),
+		);
+		await user.click(
+			await screen.findByRole("menuitem", {
+				name: "Share with organization…",
+			}),
+		);
+		const dialog = await screen.findByRole("dialog");
+		await user.click(within(dialog).getByRole("button", { name: "Share" }));
+
+		await within(dialog).findByText(
+			"An organization workflow with this name already exists.",
+		);
+		expect(screen.getByRole("dialog")).toBeInTheDocument();
+		within(personal).getByText(MockForkSavedWorkflowMetadata.name);
 	});
 
 	it("offers only the member's organizations in the picker", async () => {

@@ -872,6 +872,11 @@ func (f forkQueryMetricsStore) DeleteUserSavedWorkflowByName(ctx context.Context
 	return f.s.DeleteUserSavedWorkflowByName(ctx, arg)
 }
 
+func (f forkQueryMetricsStore) ShareUserSavedWorkflowByName(ctx context.Context, arg forkdb.ShareUserSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	defer f.observe(ctx, "ShareUserSavedWorkflowByName", time.Now())
+	return f.s.ShareUserSavedWorkflowByName(ctx, arg)
+}
+
 func (f forkQueryMetricsStore) GetOrganizationSavedWorkflowByName(ctx context.Context, arg forkdb.GetOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
 	defer f.observe(ctx, "GetOrganizationSavedWorkflowByName", time.Now())
 	return f.s.GetOrganizationSavedWorkflowByName(ctx, arg)

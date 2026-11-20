@@ -61,6 +61,35 @@ export const Listed: Story = {
 	},
 };
 
+export const SharedByMe: Story = {
+	parameters: {
+		queries: [
+			{
+				key: savedWorkflowsKey({
+					tier: "user",
+					organizationId: MockDefaultOrganization.id,
+				}),
+				data: [],
+			},
+			{
+				key: savedWorkflowsKey({
+					tier: "organization",
+					organizationId: MockDefaultOrganization.id,
+				}),
+				data: [
+					MockForkOrganizationSavedWorkflowMetadata,
+					{
+						...MockForkSavedWorkflowMetadata,
+						id: "saved-workflow-shared",
+						user_id: undefined,
+						created_by: MockUserMember.id,
+					},
+				],
+			},
+		],
+	},
+};
+
 export const Empty: Story = {
 	parameters: {
 		queries: [

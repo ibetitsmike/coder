@@ -20,6 +20,7 @@ import {
 	savedWorkflow,
 	savedWorkflowKey,
 	savedWorkflowsKey,
+	shareSavedWorkflow,
 	updateSavedWorkflow,
 	updateSavedWorkflowACL,
 } from "./forkSavedWorkflows";
@@ -373,6 +374,86 @@ describe("deleteSavedWorkflow", () => {
 		expect(queryClient.getQueryData(listKey)).toEqual(listed);
 		expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
 			queryKey: listKey,
+		});
+	});
+});
+
+describe("shareSavedWorkflow", () => {
+	const organizationScope: SavedWorkflowScope = {
+		...scope,
+		tier: "organization",
+	};
+
+	it("moves the workflow out of the personal list and refetches both lists", async () => {
+		const queryClient = createQueryClient();
+		const listKey = savedWorkflowsKey(scope);
+		const detailKey = savedWorkflowKey(scope, name);
+		queryClient.setQueryData(listKey, [
+			metadataOf(MockForkSavedWorkflowCreated),
+		]);
+		queryClient.setQueryData(detailKey, MockForkSavedWorkflowCreated);
+		const share = vi
+			.spyOn(forkSavedWorkflowsApi, "shareUserSavedWorkflow")
+			.mockResolvedValue({
+				...MockForkSavedWorkflowCreated,
+				id: "saved-workflow-shared",
+				user_id: undefined,
+			});
+
+		await new MutationObserver(
+			queryClient,
+			shareSavedWorkflow(queryClient),
+		).mutate({
+			organizationId: scope.organizationId,
+			name,
+			id: MockForkSavedWorkflowCreated.id,
+		});
+
+		expect(share).toHaveBeenCalledWith(
+			scope.organizationId,
+			name,
+			MockForkSavedWorkflowCreated.id,
+		);
+		expect(queryClient.getQueryData(listKey)).toEqual([]);
+		expect(queryClient.getQueryData(detailKey)).toBeUndefined();
+		expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
+			queryKey: listKey,
+		});
+		expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
+			queryKey: savedWorkflowsKey(organizationScope),
+		});
+	});
+
+	it("keeps the personal row when the server rejects the move", async () => {
+		const queryClient = createQueryClient();
+		const listKey = savedWorkflowsKey(scope);
+		const detailKey = savedWorkflowKey(scope, name);
+		const listed = [metadataOf(MockForkSavedWorkflowCreated)];
+		queryClient.setQueryData(listKey, listed);
+		queryClient.setQueryData(detailKey, MockForkSavedWorkflowCreated);
+		vi.spyOn(forkSavedWorkflowsApi, "shareUserSavedWorkflow").mockRejectedValue(
+			mockApiError({
+				message: "An organization workflow with this name already exists.",
+				status: 409,
+			}),
+		);
+
+		await expect(
+			new MutationObserver(queryClient, shareSavedWorkflow(queryClient)).mutate(
+				{
+					organizationId: scope.organizationId,
+					name,
+					id: MockForkSavedWorkflowCreated.id,
+				},
+			),
+		).rejects.toBeTruthy();
+
+		expect(queryClient.getQueryData(listKey)).toEqual(listed);
+		expect(queryClient.getQueryData(detailKey)).toEqual(
+			MockForkSavedWorkflowCreated,
+		);
+		expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
+			queryKey: savedWorkflowsKey(organizationScope),
 		});
 	});
 });

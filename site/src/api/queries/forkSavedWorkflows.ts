@@ -20,6 +20,7 @@ import {
 	getOrganizationSavedWorkflows,
 	getUserSavedWorkflow,
 	getUserSavedWorkflows,
+	shareUserSavedWorkflow,
 	updateOrganizationSavedWorkflow,
 	updateOrganizationSavedWorkflowACL,
 	updateUserSavedWorkflow,
@@ -277,6 +278,44 @@ export const deleteSavedWorkflow = (queryClient: QueryClient) =>
 			void queryClient.invalidateQueries({
 				queryKey: savedWorkflowsKey(scope),
 			});
+		},
+	});
+
+type ShareSavedWorkflowArgs = {
+	organizationId: string;
+	name: string;
+	/** The personal workflow the user picked, which the name must still hold. */
+	id: string;
+};
+
+/**
+ * Mutation options that move a personal workflow to the organization. The
+ * server rejects the move with 409 when the name holds another personal
+ * workflow, the organization has a workflow of that name, or it is full.
+ */
+export const shareSavedWorkflow = (queryClient: QueryClient) =>
+	mutationOptions({
+		mutationFn: ({ organizationId, name, id }: ShareSavedWorkflowArgs) =>
+			shareUserSavedWorkflow(organizationId, name, id),
+		onSuccess: (_data, { organizationId, name, id }) => {
+			const scope: SavedWorkflowScope = { tier: "user", organizationId };
+			queryClient.setQueryData(savedWorkflows(scope).queryKey, (workflows) =>
+				workflows?.filter((workflow) => workflow.id !== id),
+			);
+			const detailKey = savedWorkflowKey(scope, name);
+			const cached = queryClient.getQueryData<ForkSavedWorkflow>(detailKey);
+			if (cached === undefined || cached.id === id) {
+				queryClient.removeQueries({ queryKey: detailKey, exact: true });
+			}
+		},
+		// Both lists change: the row leaves the personal one and joins the
+		// organization one.
+		onSettled: (_data, _error, { organizationId }) => {
+			for (const tier of ["user", "organization"] as const) {
+				void queryClient.invalidateQueries({
+					queryKey: savedWorkflowsKey({ tier, organizationId }),
+				});
+			}
 		},
 	});
 

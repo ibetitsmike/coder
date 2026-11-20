@@ -12,6 +12,7 @@ import {
 	savedWorkflow,
 	savedWorkflowKey,
 	savedWorkflows,
+	shareSavedWorkflow,
 } from "#/api/queries/forkSavedWorkflows";
 import type {
 	ForkSavedWorkflow,
@@ -21,6 +22,7 @@ import { toast } from "#/components/Toaster/toast";
 import type { SkillAccess } from "#/pages/AgentsPage/utils/skills";
 import {
 	type ForkSavedWorkflowDeleteState,
+	type ForkSavedWorkflowShareState,
 	ForkSavedWorkflowsTableView,
 } from "./ForkSavedWorkflowsTableView";
 import { useForkSavedWorkflowEditor } from "./useForkSavedWorkflowEditor";
@@ -56,6 +58,13 @@ type ForkSavedWorkflowsTableProps = {
 	/** Replaces parts of the tier's default copy. */
 	copy?: Partial<ForkSavedWorkflowsTableCopy>;
 	access?: SkillAccess;
+	/** Overrides access for one row, see ForkSavedWorkflowsTableView. */
+	rowAccess?: (workflow: ForkSavedWorkflowMetadata) => SkillAccess;
+	/**
+	 * Offers to move each personal workflow to the organization. Only the
+	 * user tier can share.
+	 */
+	canShare?: boolean;
 	onManagePermissions?: (
 		workflow: ForkSavedWorkflowMetadata,
 		onCloseAutoFocus: (event: Event) => void,
@@ -65,7 +74,14 @@ type ForkSavedWorkflowsTableProps = {
 /** Wires the saved workflows table of one scope to the API. */
 export const ForkSavedWorkflowsTable: React.FC<
 	ForkSavedWorkflowsTableProps
-> = ({ scope, copy: copyOverride, access, onManagePermissions }) => {
+> = ({
+	scope,
+	copy: copyOverride,
+	access,
+	rowAccess,
+	canShare = false,
+	onManagePermissions,
+}) => {
 	const tierCopy = { ...copy[scope.tier], ...copyOverride };
 	const queryClient = useQueryClient();
 	const [deleteTarget, setDeleteTarget] = useState<{
@@ -101,6 +117,53 @@ export const ForkSavedWorkflowsTable: React.FC<
 		useForkSavedWorkflowEditor(scope);
 
 	const deleteMutation = useMutation(deleteSavedWorkflow(queryClient));
+
+	const [shareTarget, setShareTarget] = useState<{
+		workflow: ForkSavedWorkflowMetadata;
+		scope: SavedWorkflowScope;
+	}>();
+	const activeShareTarget =
+		shareTarget && isSameScope(shareTarget.scope, scope)
+			? shareTarget.workflow
+			: undefined;
+	if (shareTarget && !activeShareTarget) {
+		setShareTarget(undefined);
+	}
+	const shareMutation = useMutation(shareSavedWorkflow(queryClient));
+	let shareState: ForkSavedWorkflowShareState | undefined;
+	if (activeShareTarget) {
+		const isTarget =
+			shareMutation.variables !== undefined &&
+			shareMutation.variables.organizationId === scope.organizationId &&
+			shareMutation.variables.id === activeShareTarget.id;
+		const isSharing = isTarget && shareMutation.isPending;
+		shareState = {
+			workflow: activeShareTarget,
+			error: isTarget ? shareMutation.error : undefined,
+			isSharing,
+			onConfirm: () =>
+				shareMutation.mutate(
+					{
+						organizationId: scope.organizationId,
+						name: activeShareTarget.name,
+						id: activeShareTarget.id,
+					},
+					{
+						onSuccess: () => {
+							setShareTarget(undefined);
+							toast.success(
+								`${activeShareTarget.name} is now an organization workflow.`,
+							);
+						},
+					},
+				),
+			onClose: () => {
+				if (!isSharing) {
+					setShareTarget(undefined);
+				}
+			},
+		};
+	}
 
 	let deleteState: ForkSavedWorkflowDeleteState | undefined;
 	if (activeDeleteTarget) {
@@ -155,6 +218,7 @@ export const ForkSavedWorkflowsTable: React.FC<
 			description={tierCopy.description}
 			emptyMessage={tierCopy.emptyMessage}
 			access={access}
+			rowAccess={rowAccess}
 			error={workflowsQuery.error}
 			isLoading={workflowsQuery.isLoading}
 			isRetrying={workflowsQuery.isFetching}
@@ -177,9 +241,18 @@ export const ForkSavedWorkflowsTable: React.FC<
 				deleteMutation.reset();
 				setDeleteTarget({ workflow, scope });
 			}}
+			onShare={
+				canShare && scope.tier === "user"
+					? (workflow) => {
+							shareMutation.reset();
+							setShareTarget({ workflow, scope });
+						}
+					: undefined
+			}
 			onManagePermissions={onManagePermissions}
 			editorState={editorState}
 			deleteState={deleteState}
+			shareState={shareState}
 			detailState={
 				activeDetailName
 					? {

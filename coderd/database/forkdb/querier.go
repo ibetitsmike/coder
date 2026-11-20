@@ -421,6 +421,13 @@ type Querier interface {
 	// the owner without the running check: the terminal flush follows the
 	// terminal status write of the same owner.
 	SetWorkflowRunLogs(ctx context.Context, arg SetWorkflowRunLogsParams) error
+	// Moves a personal workflow to the organization tier under the same name in
+	// one statement, so a failed insert, such as a taken name or a full
+	// organization, keeps the personal row. The owner keeps read, update and
+	// delete through a user grant, and every member reads it through the
+	// Everyone group, whose id is the organization's. Set ExpectID to move only
+	// when the personal row still has that id.
+	ShareUserSavedWorkflowByName(ctx context.Context, arg ShareUserSavedWorkflowByNameParams) (SavedWorkflow, error)
 	// Deleted messages count too: they were paid for. Messages without a price
 	// have a NULL cost and count as zero.
 	SumChatCostMicrosSince(ctx context.Context, arg SumChatCostMicrosSinceParams) (int64, error)

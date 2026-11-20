@@ -1510,6 +1510,21 @@ func (f *forkQuerier) DeleteUserSavedWorkflowByName(ctx context.Context, arg for
 	return f.db.DeleteUserSavedWorkflowByName(ctx, arg)
 }
 
+// ShareUserSavedWorkflowByName moves a personal row to the organization tier.
+// The move removes the personal row and copies its content, so it needs
+// delete and read of that row. It needs no organization create: the new row
+// grants every member only read, and its owner only what the owner already
+// had on the personal row.
+func (f *forkQuerier) ShareUserSavedWorkflowByName(ctx context.Context, arg forkdb.ShareUserSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionDelete, arg.OrganizationID, arg.UserID); err != nil {
+		return forkdb.SavedWorkflow{}, err
+	}
+	if err := f.authorizeUserAgentDefinition(ctx, policy.ActionRead, arg.OrganizationID, arg.UserID); err != nil {
+		return forkdb.SavedWorkflow{}, err
+	}
+	return f.db.ShareUserSavedWorkflowByName(ctx, arg)
+}
+
 func (f *forkQuerier) InsertOrganizationSavedWorkflow(ctx context.Context, arg forkdb.InsertOrganizationSavedWorkflowParams) (forkdb.SavedWorkflow, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionCreate, rbac.ResourceOrganizationSkill.InOrg(arg.OrganizationID)); err != nil {
 		return forkdb.SavedWorkflow{}, err

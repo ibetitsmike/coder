@@ -84,6 +84,28 @@ export const deleteUserSavedWorkflow = async (
 	);
 };
 
+/**
+ * Moves one of the signed-in member's personal saved workflows to the
+ * organization under the same name. Every member can then read it, and the
+ * member keeps the right to edit and delete it. expectId rejects the move
+ * with 409 when the name holds another workflow.
+ */
+export const shareUserSavedWorkflow = async (
+	organizationId: string,
+	name: string,
+	expectId?: string,
+): Promise<ForkSavedWorkflow> => {
+	const response = await API.getAxiosInstance().post<ForkSavedWorkflow>(
+		getURLWithSearchParams(
+			`${userSavedWorkflowPath(organizationId, name)}/share`,
+			{
+				expect_id: expectId,
+			},
+		),
+	);
+	return response.data;
+};
+
 const organizationSavedWorkflowsPath = (organizationId: string) =>
 	`/api/v2/chats/fork/organizations/${organizationId}/workflows`;
 const organizationSavedWorkflowPath = (organizationId: string, name: string) =>

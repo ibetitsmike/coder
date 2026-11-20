@@ -58,6 +58,18 @@ export type ForkSavedWorkflowDeleteState = {
 	onClose: () => void;
 };
 
+/**
+ * The open share confirmation. While isSharing, onClose should keep the
+ * dialog open, because a failure is reported only as error in this dialog.
+ */
+export type ForkSavedWorkflowShareState = {
+	workflow: ForkSavedWorkflowMetadata;
+	error: unknown;
+	isSharing: boolean;
+	onConfirm: () => void;
+	onClose: () => void;
+};
+
 /** Everything the saved workflows table view renders one section with. */
 type ForkSavedWorkflowsTableViewProps = {
 	/** The section title, for example "Personal workflows". */
@@ -69,6 +81,11 @@ type ForkSavedWorkflowsTableViewProps = {
 	 * Hides the create, edit, and delete controls the user may not use.
 	 */
 	access?: SkillAccess;
+	/**
+	 * Overrides access for one row's edit and delete controls, for example
+	 * for the workflows the user created.
+	 */
+	rowAccess?: (workflow: ForkSavedWorkflowMetadata) => SkillAccess;
 	error: unknown;
 	isLoading: boolean;
 	isRetrying: boolean;
@@ -78,6 +95,8 @@ type ForkSavedWorkflowsTableViewProps = {
 	onView: (workflow: ForkSavedWorkflowMetadata) => void;
 	onEdit: (workflow: ForkSavedWorkflowMetadata) => void;
 	onDelete: (workflow: ForkSavedWorkflowMetadata) => void;
+	/** Offers a Share action on every row, which opens shareState. */
+	onShare?: (workflow: ForkSavedWorkflowMetadata) => void;
 	/**
 	 * The caller opens its own dialog and passes onCloseAutoFocus to it so
 	 * focus returns to the row's menu.
@@ -90,6 +109,8 @@ type ForkSavedWorkflowsTableViewProps = {
 	editorState: ForkSavedWorkflowEditorState | undefined;
 	/** The open delete confirmation, when a row's menu opened one. */
 	deleteState: ForkSavedWorkflowDeleteState | undefined;
+	/** The open share confirmation, when a row's menu opened one. */
+	shareState?: ForkSavedWorkflowShareState;
 	/** The open detail dialog, when a row's name button opened one. */
 	detailState:
 		| {
@@ -158,6 +179,7 @@ export const ForkSavedWorkflowsTableView: React.FC<
 	description,
 	emptyMessage,
 	access = fullSkillAccess,
+	rowAccess,
 	error,
 	isLoading,
 	isRetrying,
@@ -166,9 +188,11 @@ export const ForkSavedWorkflowsTableView: React.FC<
 	onView,
 	onEdit,
 	onDelete,
+	onShare,
 	onManagePermissions,
 	editorState,
 	deleteState,
+	shareState,
 	detailState,
 }) => {
 	const {
@@ -178,8 +202,20 @@ export const ForkSavedWorkflowsTableView: React.FC<
 		setSecondaryFallback,
 	} = useDialogFocusReturn();
 
+	const accessOf = (workflow: ForkSavedWorkflowMetadata) =>
+		rowAccess?.(workflow) ?? access;
+	const rowHasActions = (workflow: ForkSavedWorkflowMetadata) => {
+		const { update, delete: canDelete } = accessOf(workflow);
+		return (
+			update || canDelete || Boolean(onShare) || Boolean(onManagePermissions)
+		);
+	};
 	const hasRowActions =
-		access.update || access.delete || Boolean(onManagePermissions);
+		access.update ||
+		access.delete ||
+		Boolean(onShare) ||
+		Boolean(onManagePermissions) ||
+		workflows.some(rowHasActions);
 
 	let tableBody: React.ReactNode;
 	if (isLoading) {
@@ -219,15 +255,17 @@ export const ForkSavedWorkflowsTableView: React.FC<
 			<SavedWorkflowRow
 				key={workflow.id}
 				workflow={workflow}
-				access={access}
-				hasRowActions={hasRowActions}
+				access={accessOf(workflow)}
+				hasActionsColumn={hasRowActions}
+				hasActions={rowHasActions(workflow)}
 				// A deleted row takes its menu button with it, so focus falls
 				// back to the first remaining row's menu button, or its name
-				// button when the table has no row menus.
+				// button when the row has no menu.
 				isFirst={workflow.id === workflows[0]?.id}
 				onView={onView}
 				onEdit={onEdit}
 				onDelete={onDelete}
+				onShare={onShare}
 				onManagePermissions={onManagePermissions}
 				rememberTrigger={rememberTrigger}
 				restoreFocus={restoreFocus}
@@ -322,6 +360,43 @@ export const ForkSavedWorkflowsTableView: React.FC<
 				/>
 			)}
 
+			{shareState && (
+				<ConfirmDialog
+					type="info"
+					hideCancel={false}
+					open
+					onClose={shareState.onClose}
+					onCloseAutoFocus={restoreFocus}
+					title={`Share ${shareState.workflow.name} with the organization?`}
+					confirmText="Share"
+					description={
+						<>
+							<p className="m-0">
+								The workflow moves from your personal workflows to the
+								organization workflows. Every member of the organization can
+								read and run it. You can still edit and delete it, and an
+								organization admin can change who has access.
+							</p>
+							{Boolean(shareState.error) && (
+								<Alert severity="error" className="mt-3">
+									<AlertDescription>
+										{getErrorMessage(
+											shareState.error,
+											"Failed to share saved workflow.",
+										)}
+										{getErrorDetail(shareState.error)
+											? ` ${getErrorDetail(shareState.error)}`
+											: ""}
+									</AlertDescription>
+								</Alert>
+							)}
+						</>
+					}
+					onConfirm={shareState.onConfirm}
+					confirmLoading={shareState.isSharing}
+				/>
+			)}
+
 			{detailState && (
 				<ForkSavedWorkflowDetailDialog
 					onCloseAutoFocus={restoreFocus}
@@ -340,11 +415,14 @@ export const ForkSavedWorkflowsTableView: React.FC<
 type SavedWorkflowRowProps = {
 	workflow: ForkSavedWorkflowMetadata;
 	access: SkillAccess;
-	hasRowActions: boolean;
+	/** Some row of the table has a menu, so every row has the column. */
+	hasActionsColumn: boolean;
+	hasActions: boolean;
 	isFirst: boolean;
 	onView: (workflow: ForkSavedWorkflowMetadata) => void;
 	onEdit: (workflow: ForkSavedWorkflowMetadata) => void;
 	onDelete: (workflow: ForkSavedWorkflowMetadata) => void;
+	onShare?: (workflow: ForkSavedWorkflowMetadata) => void;
 	onManagePermissions?: (
 		workflow: ForkSavedWorkflowMetadata,
 		onCloseAutoFocus: (event: Event) => void,
@@ -357,11 +435,13 @@ type SavedWorkflowRowProps = {
 const SavedWorkflowRow: React.FC<SavedWorkflowRowProps> = ({
 	workflow,
 	access,
-	hasRowActions,
+	hasActionsColumn,
+	hasActions,
 	isFirst,
 	onView,
 	onEdit,
 	onDelete,
+	onShare,
 	onManagePermissions,
 	rememberTrigger,
 	restoreFocus,
@@ -372,7 +452,7 @@ const SavedWorkflowRow: React.FC<SavedWorkflowRowProps> = ({
 			<Button
 				variant="subtle"
 				className="h-auto min-w-0 max-w-full justify-start p-0"
-				ref={isFirst && !hasRowActions ? setPrimaryFallback : undefined}
+				ref={isFirst && !hasActions ? setPrimaryFallback : undefined}
 				onClick={(event) => {
 					rememberTrigger(event);
 					onView(workflow);
@@ -392,7 +472,8 @@ const SavedWorkflowRow: React.FC<SavedWorkflowRowProps> = ({
 		<TableCell className="hidden whitespace-nowrap sm:table-cell">
 			{formatUpdatedAt(workflow.updated_at)}
 		</TableCell>
-		{hasRowActions && (
+		{hasActionsColumn && !hasActions && <TableCell />}
+		{hasActions && (
 			<TableCell className="text-right">
 				<DropdownMenu>
 					<DropdownMenuTrigger asChild>
@@ -411,6 +492,11 @@ const SavedWorkflowRow: React.FC<SavedWorkflowRowProps> = ({
 						{access.update && (
 							<DropdownMenuItem onClick={() => onEdit(workflow)}>
 								Edit
+							</DropdownMenuItem>
+						)}
+						{onShare && (
+							<DropdownMenuItem onClick={() => onShare(workflow)}>
+								Share with organization&hellip;
 							</DropdownMenuItem>
 						)}
 						{onManagePermissions && (
