@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -22,9 +23,12 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/httpapi"
+	"github.com/coder/coder/v2/coderd/httpapi/httperror"
 	"github.com/coder/coder/v2/coderd/httpmw"
+	"github.com/coder/coder/v2/coderd/rbac/policy"
 	"github.com/coder/coder/v2/coderd/x/chatd"
 	"github.com/coder/coder/v2/codersdk"
 )
@@ -198,7 +202,8 @@ func (api *API) patchForkUserSavedWorkflow(rw http.ResponseWriter, r *http.Reque
 		})
 		return row.ID, err
 	}
-	if !okAfterConditionalWrite(ctx, rw, err, expectID, false, probe, probe) {
+	conflict := api.forkUserSavedWorkflowConflictProbe(r, update.OrganizationID, update.UserID, update.Name, policy.ActionUpdate)
+	if !okAfterConditionalWrite(ctx, rw, err, expectID, false, probe, conflict) {
 		return
 	}
 	httpapi.Write(ctx, rw, http.StatusOK, convertForkSavedWorkflow(row))
@@ -246,17 +251,56 @@ func (api *API) deleteForkUserSavedWorkflow(rw http.ResponseWriter, r *http.Requ
 		})
 		return row.ID, err
 	}
-	if !okAfterConditionalWrite(ctx, rw, err, expectID, false, probe, probe) {
+	conflict := api.forkUserSavedWorkflowConflictProbe(r, member.OrganizationID, member.UserID, name, policy.ActionDelete)
+	if !okAfterConditionalWrite(ctx, rw, err, expectID, false, probe, conflict) {
 		return
 	}
 	rw.WriteHeader(http.StatusNoContent)
 }
 
+// forkUserSavedWorkflowConflictProbe reads the stored id of a personal
+// workflow again for a conflict check. The plain probe keeps the caller's
+// context, so a caller who cannot read the row keeps getting 404. The
+// conflict probe must also answer a write-only API key scope, whose read
+// would fail, so it fetches with a system-restricted context and authorizes
+// the row it finds for the requested write action: a row the caller could
+// not change answers 404, never a conflict that proves it exists.
+func (api *API) forkUserSavedWorkflowConflictProbe(r *http.Request, organizationID, userID uuid.UUID, name string, action policy.Action) func(ctx context.Context) (uuid.UUID, error) {
+	return func(ctx context.Context) (uuid.UUID, error) {
+		fdb, ok := forkAgentDefinitionStore(nil, api.Database)
+		if !ok {
+			return uuid.UUID{}, xerrors.New("fork agent definition store unavailable")
+		}
+		//nolint:gocritic // The fetch only feeds the reauthorization below.
+		row, err := fdb.GetUserSavedWorkflowByName(dbauthz.AsSystemRestricted(ctx), forkdb.GetUserSavedWorkflowByNameParams{
+			OrganizationID: organizationID,
+			UserID:         userID,
+			Name:           name,
+		})
+		if err != nil {
+			return uuid.UUID{}, err
+		}
+		if !api.Authorize(r, action, row) {
+			return uuid.UUID{}, httperror.ErrResourceNotFound
+		}
+		return row.ID, nil
+	}
+}
+
 // readForkSavedWorkflowExpectID reads the optional expect_id query
 // parameter. Absent means no check. An explicit but invalid value, including
-// an empty one, is a bad request, so a client can never silently drop its
-// concurrency guard.
+// an empty one, is a bad request, and so is a query string that does not
+// parse, so a client can never silently drop its concurrency guard: Go's
+// URL.Query drops a pair with a malformed escape such as %zz, and an
+// unparsed query string cannot name one.
 func readForkSavedWorkflowExpectID(rw http.ResponseWriter, r *http.Request) (uuid.NullUUID, bool) {
+	if _, err := url.ParseQuery(r.URL.RawQuery); err != nil {
+		httpapi.Write(r.Context(), rw, http.StatusBadRequest, codersdk.Response{
+			Message: "Invalid query string.",
+			Detail:  "The query string does not parse, so expect_id may have been dropped.",
+		})
+		return uuid.NullUUID{}, false
+	}
 	raw, ok := r.URL.Query()["expect_id"]
 	if !ok || len(raw) == 0 {
 		return uuid.NullUUID{}, true

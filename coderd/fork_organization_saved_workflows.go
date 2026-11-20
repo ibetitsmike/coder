@@ -174,6 +174,7 @@ func (api *API) patchForkOrganizationSavedWorkflow(rw http.ResponseWriter, r *ht
 		// reauthorization keeps a replacement under the same name that
 		// hides from this caller at 404, never a conflict that proves it
 		// exists.
+		//nolint:gocritic // See above, the fetch only feeds the reauthorization below.
 		row, err := fdb.GetOrganizationSavedWorkflowByName(dbauthz.AsSystemRestricted(ctx), forkdb.GetOrganizationSavedWorkflowByNameParams{
 			OrganizationID: current.OrganizationID,
 			Name:           current.Name,
@@ -242,6 +243,7 @@ func (api *API) deleteForkOrganizationSavedWorkflow(rw http.ResponseWriter, r *h
 		// reauthorization keeps a replacement under the same name that
 		// hides from this caller at 404, never a conflict that proves it
 		// exists.
+		//nolint:gocritic // See above, the fetch only feeds the reauthorization below.
 		row, err := fdb.GetOrganizationSavedWorkflowByName(dbauthz.AsSystemRestricted(ctx), forkdb.GetOrganizationSavedWorkflowByNameParams{
 			OrganizationID: organizationID,
 			Name:           name,
