@@ -18,3 +18,12 @@ export const Inactive: Story = {};
 export const Active: Story = {
 	args: { settingsSection: "agent-definitions" },
 };
+
+export const WorkflowsActive: Story = {
+	args: { settingsSection: "workflows" },
+	parameters: { experiments: ["fork-agent-definitions", "fork-workflows"] },
+};
+
+export const WorkflowsOnly: Story = {
+	parameters: { experiments: ["fork-workflows"] },
+};
