@@ -171,7 +171,6 @@ describe("ForkSavedWorkflowsPage", () => {
 			MockForkSavedWorkflowMetadata.name,
 			MockForkSavedWorkflowMetadata.id,
 		);
-		// The move changes both tiers, so both lists refetch.
 		await waitFor(() =>
 			expect(listUser.mock.calls.length).toBeGreaterThan(userCalls),
 		);
@@ -203,10 +202,13 @@ describe("ForkSavedWorkflowsPage", () => {
 		const confirm = within(dialog).getByRole("button", { name: "Share" });
 		await user.click(confirm);
 		await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
-		await waitFor(() => expect(confirm).toBeEnabled());
 		expect(success).not.toHaveBeenCalled();
 
-		await user.click(confirm);
+		// The button ignores clicks until the rejected request settles.
+		await waitFor(async () => {
+			await user.click(confirm);
+			expect(share).toHaveBeenCalledTimes(2);
+		});
 		await waitFor(() =>
 			expect(success).toHaveBeenCalledWith(
 				`${MockForkSavedWorkflowMetadata.name} is now an organization workflow.`,

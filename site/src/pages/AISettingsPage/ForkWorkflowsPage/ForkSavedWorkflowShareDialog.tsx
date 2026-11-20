@@ -23,6 +23,11 @@ type ForkSavedWorkflowShareDialogProps = {
 	onCloseAutoFocus?: (event: Event) => void;
 };
 
+/**
+ * Confirms moving a personal workflow to the organization. It shows the
+ * error of a failed attempt and keeps its Share button busy while
+ * state.isSharing.
+ */
 export const ForkSavedWorkflowShareDialog: React.FC<
 	ForkSavedWorkflowShareDialogProps
 > = ({ state, onCloseAutoFocus }) => (
