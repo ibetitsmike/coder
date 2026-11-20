@@ -326,7 +326,12 @@ describe("ForkAgentMentionPlugin", () => {
 			experiments: ["fork-workflows"],
 		});
 		getUserWorkflows.mockRejectedValue(new Error("offline"));
-		const user = await typeIntoComposer("@exp");
+		// The query matches no agent, so only the failed workflow load can
+		// hold Enter back.
+		const user = await typeIntoComposer("@zzz");
+		await screen.findByText(
+			"Could not load some workflows. Close and type @ again to retry.",
+		);
 		await user.keyboard("{Enter}");
 		expect(onEnter).not.toHaveBeenCalled();
 	});
@@ -437,6 +442,24 @@ describe("ForkAgentMentionPlugin", () => {
 		await typeIntoComposer("@");
 		await screen.findByRole("option", { name: /^@explore/ });
 		expect(screen.getAllByRole("option", { name: /^@explore/ })).toHaveLength(
+			1,
+		);
+		expect(screen.queryByText("Workflows")).toBeNull();
+	});
+
+	it("hides a workflow whose name a reserved agent type takes", async () => {
+		const { getUserWorkflows } = renderComposer({
+			experiments: ["fork-workflows"],
+		});
+		// chatd names the reserved types for spawn_agent only, so run_workflow
+		// could never resolve this workflow's name; the option would run the
+		// workflow's definition through a delegation instead.
+		getUserWorkflows.mockResolvedValue([
+			{ ...MockForkSavedWorkflowMetadata, name: "general" },
+		]);
+		await typeIntoComposer("@");
+		await screen.findByRole("option", { name: /^@general/ });
+		expect(screen.getAllByRole("option", { name: /^@general/ })).toHaveLength(
 			1,
 		);
 		expect(screen.queryByText("Workflows")).toBeNull();

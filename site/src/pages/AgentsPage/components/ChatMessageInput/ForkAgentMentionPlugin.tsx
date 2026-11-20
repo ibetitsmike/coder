@@ -375,8 +375,13 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 		.map((mention) => new AgentMentionOption(mention));
 	// A workflow name that an agent mention already takes must not appear
 	// twice: both @name options would look the same while one delegates and
-	// the other runs a workflow.
-	const agentNames = new Set(mentions.map(({ name }) => name));
+	// the other runs a workflow. A workflow whose name a reserved built-in
+	// type takes, such as "general", can never reach run_workflow either,
+	// because chatd names those types for spawn_agent only.
+	const agentNames = new Set([
+		...mentions.map(({ name }) => name),
+		...reservedAgentTypeNames,
+	]);
 	const workflowOptions = workflows
 		.filter(
 			({ name }) =>
