@@ -3149,7 +3149,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Search query in the format ` + "`" + `key:value` + "`" + `. Available keys are: initiator, provider, provider_name, model, client, session_id, started_after, started_before.",
+                        "description": "Search query in the format ` + "`" + `key:value` + "`" + `. Available keys are: initiator, provider, provider_name, model, client, session_id, organization, started_after, started_before.",
                         "name": "q",
                         "in": "query"
                     },
@@ -23559,6 +23559,14 @@ const docTemplate = `{
                 "model": {
                     "type": "string"
                 },
+                "organization": {
+                    "description": "Organization is the organization of this interception. Nil when none\nwas stored.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.AIBridgeInterceptionOrganization"
+                        }
+                    ]
+                },
                 "priced_model": {
                     "description": "PricedModel is the model and prices used for this interception. Nil\nwhen it was not priced.",
                     "allOf": [
@@ -23667,6 +23675,43 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "codersdk.AIBridgeInterceptionOrganization": {
+            "type": "object",
+            "required": [
+                "id"
+            ],
+            "properties": {
+                "display_name": {
+                    "type": "string"
+                },
+                "icon": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "source": {
+                    "$ref": "#/definitions/codersdk.AIBridgeInterceptionOrganizationSource"
+                }
+            }
+        },
+        "codersdk.AIBridgeInterceptionOrganizationSource": {
+            "type": "string",
+            "enum": [
+                "workspace",
+                "chatd",
+                "effective_group"
+            ],
+            "x-enum-varnames": [
+                "AIBridgeInterceptionOrganizationSourceWorkspace",
+                "AIBridgeInterceptionOrganizationSourceChatd",
+                "AIBridgeInterceptionOrganizationSourceEffectiveGroup"
+            ]
         },
         "codersdk.AIBridgeListSessionsResponse": {
             "type": "object",
@@ -23816,6 +23861,13 @@ const docTemplate = `{
                         }
                     ]
                 },
+                "organizations": {
+                    "description": "Organizations are the organizations this session's interceptions were\nattributed to.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.AIBridgeSessionOrganization"
+                    }
+                },
                 "providers": {
                     "type": "array",
                     "items": {
@@ -23853,6 +23905,33 @@ const docTemplate = `{
                 },
                 "domain": {
                     "type": "string"
+                }
+            }
+        },
+        "codersdk.AIBridgeSessionOrganization": {
+            "type": "object",
+            "required": [
+                "id"
+            ],
+            "properties": {
+                "display_name": {
+                    "type": "string"
+                },
+                "icon": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.AIBridgeInterceptionOrganizationSource"
+                    }
                 }
             }
         },
@@ -23905,6 +23984,13 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/codersdk.AIBridgeSessionNetworkDomain"
+                    }
+                },
+                "organizations": {
+                    "description": "Organizations are the organizations this session's interceptions were\nattributed to.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/codersdk.AIBridgeSessionOrganization"
                     }
                 },
                 "page_ended_at": {
@@ -24032,6 +24118,14 @@ const docTemplate = `{
                 },
                 "model": {
                     "type": "string"
+                },
+                "organization": {
+                    "description": "Organization is the organization of the root interception. Nil when\nnone was stored.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.AIBridgeInterceptionOrganization"
+                        }
+                    ]
                 },
                 "priced_model": {
                     "description": "PricedModel is the model and prices used for the root interception\n(the prompt). Other requests in the thread may use different models\nand prices, see agentic_actions[].priced_model. Nil when the root\ninterception was not priced.",

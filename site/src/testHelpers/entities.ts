@@ -2951,6 +2951,14 @@ export const MockEntitlementsWithMultiOrg: TypesGen.Entitlements = {
 	}),
 };
 
+export const MockEntitlementsWithAIBridge: TypesGen.Entitlements = {
+	...MockEntitlements,
+	has_license: true,
+	features: withDefaultFeatures({
+		aibridge: { enabled: true, entitlement: "entitled" },
+	}),
+};
+
 export const MockExperiments: TypesGen.Experiment[] = [];
 
 /**
@@ -5591,6 +5599,7 @@ export const MockSession: TypesGen.AIBridgeSession = {
 			"https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQeDqc5b7Ny5bJOKxDeFvy17kBQ2_ZmBE8vKw&s",
 	},
 	providers: ["anthropic", "openai"],
+	organizations: [],
 	models: ["claude-opus-4-6", "gpt-5.4"],
 	client: "Xum",
 	metadata: {
