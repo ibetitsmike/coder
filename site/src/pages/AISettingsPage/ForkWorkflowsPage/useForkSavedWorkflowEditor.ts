@@ -241,11 +241,11 @@ export const useForkSavedWorkflowEditor = (scope: SavedWorkflowScope) => {
 							closeEditorTarget(editorTarget);
 							toast.success("Workflow saved.");
 						},
-						// A 409 means the workflow was replaced or deleted since
-						// the editor loaded it, the same outcome the list and
-						// detail refetches already report as isChanged, so tell
-						// the user and refresh what the editor seeds from without
-						// overwriting anything.
+						// A 409 means the name now holds a workflow the editor did
+						// not load, and a 404 means it holds nothing the editor may
+						// write, the same outcomes the list and detail refetches
+						// already report as isChanged. Tell the user and refresh
+						// what the editor seeds from without overwriting anything.
 						onError: (error) => {
 							if (
 								isAxiosError(error) &&
@@ -254,9 +254,12 @@ export const useForkSavedWorkflowEditor = (scope: SavedWorkflowScope) => {
 							) {
 								// The mutation's own invalidation already refetches
 								// the list and detail queries, so the editor seeds
-								// from what the name holds now.
+								// from what the name holds now. A scope change or
+								// another editor may have replaced this one while the
+								// request was pending, so the message cannot promise
+								// where the draft survives.
 								toast.info(
-									`${name} changed or was deleted after you opened it, so the save was rejected. Your changes are still in the editor.`,
+									`${name} changed or was deleted after you opened it, so the save was rejected. Copy your unsaved changes from the editor if it is still open.`,
 								);
 							}
 						},
