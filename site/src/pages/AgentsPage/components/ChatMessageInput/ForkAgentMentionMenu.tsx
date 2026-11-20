@@ -117,7 +117,9 @@ const MentionOption: React.FC<MentionOptionProps> = ({
 				{row.description}
 			</div>
 			{row.args && (
-				<div className="text-content-secondary text-xs">Args: {row.args}</div>
+				<div className="line-clamp-2 text-content-secondary text-xs">
+					Args: {row.args}
+				</div>
 			)}
 		</button>
 	);

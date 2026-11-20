@@ -17,7 +17,7 @@ import * as forkAgentDefinitionsApi from "#/api/forkAgentDefinitions";
 import * as forkSavedWorkflowsApi from "#/api/forkSavedWorkflows";
 import { chat } from "#/api/queries/chats";
 import { agentDefinitions } from "#/api/queries/forkAgentDefinitions";
-import { savedWorkflows } from "#/api/queries/forkSavedWorkflows";
+import { savedWorkflowsKey } from "#/api/queries/forkSavedWorkflows";
 import { userSkills } from "#/api/queries/userSkills";
 import type { Chat, Experiment } from "#/api/typesGenerated";
 import {
@@ -321,15 +321,14 @@ describe("ForkAgentMentionPlugin", () => {
 		},
 	);
 
-	it("shows a failed workflow load as a retryable error", async () => {
-		const { getUserWorkflows } = renderComposer({
+	it("keeps Enter from sending the mention while a workflow load failed", async () => {
+		const { getUserWorkflows, onEnter } = renderComposer({
 			experiments: ["fork-workflows"],
 		});
 		getUserWorkflows.mockRejectedValue(new Error("offline"));
-		await typeIntoComposer("@");
-		await screen.findByText(
-			"Could not load some workflows. Close and type @ again to retry.",
-		);
+		const user = await typeIntoComposer("@exp");
+		await user.keyboard("{Enter}");
+		expect(onEnter).not.toHaveBeenCalled();
 	});
 
 	it("offers a nested child chat its root chat's project agents", async () => {
@@ -585,10 +584,10 @@ describe("ForkAgentMentionPlugin", () => {
 			// Another page may have filled the shared cache before this chat
 			// opened; the gate must hide those workflows too, not skip the fetch.
 			queryClient.setQueryData(
-				savedWorkflows({
+				savedWorkflowsKey({
 					tier: "user",
 					organizationId: MockDefaultOrganization.id,
-				}).queryKey,
+				}),
 				[MockForkSavedWorkflowMetadata],
 			);
 			await typeIntoComposer("@");
