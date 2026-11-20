@@ -7,6 +7,7 @@ import type {
 	CreateForkSavedWorkflowRequest,
 	ForkSavedWorkflow,
 	ForkSavedWorkflowMetadata,
+	ForkSavedWorkflowWriteParams,
 	OrganizationSkillACL,
 	UpdateForkSavedWorkflowRequest,
 	UpdateOrganizationSkillACLRequest,
@@ -61,14 +62,27 @@ export const createUserSavedWorkflow = async (
 	return response.data;
 };
 
+/**
+ * The query parameters of a conditional saved workflow write. Undefined
+ * leaves the write unconditional.
+ */
+const savedWorkflowWriteSearchParams = (
+	params?: ForkSavedWorkflowWriteParams,
+): Record<string, string | undefined> =>
+	params ? { expect_id: params.expect_id } : {};
+
 /** Updates one of the signed-in member's personal saved workflows. */
 export const updateUserSavedWorkflow = async (
 	organizationId: string,
 	name: string,
 	req: UpdateSavedWorkflowRequest,
+	params?: ForkSavedWorkflowWriteParams,
 ): Promise<ForkSavedWorkflow> => {
 	const response = await API.getAxiosInstance().patch<ForkSavedWorkflow>(
-		userSavedWorkflowPath(organizationId, name),
+		getURLWithSearchParams(
+			userSavedWorkflowPath(organizationId, name),
+			savedWorkflowWriteSearchParams(params),
+		),
 		req,
 	);
 	return response.data;
@@ -78,9 +92,13 @@ export const updateUserSavedWorkflow = async (
 export const deleteUserSavedWorkflow = async (
 	organizationId: string,
 	name: string,
+	params?: ForkSavedWorkflowWriteParams,
 ): Promise<void> => {
 	await API.getAxiosInstance().delete(
-		userSavedWorkflowPath(organizationId, name),
+		getURLWithSearchParams(
+			userSavedWorkflowPath(organizationId, name),
+			savedWorkflowWriteSearchParams(params),
+		),
 	);
 };
 
@@ -127,9 +145,13 @@ export const updateOrganizationSavedWorkflow = async (
 	organizationId: string,
 	name: string,
 	req: UpdateSavedWorkflowRequest,
+	params?: ForkSavedWorkflowWriteParams,
 ): Promise<ForkSavedWorkflow> => {
 	const response = await API.getAxiosInstance().patch<ForkSavedWorkflow>(
-		organizationSavedWorkflowPath(organizationId, name),
+		getURLWithSearchParams(
+			organizationSavedWorkflowPath(organizationId, name),
+			savedWorkflowWriteSearchParams(params),
+		),
 		req,
 	);
 	return response.data;
@@ -139,9 +161,13 @@ export const updateOrganizationSavedWorkflow = async (
 export const deleteOrganizationSavedWorkflow = async (
 	organizationId: string,
 	name: string,
+	params?: ForkSavedWorkflowWriteParams,
 ): Promise<void> => {
 	await API.getAxiosInstance().delete(
-		organizationSavedWorkflowPath(organizationId, name),
+		getURLWithSearchParams(
+			organizationSavedWorkflowPath(organizationId, name),
+			savedWorkflowWriteSearchParams(params),
+		),
 	);
 };
 

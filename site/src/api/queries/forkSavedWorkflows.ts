@@ -29,6 +29,7 @@ import type {
 	CreateForkSavedWorkflowRequest,
 	ForkSavedWorkflow,
 	ForkSavedWorkflowMetadata,
+	ForkSavedWorkflowWriteParams,
 	UpdateOrganizationSkillACLRequest,
 	UsersRequest,
 } from "#/api/typesGenerated";
@@ -58,8 +59,12 @@ type ScopeEndpoints = {
 	update: (
 		name: string,
 		req: UpdateSavedWorkflowRequest,
+		params?: ForkSavedWorkflowWriteParams,
 	) => Promise<ForkSavedWorkflow>;
-	remove: (name: string) => Promise<void>;
+	remove: (
+		name: string,
+		params?: ForkSavedWorkflowWriteParams,
+	) => Promise<void>;
 };
 
 const scopeEndpoints = (scope: SavedWorkflowScope): ScopeEndpoints => {
@@ -70,18 +75,20 @@ const scopeEndpoints = (scope: SavedWorkflowScope): ScopeEndpoints => {
 				list: () => getUserSavedWorkflows(organizationId),
 				get: (name) => getUserSavedWorkflow(organizationId, name),
 				create: (req) => createUserSavedWorkflow(organizationId, req),
-				update: (name, req) =>
-					updateUserSavedWorkflow(organizationId, name, req),
-				remove: (name) => deleteUserSavedWorkflow(organizationId, name),
+				update: (name, req, params) =>
+					updateUserSavedWorkflow(organizationId, name, req, params),
+				remove: (name, params) =>
+					deleteUserSavedWorkflow(organizationId, name, params),
 			};
 		case "organization":
 			return {
 				list: () => getOrganizationSavedWorkflows(organizationId),
 				get: (name) => getOrganizationSavedWorkflow(organizationId, name),
 				create: (req) => createOrganizationSavedWorkflow(organizationId, req),
-				update: (name, req) =>
-					updateOrganizationSavedWorkflow(organizationId, name, req),
-				remove: (name) => deleteOrganizationSavedWorkflow(organizationId, name),
+				update: (name, req, params) =>
+					updateOrganizationSavedWorkflow(organizationId, name, req, params),
+				remove: (name, params) =>
+					deleteOrganizationSavedWorkflow(organizationId, name, params),
 			};
 	}
 };
@@ -174,6 +181,11 @@ type UpdateSavedWorkflowArgs = {
 	scope: SavedWorkflowScope;
 	name: string;
 	req: UpdateSavedWorkflowRequest;
+	/**
+	 * The revision the caller opened, which the request keeps unless the
+	 * stored workflow still has its id. Undefined writes unconditionally.
+	 */
+	id?: string;
 };
 
 /**
@@ -183,8 +195,12 @@ type UpdateSavedWorkflowArgs = {
  */
 export const updateSavedWorkflow = (queryClient: QueryClient) =>
 	mutationOptions({
-		mutationFn: ({ scope, name, req }: UpdateSavedWorkflowArgs) =>
-			scopeEndpoints(scope).update(name, req),
+		mutationFn: ({ scope, name, req, id }: UpdateSavedWorkflowArgs) =>
+			scopeEndpoints(scope).update(
+				name,
+				req,
+				id ? { expect_id: id } : undefined,
+			),
 		// Writing the result keeps an accepted change visible even if the
 		// reconciling refetch below fails. Rows match by name, as the request
 		// does, and a response older than a cached change does not replace it.
@@ -213,7 +229,7 @@ export const updateSavedWorkflow = (queryClient: QueryClient) =>
 type DeleteSavedWorkflowArgs = {
 	scope: SavedWorkflowScope;
 	name: string;
-	/** The workflow the user picked, which the name must still resolve to. */
+	/** The workflow the user picked, which the delete only removes if it is still stored. */
 	id: string;
 };
 
@@ -230,32 +246,24 @@ export class SavedWorkflowChangedError extends Error {
 
 /**
  * Mutation options that delete a saved workflow. The API deletes by name, so
- * the request first checks that the name still resolves to the picked
- * workflow; otherwise it would delete one the user never chose. A success
- * also removes the row's detail query, so a failed refetch cannot leave it
- * actionable.
+ * the request carries expect_id, the id the user picked, and the server
+ * rejects the delete with 409 when the name holds another workflow. A
+ * success also removes the row's detail query, so a failed refetch cannot
+ * leave it actionable.
  */
 export const deleteSavedWorkflow = (queryClient: QueryClient) =>
 	mutationOptions({
 		mutationFn: async ({ scope, name, id }: DeleteSavedWorkflowArgs) => {
-			const endpoints = scopeEndpoints(scope);
-			let current: ForkSavedWorkflow;
 			try {
-				current = await endpoints.get(name);
+				await scopeEndpoints(scope).remove(name, { expect_id: id });
 			} catch (error) {
+				// The workflow was deleted after the user picked it.
 				if (isAxiosError(error) && error.response?.status === 404) {
 					throw new SavedWorkflowChangedError();
 				}
-				throw error;
-			}
-			if (current.id !== id) {
-				throw new SavedWorkflowChangedError();
-			}
-			try {
-				await endpoints.remove(name);
-			} catch (error) {
-				// Someone else deleted the workflow after the check.
-				if (isAxiosError(error) && error.response?.status === 404) {
+				// The name holds another workflow now, so the conditional
+				// delete refused to remove it.
+				if (isAxiosError(error) && error.response?.status === 409) {
 					throw new SavedWorkflowChangedError();
 				}
 				throw error;

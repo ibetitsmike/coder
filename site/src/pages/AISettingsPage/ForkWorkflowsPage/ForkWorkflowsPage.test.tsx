@@ -279,6 +279,7 @@ it("edits a workflow and sends only the fields the form owns", async () => {
 				args_schema: MockForkSavedWorkflowMetadata.args_schema,
 				phases: ["review", "summarize"],
 			}),
+			{ expect_id: MockForkSavedWorkflow.id },
 		),
 	);
 });
@@ -326,6 +327,55 @@ it("shows a server validation error in the editor", async () => {
 	// shown came from the response, not the form validation.
 	await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
 	await within(dialog).findByText("Invalid saved workflow.");
+});
+
+it("keeps the draft and refetches when the server rejects the save with 409", async () => {
+	const user = userEvent.setup();
+	const info = vi.spyOn(toast, "info");
+	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflows").mockResolvedValue([
+		MockForkSavedWorkflowMetadata,
+	]);
+	vi.spyOn(
+		forkSavedWorkflowsApi,
+		"getOrganizationSavedWorkflows",
+	).mockResolvedValue([]);
+	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow").mockResolvedValue(
+		MockForkSavedWorkflow,
+	);
+	// Another tab replaced the workflow after the editor loaded it, so the
+	// conditional save refuses with 409.
+	const update = vi
+		.spyOn(forkSavedWorkflowsApi, "updateUserSavedWorkflow")
+		.mockRejectedValue(mockApiError({ message: "Conflict.", status: 409 }));
+	renderPage(`?org=${MockOrganization2.name}`);
+
+	await user.click(
+		await screen.findByRole("button", {
+			name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
+		}),
+	);
+	await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+	const dialog = await screen.findByRole("dialog");
+	const description = await within(dialog).findByLabelText("Description");
+	await user.type(description, " even harder");
+	await user.click(
+		within(dialog).getByRole("button", { name: "Save workflow" }),
+	);
+
+	await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+	expect(update).toHaveBeenCalledWith(
+		MockOrganization2.id,
+		MockForkSavedWorkflowMetadata.name,
+		expect.anything(),
+		{ expect_id: MockForkSavedWorkflow.id },
+	);
+	await waitFor(() => expect(info).toHaveBeenCalled());
+	// The draft stays, the editor stays open, and the list refetches what
+	// the name holds now.
+	expect(description).toHaveValue(
+		`${MockForkSavedWorkflowMetadata.description} even harder`,
+	);
+	expect(screen.queryByRole("dialog")).not.toBeNull();
 });
 
 it("keeps the editor open with the draft after a failed save", async () => {
@@ -459,6 +509,7 @@ it("deletes a workflow after confirmation", async () => {
 		expect(remove).toHaveBeenCalledWith(
 			MockOrganization2.id,
 			MockForkSavedWorkflowMetadata.name,
+			{ expect_id: MockForkSavedWorkflowMetadata.id },
 		),
 	);
 });
@@ -473,13 +524,13 @@ it("deletes nothing when the name now holds another workflow", async () => {
 		forkSavedWorkflowsApi,
 		"getOrganizationSavedWorkflows",
 	).mockResolvedValue([]);
-	// Another tab deleted the workflow and created one with the same name.
-	const get = vi
-		.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow")
-		.mockResolvedValue({ ...MockForkSavedWorkflow, id: "saved-workflow-2" });
+	// Another tab deleted the workflow and created one with the same name,
+	// so the conditional delete refuses with 409.
 	const remove = vi
 		.spyOn(forkSavedWorkflowsApi, "deleteUserSavedWorkflow")
-		.mockResolvedValue();
+		.mockRejectedValue(
+			mockApiError({ message: "Conflict.", status: 409 }),
+		);
 	renderPage(`?org=${MockOrganization2.name}`);
 
 	await user.click(
@@ -491,11 +542,11 @@ it("deletes nothing when the name now holds another workflow", async () => {
 	await user.click(await screen.findByRole("button", { name: "Delete" }));
 
 	await waitFor(() => expect(info).toHaveBeenCalled());
-	expect(get).toHaveBeenCalledWith(
+	expect(remove).toHaveBeenCalledWith(
 		MockOrganization2.id,
 		MockForkSavedWorkflowMetadata.name,
+		{ expect_id: MockForkSavedWorkflowMetadata.id },
 	);
-	expect(remove).not.toHaveBeenCalled();
 	await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 

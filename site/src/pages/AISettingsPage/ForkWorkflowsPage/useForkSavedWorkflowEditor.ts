@@ -228,11 +228,34 @@ export const useForkSavedWorkflowEditor = (scope: SavedWorkflowScope) => {
 					return;
 				}
 				saveMutation.mutate(
-					{ scope, name, req: buildUpdateSavedWorkflowRequest(formValues) },
+					{
+						scope,
+						name,
+						req: buildUpdateSavedWorkflowRequest(formValues),
+						// The revision the editor loaded: the server rejects the
+						// save with 409 when the stored workflow has another id.
+						id: loadedFrom?.id,
+					},
 					{
 						onSuccess: () => {
 							closeEditorTarget(editorTarget);
 							toast.success("Workflow saved.");
+						},
+						// A 409 means the workflow was replaced or deleted since
+						// the editor loaded it, the same outcome the list and
+						// detail refetches already report as isChanged, so tell
+						// the user and refresh what the editor seeds from without
+						// overwriting anything.
+						onError: (error) => {
+							if (
+								isAxiosError(error) &&
+								error.response?.status === 409
+							) {
+								void refetchForEdit(name);
+								toast.info(
+									`${name} changed or was deleted after you opened it, so the save was rejected. Your changes are still in the editor.`,
+								);
+							}
 						},
 					},
 				);
