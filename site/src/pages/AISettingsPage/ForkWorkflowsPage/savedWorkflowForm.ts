@@ -1,6 +1,7 @@
 // This file is fork code: form values and validation for the saved workflow
 // editor (fork-workflows experiment).
 
+import type { ForkSavedWorkflowSchema } from "#/api/forkSavedWorkflowSchema";
 import type { UpdateSavedWorkflowRequest } from "#/api/forkSavedWorkflows";
 import type { CreateForkSavedWorkflowRequest } from "#/api/typesGenerated";
 import { getSkillContentSizeBytes } from "#/pages/AgentsPage/utils/skills";
@@ -62,7 +63,7 @@ const toArgsSchemaObject = (argsSchema: string) => {
 	}
 	const parsed: unknown = JSON.parse(argsSchema);
 	return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-		? (parsed as Record<string, string>)
+		? (parsed as ForkSavedWorkflowSchema)
 		: undefined;
 };
 

@@ -2,6 +2,7 @@
 // here so api.ts, an upstream file, stays unchanged.
 
 import { API, getURLWithSearchParams } from "./api";
+import type { ForkSavedWorkflowSchema } from "./forkSavedWorkflowSchema";
 import type {
 	ACLAvailable,
 	CreateForkSavedWorkflowRequest,
@@ -20,7 +21,7 @@ import type {
 export type UpdateSavedWorkflowRequest = Omit<
 	UpdateForkSavedWorkflowRequest,
 	"args_schema"
-> & { args_schema?: Record<string, string> | null };
+> & { args_schema?: ForkSavedWorkflowSchema | null };
 
 // The server resolves "me" to the signed-in member.
 const userSavedWorkflowsPath = (organizationId: string) =>

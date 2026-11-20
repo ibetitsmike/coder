@@ -1,3 +1,4 @@
+import type { ForkSavedWorkflowSchema } from "#/api/forkSavedWorkflowSchema";
 import type {
 	ForkSavedWorkflow,
 	ForkSavedWorkflowMetadata,
@@ -19,10 +20,7 @@ export const MockForkSavedWorkflowMetadata: ForkSavedWorkflowMetadata = {
 		type: "object",
 		properties: { files: { type: "array" } },
 		required: ["files"],
-		// The backend sends args_schema as raw JSON, so properties is an
-		// object on the wire. The generated Record<string, string> type is
-		// wrong; typed fixtures encode it as a JSON string instead.
-	} as unknown as ForkSavedWorkflowMetadata["args_schema"],
+	} as ForkSavedWorkflowSchema,
 	phases: ["review", "summarize"],
 	created_at: MOCK_TIMESTAMP,
 	updated_at: MOCK_TIMESTAMP,

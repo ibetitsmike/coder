@@ -16,6 +16,7 @@ import { useEffect, useEffectEvent, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQueries, useQuery } from "react-query";
 import { useParams } from "react-router";
+import type { ForkSavedWorkflowSchema } from "#/api/forkSavedWorkflowSchema";
 import { chat } from "#/api/queries/chats";
 import { agentDefinitions } from "#/api/queries/forkAgentDefinitions";
 import { savedWorkflows } from "#/api/queries/forkSavedWorkflows";
@@ -136,17 +137,21 @@ const workspaceAgents = (
 };
 
 /** The empty string means the workflow takes no args. */
-const workflowArgsSummary = (schema: Record<string, string>): string => {
+const workflowArgsSummary = (schema: ForkSavedWorkflowSchema): string => {
 	// The backend stores args_schema as raw JSON, so a property value can be
 	// either the JSON Schema object or a typed fixture's JSON string of it.
 	const properties = asRecord(parseArgs(schema.properties ?? ""));
 	const names = properties ? Object.keys(properties).sort() : [];
+	// A schema can constrain args through required alone, so an empty
+	// properties object still means args exist; run_workflow validates
+	// against the whole schema and would reject an empty args object.
+	const required = parseStringList(schema.required) ?? [];
 	if (names.length === 0) {
-		return "";
+		return required.length > 0 ? required.sort().join(", ") : "";
 	}
-	const required = new Set(parseStringList(schema.required) ?? []);
+	const requiredNames = new Set(required);
 	return names
-		.map((name) => (required.has(name) ? `${name} (required)` : name))
+		.map((name) => (requiredNames.has(name) ? `${name} (required)` : name))
 		.join(", ");
 };
 
@@ -176,7 +181,9 @@ const resolveWorkflowMentions = (
 					tier,
 					description: workflow.description,
 					argsSummary: workflow.args_schema
-						? workflowArgsSummary(workflow.args_schema)
+						? workflowArgsSummary(
+								workflow.args_schema as ForkSavedWorkflowSchema,
+							)
 						: "",
 				});
 			}
@@ -266,8 +273,15 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 	// see (nestedSubagentTools in coderd/x/chatd/fork_subagents.go).
 	const canSpawn =
 		!isChildChat || (isNestingEnabled && currentChat?.agent_type === "general");
-	// Workflows run only in root chats, so a child is offered none.
-	const canRunWorkflows = isWorkflowsEnabled && !isChildChat;
+	// Workflows run only in root chats that are not in plan mode and not
+	// explore mode: chatd omits run_workflow for all three states
+	// (forkWorkflowTools in coderd/x/chatd/fork_workflow.go), so the menu
+	// must not offer what the model has no tool to execute.
+	const isWorkflowGatedChat =
+		isChildChat ||
+		currentChat?.plan_mode === "plan" ||
+		currentChat?.agent_type === "explore";
+	const canRunWorkflows = isWorkflowsEnabled && !isWorkflowGatedChat;
 	// Agents are offered only when the experiment is on and this chat may
 	// spawn them; workflows stay available on their own experiment.
 	const canOfferAgents = isEnabled && canSpawn;
@@ -323,12 +337,17 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 			staleTime: 60_000,
 		})),
 	});
-	const workflows = resolveWorkflowMentions(
-		workflowTiers.map(({ tier }, index) => ({
-			tier,
-			workflows: workflowQueries[index].data,
-		})),
-	);
+	// The query cache is shared across pages, so a disabled query still
+	// returns the workflows another page fetched; gate the resolved list
+	// itself, not only the fetch.
+	const workflows = canRunWorkflows
+		? resolveWorkflowMentions(
+				workflowTiers.map(({ tier }, index) => ({
+					tier,
+					workflows: workflowQueries[index].data,
+				})),
+			)
+		: [];
 	const search = (query ?? "").toLocaleLowerCase("en-US");
 	// Only a query with a slash searches tier prefixes, so a short query
 	// doesn't match every agent of a tier.
@@ -339,8 +358,16 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 				.includes(search),
 		)
 		.map((mention) => new AgentMentionOption(mention));
+	// A workflow name that an agent mention already takes must not appear
+	// twice: both @name options would look the same while one delegates and
+	// the other runs a workflow.
+	const agentNames = new Set(mentions.map(({ name }) => name));
 	const workflowOptions = workflows
-		.filter(({ name }) => name.toLocaleLowerCase("en-US").includes(search))
+		.filter(
+			({ name }) =>
+				!agentNames.has(name) &&
+				name.toLocaleLowerCase("en-US").includes(search),
+		)
 		.map((workflow) => new WorkflowMentionOption(workflow));
 	const options: ForkMentionOption[] = [...agentOptions, ...workflowOptions];
 	const unresolved = [

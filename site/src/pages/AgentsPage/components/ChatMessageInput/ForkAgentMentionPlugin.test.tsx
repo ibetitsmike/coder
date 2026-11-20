@@ -14,15 +14,13 @@ import {
 } from "vitest";
 import { API } from "#/api/api";
 import * as forkAgentDefinitionsApi from "#/api/forkAgentDefinitions";
+import type { ForkSavedWorkflowSchema } from "#/api/forkSavedWorkflowSchema";
 import * as forkSavedWorkflowsApi from "#/api/forkSavedWorkflows";
 import { chat } from "#/api/queries/chats";
 import { agentDefinitions } from "#/api/queries/forkAgentDefinitions";
+import { savedWorkflows } from "#/api/queries/forkSavedWorkflows";
 import { userSkills } from "#/api/queries/userSkills";
-import type {
-	Chat,
-	Experiment,
-	ForkSavedWorkflowMetadata,
-} from "#/api/typesGenerated";
+import type { Chat, Experiment } from "#/api/typesGenerated";
 import {
 	DashboardContext,
 	type DashboardValue,
@@ -423,6 +421,44 @@ describe("ForkAgentMentionPlugin", () => {
 		).toHaveLength(1);
 	});
 
+	it("hides a workflow whose name an agent mention already takes", async () => {
+		const { getUserWorkflows } = renderComposer({
+			experiments: ["fork-workflows"],
+		});
+		// explore is a built-in agent type, so the workflow would otherwise
+		// produce a second @explore option that runs instead of delegates.
+		getUserWorkflows.mockResolvedValue([
+			{ ...MockForkSavedWorkflowMetadata, name: "explore" },
+		]);
+		await typeIntoComposer("@");
+		await screen.findByRole("option", { name: /^@explore/ });
+		expect(screen.getAllByRole("option", { name: /^@explore/ })).toHaveLength(
+			1,
+		);
+		expect(screen.queryByText("Workflows")).toBeNull();
+	});
+
+	it("summarizes a schema that constrains args through required alone", async () => {
+		const { getUserWorkflows, inputRef } = renderComposer({
+			experiments: ["fork-workflows"],
+		});
+		getUserWorkflows.mockResolvedValue([
+			{
+				...MockForkSavedWorkflowMetadata,
+				args_schema: { type: "object", required: ["topic"] },
+			},
+		]);
+		const user = await typeIntoComposer("@");
+		await user.click(
+			await screen.findByRole("option", {
+				name: new RegExp(`^@${MockForkSavedWorkflowMetadata.name}`),
+			}),
+		);
+		expect(inputRef.current?.getValue()).toBe(
+			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}) with args: topic. `,
+		);
+	});
+
 	it("filters the workflows by the typed text", async () => {
 		const { getUserWorkflows } = renderComposer({
 			experiments: ["fork-workflows"],
@@ -480,11 +516,32 @@ describe("ForkAgentMentionPlugin", () => {
 				agent_type: "general",
 			},
 		},
+		{
+			label: "plan mode",
+			// The composer stays open in plan mode, so this proves the gate.
+			experiments: ["fork-workflows"] as Experiment[],
+			chat: { plan_mode: "plan" as const },
+		},
+		{
+			label: "an explore root chat",
+			experiments: ["fork-workflows"] as Experiment[],
+			chat: { agent_type: "explore" },
+		},
 	])("offers no workflows with $label", async ({ experiments, chat }) => {
-		const { getUserWorkflows, getOrganizationWorkflows } = renderComposer({
-			chat,
-			experiments,
-		});
+		const { getUserWorkflows, getOrganizationWorkflows, queryClient } =
+			renderComposer({
+				chat,
+				experiments,
+			});
+		// Another page may have filled the shared cache before this chat
+		// opened; the gate must hide those workflows too, not skip the fetch.
+		queryClient.setQueryData(
+			savedWorkflows({
+				tier: "user",
+				organizationId: MockDefaultOrganization.id,
+			}).queryKey,
+			[MockForkSavedWorkflowMetadata],
+		);
 		await typeIntoComposer("@");
 		await screen.findByRole("option", { name: /^@explore/ });
 		expect(screen.queryByText("Workflows")).toBeNull();
@@ -536,7 +593,7 @@ describe("ForkAgentMentionPlugin", () => {
 					type: "object",
 					properties: '{"files":{"type":"array"}}',
 					required: '["files"]',
-				} as unknown as ForkSavedWorkflowMetadata["args_schema"],
+				} as unknown as ForkSavedWorkflowSchema,
 			},
 		]);
 		const user = await typeIntoComposer("@");
