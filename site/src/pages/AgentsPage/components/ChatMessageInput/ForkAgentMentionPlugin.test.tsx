@@ -649,14 +649,16 @@ describe("ForkAgentMentionPlugin", () => {
 		await user.keyboard("{Escape}");
 	});
 
-	it("shows the workflow loading state while only the workflows are pending", async () => {
-		const { getUserWorkflows } = renderComposer({
+	it("keeps Enter from sending while only the workflows still load", async () => {
+		const { getUserWorkflows, onEnter } = renderComposer({
 			experiments: ["fork-workflows"],
 			skipAgentDefinitionsExperiment: true,
 		});
 		getUserWorkflows.mockReturnValue(new Promise(() => {}));
-		await typeIntoComposer("@");
+		const user = await typeIntoComposer("@zzz");
 		await screen.findByText("Loading workflows...");
+		await user.keyboard("{Enter}");
+		expect(onEnter).not.toHaveBeenCalled();
 	});
 
 	it("keeps / opening the skills menu", async () => {
