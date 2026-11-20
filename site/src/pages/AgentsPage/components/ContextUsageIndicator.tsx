@@ -503,7 +503,7 @@ export const ContextUsageIndicator: React.FC<{
 	const toneClassName = hasContextError
 		? "text-content-destructive"
 		: isDirty || hasResourceIssues || hasAgentDefinitionWarnings
-			? "text-content-warning"
+			? "text-border-warning"
 			: getIndicatorToneClassName(percentUsed, compactionPercent);
 
 	// Group files and skills by directory so every context root is labeled,
