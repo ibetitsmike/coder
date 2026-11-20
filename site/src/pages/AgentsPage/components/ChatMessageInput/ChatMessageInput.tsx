@@ -676,6 +676,14 @@ type ChatMessageInputProps = Omit<
 	/** Project, in organizationId, whose skills the chat loads, if any. */
 	projectId?: string;
 	/**
+	 * Plan mode of a chat the form is about to create. The new-chat
+	 * composer has no chat to read, so the form reports its pending
+	 * mode; the saved-workflow menu must match what chatd will offer.
+	 */
+	isPlanMode?: boolean;
+	/** Agent type of a chat the form is about to create, if picked. */
+	agentType?: string;
+	/**
 	 * Story and test seam for deterministic personal skill menu data.
 	 */
 	personalSkillsOverride?: readonly TypesGen.SkillMetadata[];
@@ -844,6 +852,8 @@ const ChatMessageInput = ({
 	hasWorkspace,
 	organizationId,
 	projectId,
+	isPlanMode,
+	agentType,
 	personalSkillsOverride,
 	workspaceSkills,
 	slashCommands,
@@ -1406,6 +1416,8 @@ const ChatMessageInput = ({
 					organizationId={organizationId}
 					projectId={projectId}
 					hasWorkspace={hasWorkspace}
+					planMode={isPlanMode}
+					agentType={agentType}
 					anchor={skillsMenuAnchor ?? containerElement}
 				/>
 				<EditableStatePlugin disabled={disabled} />

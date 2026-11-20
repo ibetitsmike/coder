@@ -160,6 +160,11 @@ type AgentChatInputProps = {
 	onReasoningEffortChange?: (value: string) => void;
 	planModeEnabled: boolean;
 	onPlanModeToggle: (enabled: boolean) => void;
+	/**
+	 * Agent type the form will create the chat with, if picked. Forwarded
+	 * to the mention menu so a pending explore chat hides its workflows.
+	 */
+	agentType?: string;
 	isModelCatalogLoading: boolean;
 	// Streaming controls (optional, for the detail page).
 	isStreaming?: boolean;
@@ -321,6 +326,7 @@ export const AgentChatInput: React.FC<AgentChatInputProps> = ({
 	onReasoningEffortChange,
 	planModeEnabled,
 	onPlanModeToggle,
+	agentType,
 	isModelCatalogLoading,
 	isStreaming = false,
 	onInterrupt,
@@ -1097,6 +1103,8 @@ export const AgentChatInput: React.FC<AgentChatInputProps> = ({
 				)}
 				<ChatMessageInput
 					ref={internalRef}
+					isPlanMode={planModeEnabled}
+					agentType={agentType}
 					onFilePaste={onAttach ? handleFilePaste : undefined}
 					acceptFilePasteWhileDisabled={
 						lockWhileLoading && isLoading && !isReadOnly

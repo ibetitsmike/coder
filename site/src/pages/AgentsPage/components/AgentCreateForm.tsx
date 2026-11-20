@@ -1061,6 +1061,7 @@ const AgentCreateFormContent: React.FC<AgentCreateFormProps> = ({
 					highlightKey={highlightKey}
 					onSend={handleSendWithAttachments}
 					inputRef={chatInputRef}
+					agentType={forkAgentType.agentType}
 					placeholder="Ask Coder to build, fix bugs, or explore your project..."
 					isDisabled={
 						isSubmitPending ||

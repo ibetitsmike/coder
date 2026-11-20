@@ -71,12 +71,16 @@ const renderComposer = ({
 	isNewChat = false,
 	hasWorkspace = false,
 	skipAgentDefinitionsExperiment = false,
+	isPlanMode = false,
+	agentType,
 }: {
 	chat?: Partial<Chat>;
 	experiments?: Experiment[];
 	isNewChat?: boolean;
 	hasWorkspace?: boolean;
 	skipAgentDefinitionsExperiment?: boolean;
+	isPlanMode?: boolean;
+	agentType?: string;
 } = {}) => {
 	const getPersonal = vi
 		.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinitions")
@@ -135,6 +139,8 @@ const renderComposer = ({
 									sendShortcut={DEFAULT_AGENT_CHAT_SEND_SHORTCUT}
 									disabled={false}
 									hasWorkspace={hasWorkspace}
+									isPlanMode={isPlanMode}
+									agentType={agentType}
 									organizationId={MockDefaultOrganization.id}
 								/>
 							}
@@ -454,7 +460,32 @@ describe("ForkAgentMentionPlugin", () => {
 			}),
 		);
 		expect(inputRef.current?.getValue()).toBe(
-			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}) with args: topic. `,
+			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}) with args: topic (required). `,
+		);
+	});
+
+	it("summarizes required names that properties does not list", async () => {
+		const { getUserWorkflows, inputRef } = renderComposer({
+			experiments: ["fork-workflows"],
+		});
+		getUserWorkflows.mockResolvedValue([
+			{
+				...MockForkSavedWorkflowMetadata,
+				args_schema: {
+					type: "object",
+					properties: { note: { type: "string" } },
+					required: ["topic"],
+				},
+			},
+		]);
+		const user = await typeIntoComposer("@");
+		await user.click(
+			await screen.findByRole("option", {
+				name: new RegExp(`^@${MockForkSavedWorkflowMetadata.name}`),
+			}),
+		);
+		expect(inputRef.current?.getValue()).toBe(
+			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}) with args: note, topic (required). `,
 		);
 	});
 
@@ -526,27 +557,47 @@ describe("ForkAgentMentionPlugin", () => {
 			experiments: ["fork-workflows"] as Experiment[],
 			chat: { agent_type: "explore" },
 		},
-	])("offers no workflows with $label", async ({ experiments, chat }) => {
-		const { getUserWorkflows, getOrganizationWorkflows, queryClient } =
-			renderComposer({
-				chat,
-				experiments,
-			});
-		// Another page may have filled the shared cache before this chat
-		// opened; the gate must hide those workflows too, not skip the fetch.
-		queryClient.setQueryData(
-			savedWorkflows({
-				tier: "user",
-				organizationId: MockDefaultOrganization.id,
-			}).queryKey,
-			[MockForkSavedWorkflowMetadata],
-		);
-		await typeIntoComposer("@");
-		await screen.findByRole("option", { name: /^@explore/ });
-		expect(screen.queryByText("Workflows")).toBeNull();
-		expect(getUserWorkflows).not.toHaveBeenCalled();
-		expect(getOrganizationWorkflows).not.toHaveBeenCalled();
-	});
+		{
+			label: "a new chat in plan mode",
+			// A new chat has no chat record yet, so the form reports the
+			// pending mode through props instead.
+			experiments: ["fork-workflows"] as Experiment[],
+			isNewChat: true,
+			isPlanMode: true,
+		},
+		{
+			label: "a new chat as an explore agent",
+			experiments: ["fork-workflows"] as Experiment[],
+			isNewChat: true,
+			agentType: "explore",
+		},
+	])(
+		"offers no workflows with $label",
+		async ({ experiments, chat, isNewChat, isPlanMode, agentType }) => {
+			const { getUserWorkflows, getOrganizationWorkflows, queryClient } =
+				renderComposer({
+					chat,
+					experiments,
+					isNewChat,
+					isPlanMode,
+					agentType,
+				});
+			// Another page may have filled the shared cache before this chat
+			// opened; the gate must hide those workflows too, not skip the fetch.
+			queryClient.setQueryData(
+				savedWorkflows({
+					tier: "user",
+					organizationId: MockDefaultOrganization.id,
+				}).queryKey,
+				[MockForkSavedWorkflowMetadata],
+			);
+			await typeIntoComposer("@");
+			await screen.findByRole("option", { name: /^@explore/ });
+			expect(screen.queryByText("Workflows")).toBeNull();
+			expect(getUserWorkflows).not.toHaveBeenCalled();
+			expect(getOrganizationWorkflows).not.toHaveBeenCalled();
+		},
+	);
 
 	it("shows an agent-only empty state when the workflows gate is off", async () => {
 		renderComposer({ experiments: [] });

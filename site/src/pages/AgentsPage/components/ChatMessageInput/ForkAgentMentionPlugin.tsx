@@ -138,14 +138,18 @@ const workspaceAgents = (
 /** The empty string means the workflow takes no args. */
 const workflowArgsSummary = (schema: ForkSavedWorkflowSchema): string => {
 	const properties = asRecord(schema.properties);
-	const names = properties ? Object.keys(properties).sort() : [];
+	const required =
+		schema.required?.filter((name) => typeof name === "string") ?? [];
+	// A required name can sit outside properties, and run_workflow
+	// validates against both, so the summary unions them.
+	const names = [
+		...new Set([...(properties ? Object.keys(properties) : []), ...required]),
+	].sort();
 	// A schema can constrain args through required alone, so an empty
 	// properties object still means args exist; run_workflow validates
 	// against the whole schema and would reject an empty args object.
-	const required =
-		schema.required?.filter((name) => typeof name === "string") ?? [];
 	if (names.length === 0) {
-		return required.length > 0 ? required.sort().join(", ") : "";
+		return "";
 	}
 	const requiredNames = new Set(required);
 	return names
@@ -245,6 +249,13 @@ type ForkAgentMentionPluginProps = {
 	projectId?: string;
 	hasWorkspace: boolean;
 	anchor: HTMLElement | null;
+	/**
+	 * Pending mode of a chat that does not exist yet: the new-chat
+	 * composer has no chat to read, so the form reports its plan mode
+	 * and agent type directly. Undefined in an existing chat.
+	 */
+	planMode?: boolean;
+	agentType?: string;
 };
 
 /** Offers agent types and saved workflows after "@" and inserts the choice. */
@@ -253,6 +264,8 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 	projectId,
 	hasWorkspace,
 	anchor,
+	planMode = false,
+	agentType,
 }) => {
 	const isEnabled = useForkExperiment("fork-agent-definitions");
 	const isNestingEnabled = useForkExperiment("fork-nested-subagents");
@@ -278,6 +291,9 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 	const isWorkflowGatedChat =
 		isChildChat ||
 		currentChat?.plan_mode === "plan" ||
+		// A new chat carries its mode in form state instead of a chat.
+		planMode ||
+		agentType === "explore" ||
 		currentChat?.agent_type === "explore";
 	const canRunWorkflows = isWorkflowsEnabled && !isWorkflowGatedChat;
 	// Agents are offered only when the experiment is on and this chat may
