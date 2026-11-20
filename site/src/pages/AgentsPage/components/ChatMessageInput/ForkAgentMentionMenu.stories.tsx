@@ -83,6 +83,23 @@ export const Empty: Story = {
 	args: { options: [] },
 };
 
+export const AgentsOnlyEmpty: Story = {
+	args: {
+		options: [],
+		// The empty message the menu shows while fork-workflows is off.
+		emptyMessage: "No agents match that query.",
+	},
+};
+
+export const WorkflowsOnlyEmpty: Story = {
+	args: {
+		options: [],
+		// The empty message the menu shows while fork-agent-definitions
+		// is off.
+		emptyMessage: "No workflows match that query.",
+	},
+};
+
 export const Loading: Story = {
 	args: { options: [], status: "Loading agents..." },
 };

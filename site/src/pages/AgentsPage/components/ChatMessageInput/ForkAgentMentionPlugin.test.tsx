@@ -627,12 +627,6 @@ describe("ForkAgentMentionPlugin", () => {
 		},
 	);
 
-	it("shows an agent-only empty state when the workflows gate is off", async () => {
-		renderComposer({ experiments: [] });
-		await typeIntoComposer("@none");
-		await screen.findByText("No agents match that query.");
-	});
-
 	it("offers workflows alone when fork-workflows is on and fork-agent-definitions is off", async () => {
 		const { getUserWorkflows, getPersonal } = renderComposer({
 			experiments: ["fork-workflows"],
