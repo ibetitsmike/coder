@@ -27,7 +27,6 @@ import type {
 } from "#/api/typesGenerated";
 import { asRecord } from "../ChatElements/runtimeTypeUtils";
 import { useForkExperiment } from "../ChatElements/tools/forkToolUtils";
-import { parseArgs, parseStringList } from "../ChatElements/tools/utils";
 import {
 	type AgentMention,
 	AgentMentionOption,
@@ -138,14 +137,13 @@ const workspaceAgents = (
 
 /** The empty string means the workflow takes no args. */
 const workflowArgsSummary = (schema: ForkSavedWorkflowSchema): string => {
-	// The backend stores args_schema as raw JSON, so a property value can be
-	// either the JSON Schema object or a typed fixture's JSON string of it.
-	const properties = asRecord(parseArgs(schema.properties ?? ""));
+	const properties = asRecord(schema.properties);
 	const names = properties ? Object.keys(properties).sort() : [];
 	// A schema can constrain args through required alone, so an empty
 	// properties object still means args exist; run_workflow validates
 	// against the whole schema and would reject an empty args object.
-	const required = parseStringList(schema.required) ?? [];
+	const required =
+		schema.required?.filter((name) => typeof name === "string") ?? [];
 	if (names.length === 0) {
 		return required.length > 0 ? required.sort().join(", ") : "";
 	}
@@ -370,18 +368,23 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 		)
 		.map((workflow) => new WorkflowMentionOption(workflow));
 	const options: ForkMentionOption[] = [...agentOptions, ...workflowOptions];
+	// A disabled query still reports the cached status of a key another
+	// page fetched, so mask each status with its capability gate.
 	const unresolved = [
-		...storedQueries,
+		...(canOfferAgents ? storedQueries : []),
 		...(isRootProjectUnknown ? [rootChat] : []),
 	].filter((result) => !result.data);
 	const isLoading = unresolved.some((result) => result.isFetching);
-	const hasError = [...storedQueries, ...(rootChatId ? [rootChat] : [])].some(
-		(result) => result.isError,
-	);
-	const hasWorkflowError = workflowQueries.some((result) => result.isError);
-	const isWorkflowsLoading = workflowQueries.some(
-		(result) => !result.data && result.isFetching,
-	);
+	const hasError = [
+		...(canOfferAgents ? storedQueries : []),
+		...(rootChatId ? [rootChat] : []),
+	].some((result) => result.isError);
+	const hasWorkflowError =
+		canRunWorkflows && workflowQueries.some((result) => result.isError);
+	const isWorkflowsLoading =
+		canRunWorkflows &&
+		workflowQueries.some((result) => !result.data && result.isFetching);
+	const hasAgents = canOfferAgents || !canRunWorkflows;
 
 	// Lexical's menu lets Enter through when nothing is selectable, which
 	// would send the unfinished mention while agents or workflows load or
@@ -436,9 +439,11 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 							isWorkflowsLoading,
 						)}
 						emptyMessage={
-							canRunWorkflows
+							hasAgents && canRunWorkflows
 								? "No agents or workflows match that query."
-								: "No agents match that query."
+								: hasAgents
+									? "No agents match that query."
+									: "No workflows match that query."
 						}
 						onSelect={menu.selectOptionAndCleanUp}
 						onHighlight={menu.setHighlightedIndex}

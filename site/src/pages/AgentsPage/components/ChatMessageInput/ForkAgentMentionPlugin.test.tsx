@@ -14,7 +14,6 @@ import {
 } from "vitest";
 import { API } from "#/api/api";
 import * as forkAgentDefinitionsApi from "#/api/forkAgentDefinitions";
-import type { ForkSavedWorkflowSchema } from "#/api/forkSavedWorkflowSchema";
 import * as forkSavedWorkflowsApi from "#/api/forkSavedWorkflows";
 import { chat } from "#/api/queries/chats";
 import { agentDefinitions } from "#/api/queries/forkAgentDefinitions";
@@ -579,33 +578,6 @@ describe("ForkAgentMentionPlugin", () => {
 		getUserWorkflows.mockReturnValue(new Promise(() => {}));
 		await typeIntoComposer("@");
 		await screen.findByText("Loading workflows...");
-	});
-
-	it("reads an args schema whose properties arrive as a JSON string", async () => {
-		const { getUserWorkflows, inputRef } = renderComposer({
-			experiments: ["fork-workflows"],
-			skipAgentDefinitionsExperiment: true,
-		});
-		getUserWorkflows.mockResolvedValue([
-			{
-				...MockForkSavedWorkflowMetadata,
-				args_schema: {
-					type: "object",
-					properties: '{"files":{"type":"array"}}',
-					required: '["files"]',
-				} as unknown as ForkSavedWorkflowSchema,
-			},
-		]);
-		const user = await typeIntoComposer("@");
-		await user.click(
-			await screen.findByRole("option", {
-				name: new RegExp(`^@${MockForkSavedWorkflowMetadata.name}`),
-			}),
-		);
-		expect(inputRef.current?.getValue()).toBe(
-			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}) with args: files (required). `,
-		);
-		await user.keyboard("{Escape}");
 	});
 
 	it("keeps / opening the skills menu", async () => {
