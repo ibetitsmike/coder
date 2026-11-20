@@ -182,10 +182,11 @@ type UpdateSavedWorkflowArgs = {
 	name: string;
 	req: UpdateSavedWorkflowRequest;
 	/**
-	 * The revision the caller opened, which the request keeps unless the
-	 * stored workflow still has its id. Only an absent id writes
-	 * unconditionally; anything else, including an empty string, must reach
-	 * the server as an explicit expect_id.
+	 * The revision the caller opened: the write goes through only when the
+	 * stored workflow still has this id, and the server rejects it with 409
+	 * otherwise. Only an absent id writes unconditionally; anything else,
+	 * including an empty string, must reach the server as an explicit
+	 * expect_id.
 	 */
 	id?: string;
 };
