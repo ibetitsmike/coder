@@ -183,11 +183,13 @@ type UpdateSavedWorkflowArgs = {
 	req: UpdateSavedWorkflowRequest;
 	/**
 	 * The revision the caller opened: the write goes through only when the
-	 * stored workflow still has this id, and the server rejects it with 409
-	 * otherwise. Only an absent id writes unconditionally. Any other value
-	 * is sent as an explicit expect_id, except an empty string, which the
-	 * request builder rejects before any request leaves the page because
-	 * the search-param builder would otherwise silently drop the guard.
+	 * stored workflow still has this id. A mismatch answers 409 when a
+	 * workflow the caller may write holds the name, and 404 when the name
+	 * holds nothing or a row the caller may not see. Only an absent id
+	 * writes unconditionally. Any other value is sent as an explicit
+	 * expect_id, except an empty string, which the request builder rejects
+	 * before any request leaves the page because the search-param builder
+	 * would otherwise silently drop the guard.
 	 */
 	id?: string;
 };
