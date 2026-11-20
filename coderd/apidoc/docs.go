@@ -29522,6 +29522,10 @@ const docTemplate = `{
                         }
                     ]
                 },
+                "browser_only": {
+                    "description": "BrowserOnly makes coderd refuse non-browser client connections, such as\nSSH, port forwarding and desktop IDEs, to workspaces built from this\ntemplate. Defaults to false. Enabling it requires the browser-only\nentitlement.",
+                    "type": "boolean"
+                },
                 "cors_behavior": {
                     "description": "CORSBehavior allows optionally specifying the CORS behavior for all shared ports.",
                     "allOf": [
@@ -36935,6 +36939,10 @@ const docTemplate = `{
                         }
                     ]
                 },
+                "browser_only": {
+                    "description": "BrowserOnly makes coderd refuse non-browser client connections, such as\nSSH, port forwarding and desktop IDEs, to workspaces built from this\ntemplate. The deployment-wide browser-only setting applies on top of\nthis one.",
+                    "type": "boolean"
+                },
                 "build_time_stats": {
                     "$ref": "#/definitions/codersdk.TemplateBuildTimeStats"
                 },
@@ -38893,6 +38901,10 @@ const docTemplate = `{
                             "$ref": "#/definitions/codersdk.TemplateAutostopRequirement"
                         }
                     ]
+                },
+                "browser_only": {
+                    "description": "BrowserOnly makes coderd refuse non-browser client connections, such as\nSSH, port forwarding and desktop IDEs, to workspaces built from this\ntemplate. Enabling it requires the browser-only entitlement; disabling it\ndoes not.",
+                    "type": "boolean"
                 },
                 "cors_behavior": {
                     "$ref": "#/definitions/codersdk.CORSBehavior"
