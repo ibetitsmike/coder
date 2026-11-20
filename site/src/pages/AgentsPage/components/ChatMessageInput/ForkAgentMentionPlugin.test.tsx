@@ -72,7 +72,7 @@ const renderComposer = ({
 	hasWorkspace = false,
 	skipAgentDefinitionsExperiment = false,
 	isPlanMode = false,
-	agentType,
+	isExploreAgentType = false,
 }: {
 	chat?: Partial<Chat>;
 	experiments?: Experiment[];
@@ -80,7 +80,7 @@ const renderComposer = ({
 	hasWorkspace?: boolean;
 	skipAgentDefinitionsExperiment?: boolean;
 	isPlanMode?: boolean;
-	agentType?: string;
+	isExploreAgentType?: boolean;
 } = {}) => {
 	const getPersonal = vi
 		.spyOn(forkAgentDefinitionsApi, "getUserAgentDefinitions")
@@ -140,7 +140,7 @@ const renderComposer = ({
 									disabled={false}
 									hasWorkspace={hasWorkspace}
 									isPlanMode={isPlanMode}
-									agentType={agentType}
+									isExploreAgentType={isExploreAgentType}
 									organizationId={MockDefaultOrganization.id}
 								/>
 							}
@@ -591,18 +591,24 @@ describe("ForkAgentMentionPlugin", () => {
 			label: "a new chat as an explore agent",
 			experiments: ["fork-workflows"] as Experiment[],
 			isNewChat: true,
-			agentType: "explore",
+			isExploreAgentType: true,
 		},
 	])(
 		"offers no workflows with $label",
-		async ({ experiments, chat, isNewChat, isPlanMode, agentType }) => {
+		async ({
+			experiments,
+			chat,
+			isNewChat,
+			isPlanMode,
+			isExploreAgentType,
+		}) => {
 			const { getUserWorkflows, getOrganizationWorkflows, queryClient } =
 				renderComposer({
 					chat,
 					experiments,
 					isNewChat,
 					isPlanMode,
-					agentType,
+					isExploreAgentType,
 				});
 			// Another page may have filled the shared cache before this chat
 			// opened; the gate must hide those workflows too, not skip the fetch.

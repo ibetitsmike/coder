@@ -253,10 +253,10 @@ type ForkAgentMentionPluginProps = {
 	/**
 	 * Pending mode of a chat that does not exist yet: the new-chat
 	 * composer has no chat to read, so the form reports its plan mode
-	 * and agent type directly. Undefined in an existing chat.
+	 * and explore base type directly. Undefined in an existing chat.
 	 */
 	planMode?: boolean;
-	agentType?: string;
+	isExploreAgentType?: boolean;
 };
 
 /** Offers agent types and saved workflows after "@" and inserts the choice. */
@@ -266,7 +266,7 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 	hasWorkspace,
 	anchor,
 	planMode = false,
-	agentType,
+	isExploreAgentType = false,
 }) => {
 	const isEnabled = useForkExperiment("fork-agent-definitions");
 	const isNestingEnabled = useForkExperiment("fork-nested-subagents");
@@ -294,7 +294,7 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 		currentChat?.plan_mode === "plan" ||
 		// A new chat carries its mode in form state instead of a chat.
 		planMode ||
-		agentType === "explore" ||
+		isExploreAgentType ||
 		currentChat?.agent_type === "explore";
 	const canRunWorkflows = isWorkflowsEnabled && !isWorkflowGatedChat;
 	// Agents are offered only when the experiment is on and this chat may

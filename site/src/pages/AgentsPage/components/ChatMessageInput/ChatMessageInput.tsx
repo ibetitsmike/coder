@@ -681,8 +681,11 @@ type ChatMessageInputProps = Omit<
 	 * mode; the saved-workflow menu must match what chatd will offer.
 	 */
 	isPlanMode?: boolean;
-	/** Agent type of a chat the form is about to create, if picked. */
-	agentType?: string;
+	/**
+	 * Whether the chat the form is about to create starts as an agent
+	 * type whose base type is explore.
+	 */
+	isExploreAgentType?: boolean;
 	/**
 	 * Story and test seam for deterministic personal skill menu data.
 	 */
@@ -853,7 +856,7 @@ const ChatMessageInput = ({
 	organizationId,
 	projectId,
 	isPlanMode,
-	agentType,
+	isExploreAgentType,
 	personalSkillsOverride,
 	workspaceSkills,
 	slashCommands,
@@ -1417,7 +1420,7 @@ const ChatMessageInput = ({
 					projectId={projectId}
 					hasWorkspace={hasWorkspace}
 					planMode={isPlanMode}
-					agentType={agentType}
+					isExploreAgentType={isExploreAgentType}
 					anchor={skillsMenuAnchor ?? containerElement}
 				/>
 				<EditableStatePlugin disabled={disabled} />
