@@ -20,9 +20,9 @@ import type {
 } from "#/api/typesGenerated";
 import { toast } from "#/components/Toaster/toast";
 import type { SkillAccess } from "#/pages/AgentsPage/utils/skills";
+import type { ForkSavedWorkflowShareState } from "./ForkSavedWorkflowShareDialog";
 import {
 	type ForkSavedWorkflowDeleteState,
-	type ForkSavedWorkflowShareState,
 	ForkSavedWorkflowsTableView,
 } from "./ForkSavedWorkflowsTableView";
 import { useForkSavedWorkflowEditor } from "./useForkSavedWorkflowEditor";

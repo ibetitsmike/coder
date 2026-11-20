@@ -91,6 +91,18 @@ export const ShareConfirm: Story = {
 	},
 };
 
+export const SharePending: Story = {
+	args: {
+		shareState: {
+			workflow: MockForkSavedWorkflowMetadata,
+			error: undefined,
+			isSharing: true,
+			onConfirm: fn(),
+			onClose: fn(),
+		},
+	},
+};
+
 export const ShareError: Story = {
 	args: {
 		shareState: {

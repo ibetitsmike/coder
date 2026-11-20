@@ -9,6 +9,7 @@ import {
 import {
 	MockForkOrganizationSavedWorkflowMetadata,
 	MockForkSavedWorkflowMetadata,
+	MockForkSharedSavedWorkflowMetadata,
 } from "#/testHelpers/forkSavedWorkflows";
 import {
 	withAuthProvider,
@@ -78,12 +79,7 @@ export const SharedByMe: Story = {
 				}),
 				data: [
 					MockForkOrganizationSavedWorkflowMetadata,
-					{
-						...MockForkSavedWorkflowMetadata,
-						id: "saved-workflow-shared",
-						user_id: undefined,
-						created_by: MockUserMember.id,
-					},
+					MockForkSharedSavedWorkflowMetadata,
 				],
 			},
 		],

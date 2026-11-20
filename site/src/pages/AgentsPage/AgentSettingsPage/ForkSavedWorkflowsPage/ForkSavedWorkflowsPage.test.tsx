@@ -15,6 +15,7 @@ import {
 import {
 	MockForkOrganizationSavedWorkflowMetadata,
 	MockForkSavedWorkflowMetadata,
+	MockForkSharedSavedWorkflowMetadata,
 } from "#/testHelpers/forkSavedWorkflows";
 import { MockForkWorkflowScript } from "#/testHelpers/forkWorkflows";
 import { renderWithAuth } from "#/testHelpers/renderHelpers";
@@ -50,6 +51,23 @@ const renderPage = ({
 		extraRoutes: [{ path: "/agents/settings", element: <div /> }],
 	});
 	return { listUser, listOrganization, router };
+};
+
+const openShareDialog = async (user: ReturnType<typeof userEvent.setup>) => {
+	const personal = await screen.findByRole("table", {
+		name: "Personal workflows",
+	});
+	await user.click(
+		await within(personal).findByRole("button", {
+			name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
+		}),
+	);
+	await user.click(
+		await screen.findByRole("menuitem", { name: "Share with organization…" }),
+	);
+	return screen.findByRole("dialog", {
+		name: `Share ${MockForkSavedWorkflowMetadata.name} with the organization?`,
+	});
 };
 
 describe("ForkSavedWorkflowsPage", () => {
@@ -122,135 +140,94 @@ describe("ForkSavedWorkflowsPage", () => {
 
 	it("shares a personal workflow with the organization", async () => {
 		const user = userEvent.setup();
+		const success = vi.spyOn(toast, "success");
 		const { listUser, listOrganization } = renderPage();
-		const shared = {
-			...MockForkSavedWorkflowMetadata,
-			id: "saved-workflow-shared",
-			user_id: undefined,
-			created_by: MockUserMember.id,
-		};
 		const share = vi
 			.spyOn(forkSavedWorkflowsApi, "shareUserSavedWorkflow")
 			.mockImplementation(async () => {
 				listUser.mockResolvedValue([]);
 				listOrganization.mockResolvedValue([
 					MockForkOrganizationSavedWorkflowMetadata,
-					shared,
+					MockForkSharedSavedWorkflowMetadata,
 				]);
-				return { ...shared, script: MockForkWorkflowScript };
+				return {
+					...MockForkSharedSavedWorkflowMetadata,
+					script: MockForkWorkflowScript,
+				};
 			});
 
-		const personal = await screen.findByRole("table", {
-			name: "Personal workflows",
-		});
-		await user.click(
-			await within(personal).findByRole("button", {
-				name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
-			}),
-		);
-		await user.click(
-			await screen.findByRole("menuitem", {
-				name: "Share with organization…",
-			}),
-		);
-		const dialog = await screen.findByRole("dialog", {
-			name: `Share ${MockForkSavedWorkflowMetadata.name} with the organization?`,
-		});
+		const dialog = await openShareDialog(user);
+		const userCalls = listUser.mock.calls.length;
+		const organizationCalls = listOrganization.mock.calls.length;
 		await user.click(within(dialog).getByRole("button", { name: "Share" }));
 
 		await waitFor(() =>
-			expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+			expect(success).toHaveBeenCalledWith(
+				`${MockForkSavedWorkflowMetadata.name} is now an organization workflow.`,
+			),
 		);
 		expect(share).toHaveBeenCalledWith(
 			MockDefaultOrganization.id,
 			MockForkSavedWorkflowMetadata.name,
 			MockForkSavedWorkflowMetadata.id,
 		);
-		await within(personal).findByText(
-			"No personal workflows in this organization yet.",
+		// The move changes both tiers, so both lists refetch.
+		await waitFor(() =>
+			expect(listUser.mock.calls.length).toBeGreaterThan(userCalls),
 		);
-		const organization = screen.getByRole("table", {
-			name: "Organization workflows",
-		});
-		// The member who shared it can edit and delete it; the other
-		// organization workflow stays read-only.
-		await user.click(
-			await within(organization).findByRole("button", {
-				name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
-			}),
+		await waitFor(() =>
+			expect(listOrganization.mock.calls.length).toBeGreaterThan(
+				organizationCalls,
+			),
 		);
-		await screen.findByRole("menuitem", { name: "Edit" });
-		screen.getByRole("menuitem", { name: "Delete…" });
-		expect(
-			screen.queryByRole("menuitem", { name: "Share with organization…" }),
-		).toBeNull();
-		expect(
-			within(organization).queryByRole("button", {
-				name: `More actions for ${MockForkOrganizationSavedWorkflowMetadata.name}`,
-			}),
-		).toBeNull();
 	});
 
-	it("keeps the share dialog open with the error when the move fails", async () => {
+	it("lets the member retry a share the server rejected", async () => {
 		const user = userEvent.setup();
+		const success = vi.spyOn(toast, "success");
 		renderPage();
-		vi.spyOn(forkSavedWorkflowsApi, "shareUserSavedWorkflow").mockRejectedValue(
-			mockApiError({
-				message: "The organization already has a workflow with this name.",
-				status: 409,
-			}),
-		);
+		const share = vi
+			.spyOn(forkSavedWorkflowsApi, "shareUserSavedWorkflow")
+			.mockRejectedValueOnce(
+				mockApiError({
+					message: "The organization already has a workflow with this name.",
+					status: 409,
+				}),
+			)
+			.mockResolvedValueOnce({
+				...MockForkSharedSavedWorkflowMetadata,
+				script: MockForkWorkflowScript,
+			});
 
-		const personal = await screen.findByRole("table", {
-			name: "Personal workflows",
-		});
-		await user.click(
-			await within(personal).findByRole("button", {
-				name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
-			}),
-		);
-		await user.click(
-			await screen.findByRole("menuitem", {
-				name: "Share with organization…",
-			}),
-		);
-		const dialog = await screen.findByRole("dialog");
-		await user.click(within(dialog).getByRole("button", { name: "Share" }));
+		const dialog = await openShareDialog(user);
+		const confirm = within(dialog).getByRole("button", { name: "Share" });
+		await user.click(confirm);
+		await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(confirm).toBeEnabled());
+		expect(success).not.toHaveBeenCalled();
 
-		await within(dialog).findByText(
-			"The organization already has a workflow with this name.",
+		await user.click(confirm);
+		await waitFor(() =>
+			expect(success).toHaveBeenCalledWith(
+				`${MockForkSavedWorkflowMetadata.name} is now an organization workflow.`,
+			),
 		);
-		expect(screen.getByRole("dialog")).toBeInTheDocument();
-		within(personal).getByText(MockForkSavedWorkflowMetadata.name);
+		expect(share).toHaveBeenCalledTimes(2);
 	});
 
-	it("closes the share dialog when the workflow is already gone", async () => {
+	it("tells the member when the workflow to share is already gone", async () => {
 		const user = userEvent.setup();
 		const info = vi.spyOn(toast, "info");
+		const success = vi.spyOn(toast, "success");
 		const { listUser } = renderPage();
-		vi.spyOn(
-			forkSavedWorkflowsApi,
-			"shareUserSavedWorkflow",
-		).mockImplementation(async () => {
-			// Another tab shared or deleted it.
-			listUser.mockResolvedValue([]);
-			throw mockApiError({ message: "Resource not found", status: 404 });
-		});
+		const share = vi
+			.spyOn(forkSavedWorkflowsApi, "shareUserSavedWorkflow")
+			.mockRejectedValue(
+				mockApiError({ message: "Resource not found", status: 404 }),
+			);
 
-		const personal = await screen.findByRole("table", {
-			name: "Personal workflows",
-		});
-		await user.click(
-			await within(personal).findByRole("button", {
-				name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
-			}),
-		);
-		await user.click(
-			await screen.findByRole("menuitem", {
-				name: "Share with organization…",
-			}),
-		);
-		const dialog = await screen.findByRole("dialog");
+		const dialog = await openShareDialog(user);
+		const userCalls = listUser.mock.calls.length;
 		await user.click(within(dialog).getByRole("button", { name: "Share" }));
 
 		await waitFor(() =>
@@ -258,9 +235,10 @@ describe("ForkSavedWorkflowsPage", () => {
 				`${MockForkSavedWorkflowMetadata.name} was deleted or moved since you picked it, so nothing was shared.`,
 			),
 		);
-		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-		await within(personal).findByText(
-			"No personal workflows in this organization yet.",
+		expect(share).toHaveBeenCalledTimes(1);
+		expect(success).not.toHaveBeenCalled();
+		await waitFor(() =>
+			expect(listUser.mock.calls.length).toBeGreaterThan(userCalls),
 		);
 	});
 

@@ -308,8 +308,6 @@ export const shareSavedWorkflow = (queryClient: QueryClient) =>
 				queryClient.removeQueries({ queryKey: detailKey, exact: true });
 			}
 		},
-		// Both lists change: the row leaves the personal one and joins the
-		// organization one.
 		onSettled: (_data, _error, { organizationId }) => {
 			for (const tier of ["user", "organization"] as const) {
 				void queryClient.invalidateQueries({
