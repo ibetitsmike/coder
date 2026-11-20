@@ -158,11 +158,9 @@ const workflowArgsSummary = (schema: ForkSavedWorkflowSchema): string => {
 };
 
 /**
- * Dedupes workflows the way the menu presents them: personal first, then
- * organization ones no personal workflow hides. Both list endpoints
- * already return only what the signed-in user may read. A list that has
- * not loaded yet hides the tiers after it, because the menu could not
- * tell whether an earlier tier shadows a later name.
+ * Dedupes as run_workflow resolves a name: personal first, then
+ * organization ones no personal workflow hides. Both endpoints already
+ * return only readable workflows.
  */
 const resolveWorkflowMentions = (
 	lists: readonly {
