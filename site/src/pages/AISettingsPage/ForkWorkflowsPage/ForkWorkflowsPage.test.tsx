@@ -442,6 +442,55 @@ it("keeps the editor open with the draft after a failed save", async () => {
 	await waitFor(() => expect(dialog).not.toBeInTheDocument());
 });
 
+it("keeps the draft and refetches when the server rejects the save with 404", async () => {
+	const user = userEvent.setup();
+	const info = vi.spyOn(toast, "info");
+	const list = vi
+		.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflows")
+		.mockResolvedValue([MockForkSavedWorkflowMetadata]);
+	vi.spyOn(
+		forkSavedWorkflowsApi,
+		"getOrganizationSavedWorkflows",
+	).mockResolvedValue([]);
+	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow").mockResolvedValue(
+		MockForkSavedWorkflow,
+	);
+	// Another tab deleted the workflow after the editor loaded it, so the
+	// conditional save refuses with 404.
+	const update = vi
+		.spyOn(forkSavedWorkflowsApi, "updateUserSavedWorkflow")
+		.mockRejectedValue(mockApiError({ message: "Not found.", status: 404 }));
+	renderPage(`?org=${MockOrganization2.name}`);
+
+	await user.click(
+		await screen.findByRole("button", {
+			name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
+		}),
+	);
+	await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+	const dialog = await screen.findByRole("dialog");
+	const description = await within(dialog).findByLabelText("Description");
+	// The form only seeds its values once the editor's own fetches have
+	// settled, so every list call after this point is the 404 refetch.
+	const listCallsBeforeSave = list.mock.calls.length;
+	await user.type(description, " even harder");
+	await user.click(
+		within(dialog).getByRole("button", { name: "Save workflow" }),
+	);
+
+	await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+	// The 404 invalidates the list and detail queries, and the refetches
+	// bring the editor the state the name holds now.
+	await waitFor(() =>
+		expect(list.mock.calls.length).toBeGreaterThan(listCallsBeforeSave),
+	);
+	await waitFor(() => expect(info).toHaveBeenCalled());
+	expect(description).toHaveValue(
+		`${MockForkSavedWorkflowMetadata.description} even harder`,
+	);
+	expect(screen.queryByRole("dialog")).not.toBeNull();
+});
+
 it("seeds the editor from a fresh fetch, not the cached workflow", async () => {
 	const user = userEvent.setup();
 	const newer = {
