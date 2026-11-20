@@ -19,16 +19,18 @@ import (
 const deleteOrganizationSavedWorkflowByName = `-- name: DeleteOrganizationSavedWorkflowByName :one
 DELETE FROM saved_workflows
 WHERE organization_id = $1::uuid AND user_id IS NULL AND name = $2::text
+  AND ($3::uuid IS NULL OR id = $3::uuid)
 RETURNING id, organization_id, user_id, created_by, name, description, script, args_schema, phases, group_acl, user_acl, created_at, updated_at
 `
 
 type DeleteOrganizationSavedWorkflowByNameParams struct {
-	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
-	Name           string    `db:"name" json:"name"`
+	OrganizationID uuid.UUID     `db:"organization_id" json:"organization_id"`
+	Name           string        `db:"name" json:"name"`
+	ExpectID       uuid.NullUUID `db:"expect_id" json:"expect_id"`
 }
 
 func (q *Queries) DeleteOrganizationSavedWorkflowByName(ctx context.Context, arg DeleteOrganizationSavedWorkflowByNameParams) (SavedWorkflow, error) {
-	row := q.db.QueryRowContext(ctx, deleteOrganizationSavedWorkflowByName, arg.OrganizationID, arg.Name)
+	row := q.db.QueryRowContext(ctx, deleteOrganizationSavedWorkflowByName, arg.OrganizationID, arg.Name, arg.ExpectID)
 	var i SavedWorkflow
 	err := row.Scan(
 		&i.ID,
@@ -51,17 +53,24 @@ func (q *Queries) DeleteOrganizationSavedWorkflowByName(ctx context.Context, arg
 const deleteUserSavedWorkflowByName = `-- name: DeleteUserSavedWorkflowByName :one
 DELETE FROM saved_workflows
 WHERE organization_id = $1::uuid AND user_id = $2::uuid AND name = $3::text
+  AND ($4::uuid IS NULL OR id = $4::uuid)
 RETURNING id, organization_id, user_id, created_by, name, description, script, args_schema, phases, group_acl, user_acl, created_at, updated_at
 `
 
 type DeleteUserSavedWorkflowByNameParams struct {
-	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`
-	UserID         uuid.UUID `db:"user_id" json:"user_id"`
-	Name           string    `db:"name" json:"name"`
+	OrganizationID uuid.UUID     `db:"organization_id" json:"organization_id"`
+	UserID         uuid.UUID     `db:"user_id" json:"user_id"`
+	Name           string        `db:"name" json:"name"`
+	ExpectID       uuid.NullUUID `db:"expect_id" json:"expect_id"`
 }
 
 func (q *Queries) DeleteUserSavedWorkflowByName(ctx context.Context, arg DeleteUserSavedWorkflowByNameParams) (SavedWorkflow, error) {
-	row := q.db.QueryRowContext(ctx, deleteUserSavedWorkflowByName, arg.OrganizationID, arg.UserID, arg.Name)
+	row := q.db.QueryRowContext(ctx, deleteUserSavedWorkflowByName,
+		arg.OrganizationID,
+		arg.UserID,
+		arg.Name,
+		arg.ExpectID,
+	)
 	var i SavedWorkflow
 	err := row.Scan(
 		&i.ID,
@@ -444,6 +453,7 @@ SET
     phases      = COALESCE($5::text[], phases),
     updated_at  = now()
 WHERE organization_id = $6::uuid AND user_id IS NULL AND name = $7::text
+  AND ($8::uuid IS NULL OR id = $8::uuid)
 RETURNING id, organization_id, user_id, created_by, name, description, script, args_schema, phases, group_acl, user_acl, created_at, updated_at
 `
 
@@ -455,8 +465,11 @@ type UpdateOrganizationSavedWorkflowByNameParams struct {
 	Phases         []string              `db:"phases" json:"phases"`
 	OrganizationID uuid.UUID             `db:"organization_id" json:"organization_id"`
 	Name           string                `db:"name" json:"name"`
+	ExpectID       uuid.NullUUID         `db:"expect_id" json:"expect_id"`
 }
 
+// Set ExpectID to write only when the stored row still has that id, like
+// the user write.
 func (q *Queries) UpdateOrganizationSavedWorkflowByName(ctx context.Context, arg UpdateOrganizationSavedWorkflowByNameParams) (SavedWorkflow, error) {
 	row := q.db.QueryRowContext(ctx, updateOrganizationSavedWorkflowByName,
 		arg.Description,
@@ -466,6 +479,7 @@ func (q *Queries) UpdateOrganizationSavedWorkflowByName(ctx context.Context, arg
 		pq.Array(arg.Phases),
 		arg.OrganizationID,
 		arg.Name,
+		arg.ExpectID,
 	)
 	var i SavedWorkflow
 	err := row.Scan(
@@ -495,6 +509,7 @@ SET
     phases      = COALESCE($5::text[], phases),
     updated_at  = now()
 WHERE organization_id = $6::uuid AND user_id = $7::uuid AND name = $8::text
+  AND ($9::uuid IS NULL OR id = $9::uuid)
 RETURNING id, organization_id, user_id, created_by, name, description, script, args_schema, phases, group_acl, user_acl, created_at, updated_at
 `
 
@@ -507,8 +522,13 @@ type UpdateUserSavedWorkflowByNameParams struct {
 	OrganizationID uuid.UUID             `db:"organization_id" json:"organization_id"`
 	UserID         uuid.UUID             `db:"user_id" json:"user_id"`
 	Name           string                `db:"name" json:"name"`
+	ExpectID       uuid.NullUUID         `db:"expect_id" json:"expect_id"`
 }
 
+// Set ExpectID to write only when the stored row still has that id. NULL
+// writes unconditionally. The check runs in SQL, so the caller's
+// authorization happens before any id comparison and no read leaks a row
+// the caller cannot see.
 func (q *Queries) UpdateUserSavedWorkflowByName(ctx context.Context, arg UpdateUserSavedWorkflowByNameParams) (SavedWorkflow, error) {
 	row := q.db.QueryRowContext(ctx, updateUserSavedWorkflowByName,
 		arg.Description,
@@ -519,6 +539,7 @@ func (q *Queries) UpdateUserSavedWorkflowByName(ctx context.Context, arg UpdateU
 		arg.OrganizationID,
 		arg.UserID,
 		arg.Name,
+		arg.ExpectID,
 	)
 	var i SavedWorkflow
 	err := row.Scan(

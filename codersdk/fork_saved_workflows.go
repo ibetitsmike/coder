@@ -63,8 +63,36 @@ type UpdateForkSavedWorkflowRequest struct {
 	Phases      *[]string       `json:"phases,omitempty"`
 }
 
+// ForkSavedWorkflowWriteParams holds the optional conditions of a saved
+// workflow update or delete.
+type ForkSavedWorkflowWriteParams struct {
+	// ExpectID rejects the write with 409 Conflict when the stored workflow
+	// has another ID. Nil leaves the write unconditional.
+	ExpectID *uuid.UUID `json:"expect_id,omitempty"`
+}
+
+func (p ForkSavedWorkflowWriteParams) asRequestOption() RequestOption {
+	return func(r *http.Request) {
+		if p.ExpectID == nil {
+			return
+		}
+		q := r.URL.Query()
+		q.Set("expect_id", p.ExpectID.String())
+		r.URL.RawQuery = q.Encode()
+	}
+}
+
 func forkUserSavedWorkflowsPath(organizationID uuid.UUID, user string) string {
 	return fmt.Sprintf("/api/v2/chats/fork/organizations/%s/members/%s/workflows", organizationID, url.PathEscape(user))
+}
+
+// writeParamsOptions turns write condition params into request options.
+func writeParamsOptions(params []ForkSavedWorkflowWriteParams) []RequestOption {
+	opts := make([]RequestOption, 0, len(params))
+	for _, p := range params {
+		opts = append(opts, p.asRequestOption())
+	}
+	return opts
 }
 
 func forkUserSavedWorkflowPath(organizationID uuid.UUID, user, name string) string {
@@ -87,14 +115,16 @@ func (c *Client) CreateForkUserSavedWorkflow(ctx context.Context, organizationID
 	return requestJSON[ForkSavedWorkflow](ctx, c, http.MethodPost, forkUserSavedWorkflowsPath(organizationID, user), http.StatusCreated, req)
 }
 
-// UpdateForkUserSavedWorkflow updates a personal workflow.
-func (c *Client) UpdateForkUserSavedWorkflow(ctx context.Context, organizationID uuid.UUID, user, name string, req UpdateForkSavedWorkflowRequest) (ForkSavedWorkflow, error) {
-	return requestJSON[ForkSavedWorkflow](ctx, c, http.MethodPatch, forkUserSavedWorkflowPath(organizationID, user, name), http.StatusOK, req)
+// UpdateForkUserSavedWorkflow updates a personal workflow. Optional write
+// conditions come as params.
+func (c *Client) UpdateForkUserSavedWorkflow(ctx context.Context, organizationID uuid.UUID, user, name string, req UpdateForkSavedWorkflowRequest, params ...ForkSavedWorkflowWriteParams) (ForkSavedWorkflow, error) {
+	return requestJSON[ForkSavedWorkflow](ctx, c, http.MethodPatch, forkUserSavedWorkflowPath(organizationID, user, name), http.StatusOK, req, writeParamsOptions(params)...)
 }
 
-// DeleteForkUserSavedWorkflow deletes a personal workflow.
-func (c *Client) DeleteForkUserSavedWorkflow(ctx context.Context, organizationID uuid.UUID, user, name string) error {
-	return requestNoContent(ctx, c, http.MethodDelete, forkUserSavedWorkflowPath(organizationID, user, name), nil)
+// DeleteForkUserSavedWorkflow deletes a personal workflow. Optional write
+// conditions come as params.
+func (c *Client) DeleteForkUserSavedWorkflow(ctx context.Context, organizationID uuid.UUID, user, name string, params ...ForkSavedWorkflowWriteParams) error {
+	return requestNoContent(ctx, c, http.MethodDelete, forkUserSavedWorkflowPath(organizationID, user, name), nil, writeParamsOptions(params)...)
 }
 
 func forkOrganizationSavedWorkflowsPath(organizationID uuid.UUID) string {
@@ -123,13 +153,15 @@ func (c *Client) CreateForkOrganizationSavedWorkflow(ctx context.Context, organi
 }
 
 // UpdateForkOrganizationSavedWorkflow updates an organization workflow.
-func (c *Client) UpdateForkOrganizationSavedWorkflow(ctx context.Context, organizationID uuid.UUID, name string, req UpdateForkSavedWorkflowRequest) (ForkSavedWorkflow, error) {
-	return requestJSON[ForkSavedWorkflow](ctx, c, http.MethodPatch, forkOrganizationSavedWorkflowPath(organizationID, name), http.StatusOK, req)
+// Optional write conditions come as params.
+func (c *Client) UpdateForkOrganizationSavedWorkflow(ctx context.Context, organizationID uuid.UUID, name string, req UpdateForkSavedWorkflowRequest, params ...ForkSavedWorkflowWriteParams) (ForkSavedWorkflow, error) {
+	return requestJSON[ForkSavedWorkflow](ctx, c, http.MethodPatch, forkOrganizationSavedWorkflowPath(organizationID, name), http.StatusOK, req, writeParamsOptions(params)...)
 }
 
 // DeleteForkOrganizationSavedWorkflow deletes an organization workflow.
-func (c *Client) DeleteForkOrganizationSavedWorkflow(ctx context.Context, organizationID uuid.UUID, name string) error {
-	return requestNoContent(ctx, c, http.MethodDelete, forkOrganizationSavedWorkflowPath(organizationID, name), nil)
+// Optional write conditions come as params.
+func (c *Client) DeleteForkOrganizationSavedWorkflow(ctx context.Context, organizationID uuid.UUID, name string, params ...ForkSavedWorkflowWriteParams) error {
+	return requestNoContent(ctx, c, http.MethodDelete, forkOrganizationSavedWorkflowPath(organizationID, name), nil, writeParamsOptions(params)...)
 }
 
 // ForkOrganizationSavedWorkflowACL returns the users and groups that an

@@ -17,6 +17,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/httpapi"
+	"github.com/coder/coder/v2/coderd/httpapi/httperror"
 	"github.com/coder/coder/v2/coderd/httpmw"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
@@ -304,6 +305,10 @@ func parseForkAgentDefinition(ctx context.Context, rw http.ResponseWriter, conte
 func writeForkAgentDefinitionReadError(rw http.ResponseWriter, err error) {
 	if httpapi.Is404Error(err) {
 		httpapi.ResourceNotFound(rw)
+		return
+	}
+	if _, ok := httperror.IsResponder(err); ok {
+		httperror.WriteResponseError(context.Background(), rw, err)
 		return
 	}
 	httpapi.InternalServerError(rw, err)

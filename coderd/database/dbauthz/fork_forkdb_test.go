@@ -1132,7 +1132,7 @@ func TestForkQuerier(t *testing.T) {
 		"DeleteOrganizationSavedWorkflowByName": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
 			wf := organizationSavedWorkflow(uuid.New(), "triage")
 			arg := forkdb.DeleteOrganizationSavedWorkflowByNameParams{OrganizationID: wf.OrganizationID, Name: wf.Name}
-			fdb.EXPECT().GetOrganizationSavedWorkflowByName(gomock.Any(), forkdb.GetOrganizationSavedWorkflowByNameParams(arg)).Return(wf, nil).AnyTimes()
+			fdb.EXPECT().GetOrganizationSavedWorkflowByName(gomock.Any(), forkdb.GetOrganizationSavedWorkflowByNameParams{OrganizationID: wf.OrganizationID, Name: wf.Name}).Return(wf, nil).AnyTimes()
 			fdb.EXPECT().DeleteOrganizationSavedWorkflowByName(gomock.Any(), arg).Return(wf, nil).AnyTimes()
 			check.Args(arg).Asserts(organizationSavedWorkflowObject(wf), policy.ActionDelete).Returns(wf)
 		},

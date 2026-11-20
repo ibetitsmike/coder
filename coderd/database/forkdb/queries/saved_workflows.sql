@@ -16,6 +16,10 @@ WHERE organization_id = @organization_id::uuid AND user_id = @user_id::uuid
 ORDER BY name ASC;
 
 -- name: UpdateUserSavedWorkflowByName :one
+-- Set ExpectID to write only when the stored row still has that id. NULL
+-- writes unconditionally. The check runs in SQL, so the caller's
+-- authorization happens before any id comparison and no read leaks a row
+-- the caller cannot see.
 UPDATE saved_workflows
 SET
     description = COALESCE(sqlc.narg('description')::text, description),
@@ -24,11 +28,13 @@ SET
     phases      = COALESCE(sqlc.narg('phases')::text[], phases),
     updated_at  = now()
 WHERE organization_id = @organization_id::uuid AND user_id = @user_id::uuid AND name = @name::text
+  AND (sqlc.narg('expect_id')::uuid IS NULL OR id = sqlc.narg('expect_id')::uuid)
 RETURNING *;
 
 -- name: DeleteUserSavedWorkflowByName :one
 DELETE FROM saved_workflows
 WHERE organization_id = @organization_id::uuid AND user_id = @user_id::uuid AND name = @name::text
+  AND (sqlc.narg('expect_id')::uuid IS NULL OR id = sqlc.narg('expect_id')::uuid)
 RETURNING *;
 
 -- name: InsertOrganizationSavedWorkflow :one
@@ -55,6 +61,8 @@ WHERE organization_id = @organization_id::uuid AND user_id IS NULL
 ORDER BY name ASC;
 
 -- name: UpdateOrganizationSavedWorkflowByName :one
+-- Set ExpectID to write only when the stored row still has that id, like
+-- the user write.
 UPDATE saved_workflows
 SET
     description = COALESCE(sqlc.narg('description')::text, description),
@@ -63,6 +71,7 @@ SET
     phases      = COALESCE(sqlc.narg('phases')::text[], phases),
     updated_at  = now()
 WHERE organization_id = @organization_id::uuid AND user_id IS NULL AND name = @name::text
+  AND (sqlc.narg('expect_id')::uuid IS NULL OR id = sqlc.narg('expect_id')::uuid)
 RETURNING *;
 
 -- name: UpdateOrganizationSavedWorkflowACLByName :one
@@ -77,4 +86,5 @@ RETURNING *;
 -- name: DeleteOrganizationSavedWorkflowByName :one
 DELETE FROM saved_workflows
 WHERE organization_id = @organization_id::uuid AND user_id IS NULL AND name = @name::text
+  AND (sqlc.narg('expect_id')::uuid IS NULL OR id = sqlc.narg('expect_id')::uuid)
 RETURNING *;
