@@ -17186,7 +17186,7 @@ func (q *sqlQuerier) RevokeDBCryptKey(ctx context.Context, activeKeyDigest strin
 }
 
 const acquireExternalAuthLinkRefreshLease = `-- name: AcquireExternalAuthLinkRefreshLease :one
-SELECT provider_id, user_id, created_at, updated_at, oauth_access_token, oauth_refresh_token, oauth_expiry, oauth_access_token_key_id, oauth_refresh_token_key_id, oauth_extra, oauth_refresh_failure_reason, refresh_lease_expires_at from acquire_external_auth_link_refresh_lease($1, $2, $3)
+SELECT provider_id, user_id, created_at, updated_at, oauth_access_token, oauth_refresh_token, oauth_expiry, oauth_access_token_key_id, oauth_refresh_token_key_id, oauth_extra, oauth_refresh_failure_reason, refresh_lease_expires_at, oauth_extra_key_id from acquire_external_auth_link_refresh_lease($1, $2, $3)
 `
 
 type AcquireExternalAuthLinkRefreshLeaseParams struct {
@@ -17213,6 +17213,7 @@ func (q *sqlQuerier) AcquireExternalAuthLinkRefreshLease(ctx context.Context, ar
 		&i.OAuthExtra,
 		&i.OauthRefreshFailureReason,
 		&i.RefreshLeaseExpiresAt,
+		&i.OAuthExtraKeyID,
 	)
 	return i, err
 }
@@ -17232,7 +17233,7 @@ func (q *sqlQuerier) DeleteExternalAuthLink(ctx context.Context, arg DeleteExter
 }
 
 const getExternalAuthLink = `-- name: GetExternalAuthLink :one
-SELECT provider_id, user_id, created_at, updated_at, oauth_access_token, oauth_refresh_token, oauth_expiry, oauth_access_token_key_id, oauth_refresh_token_key_id, oauth_extra, oauth_refresh_failure_reason, refresh_lease_expires_at FROM external_auth_links WHERE provider_id = $1 AND user_id = $2
+SELECT provider_id, user_id, created_at, updated_at, oauth_access_token, oauth_refresh_token, oauth_expiry, oauth_access_token_key_id, oauth_refresh_token_key_id, oauth_extra, oauth_refresh_failure_reason, refresh_lease_expires_at, oauth_extra_key_id FROM external_auth_links WHERE provider_id = $1 AND user_id = $2
 `
 
 type GetExternalAuthLinkParams struct {
@@ -17256,12 +17257,13 @@ func (q *sqlQuerier) GetExternalAuthLink(ctx context.Context, arg GetExternalAut
 		&i.OAuthExtra,
 		&i.OauthRefreshFailureReason,
 		&i.RefreshLeaseExpiresAt,
+		&i.OAuthExtraKeyID,
 	)
 	return i, err
 }
 
 const getExternalAuthLinksByUserID = `-- name: GetExternalAuthLinksByUserID :many
-SELECT provider_id, user_id, created_at, updated_at, oauth_access_token, oauth_refresh_token, oauth_expiry, oauth_access_token_key_id, oauth_refresh_token_key_id, oauth_extra, oauth_refresh_failure_reason, refresh_lease_expires_at FROM external_auth_links WHERE user_id = $1
+SELECT provider_id, user_id, created_at, updated_at, oauth_access_token, oauth_refresh_token, oauth_expiry, oauth_access_token_key_id, oauth_refresh_token_key_id, oauth_extra, oauth_refresh_failure_reason, refresh_lease_expires_at, oauth_extra_key_id FROM external_auth_links WHERE user_id = $1
 `
 
 func (q *sqlQuerier) GetExternalAuthLinksByUserID(ctx context.Context, userID uuid.UUID) ([]ExternalAuthLink, error) {
@@ -17286,6 +17288,7 @@ func (q *sqlQuerier) GetExternalAuthLinksByUserID(ctx context.Context, userID uu
 			&i.OAuthExtra,
 			&i.OauthRefreshFailureReason,
 			&i.RefreshLeaseExpiresAt,
+			&i.OAuthExtraKeyID,
 		); err != nil {
 			return nil, err
 		}
@@ -17311,7 +17314,8 @@ INSERT INTO external_auth_links (
     oauth_refresh_token,
     oauth_refresh_token_key_id,
     oauth_expiry,
-	oauth_extra
+	oauth_extra,
+	oauth_extra_key_id
 ) VALUES (
     $1,
     $2,
@@ -17322,8 +17326,9 @@ INSERT INTO external_auth_links (
     $7,
     $8,
     $9,
-	$10
-) RETURNING provider_id, user_id, created_at, updated_at, oauth_access_token, oauth_refresh_token, oauth_expiry, oauth_access_token_key_id, oauth_refresh_token_key_id, oauth_extra, oauth_refresh_failure_reason, refresh_lease_expires_at
+	$10,
+	$11
+) RETURNING provider_id, user_id, created_at, updated_at, oauth_access_token, oauth_refresh_token, oauth_expiry, oauth_access_token_key_id, oauth_refresh_token_key_id, oauth_extra, oauth_refresh_failure_reason, refresh_lease_expires_at, oauth_extra_key_id
 `
 
 type InsertExternalAuthLinkParams struct {
@@ -17337,6 +17342,7 @@ type InsertExternalAuthLinkParams struct {
 	OAuthRefreshTokenKeyID sql.NullString        `db:"oauth_refresh_token_key_id" json:"oauth_refresh_token_key_id"`
 	OAuthExpiry            time.Time             `db:"oauth_expiry" json:"oauth_expiry"`
 	OAuthExtra             pqtype.NullRawMessage `db:"oauth_extra" json:"oauth_extra"`
+	OAuthExtraKeyID        sql.NullString        `db:"oauth_extra_key_id" json:"oauth_extra_key_id"`
 }
 
 func (q *sqlQuerier) InsertExternalAuthLink(ctx context.Context, arg InsertExternalAuthLinkParams) (ExternalAuthLink, error) {
@@ -17351,6 +17357,7 @@ func (q *sqlQuerier) InsertExternalAuthLink(ctx context.Context, arg InsertExter
 		arg.OAuthRefreshTokenKeyID,
 		arg.OAuthExpiry,
 		arg.OAuthExtra,
+		arg.OAuthExtraKeyID,
 	)
 	var i ExternalAuthLink
 	err := row.Scan(
@@ -17366,6 +17373,7 @@ func (q *sqlQuerier) InsertExternalAuthLink(ctx context.Context, arg InsertExter
 		&i.OAuthExtra,
 		&i.OauthRefreshFailureReason,
 		&i.RefreshLeaseExpiresAt,
+		&i.OAuthExtraKeyID,
 	)
 	return i, err
 }
@@ -17402,12 +17410,13 @@ UPDATE external_auth_links SET
 	oauth_refresh_token_key_id = $8,
 	oauth_expiry = $9,
 	oauth_extra = $10,
-	oauth_refresh_failure_reason = $11
+	oauth_extra_key_id = $11,
+	oauth_refresh_failure_reason = $12
 WHERE
 	provider_id = $1
 	AND user_id = $2
 	AND (refresh_lease_expires_at = $3 OR $3 IS NULL)
-RETURNING provider_id, user_id, created_at, updated_at, oauth_access_token, oauth_refresh_token, oauth_expiry, oauth_access_token_key_id, oauth_refresh_token_key_id, oauth_extra, oauth_refresh_failure_reason, refresh_lease_expires_at
+RETURNING provider_id, user_id, created_at, updated_at, oauth_access_token, oauth_refresh_token, oauth_expiry, oauth_access_token_key_id, oauth_refresh_token_key_id, oauth_extra, oauth_refresh_failure_reason, refresh_lease_expires_at, oauth_extra_key_id
 `
 
 type UpdateExternalAuthLinkParams struct {
@@ -17421,6 +17430,7 @@ type UpdateExternalAuthLinkParams struct {
 	OAuthRefreshTokenKeyID    sql.NullString        `db:"oauth_refresh_token_key_id" json:"oauth_refresh_token_key_id"`
 	OAuthExpiry               time.Time             `db:"oauth_expiry" json:"oauth_expiry"`
 	OAuthExtra                pqtype.NullRawMessage `db:"oauth_extra" json:"oauth_extra"`
+	OAuthExtraKeyID           sql.NullString        `db:"oauth_extra_key_id" json:"oauth_extra_key_id"`
 	OauthRefreshFailureReason string                `db:"oauth_refresh_failure_reason" json:"oauth_refresh_failure_reason"`
 }
 
@@ -17437,6 +17447,7 @@ func (q *sqlQuerier) UpdateExternalAuthLink(ctx context.Context, arg UpdateExter
 		arg.OAuthRefreshTokenKeyID,
 		arg.OAuthExpiry,
 		arg.OAuthExtra,
+		arg.OAuthExtraKeyID,
 		arg.OauthRefreshFailureReason,
 	)
 	var i ExternalAuthLink
@@ -17453,6 +17464,7 @@ func (q *sqlQuerier) UpdateExternalAuthLink(ctx context.Context, arg UpdateExter
 		&i.OAuthExtra,
 		&i.OauthRefreshFailureReason,
 		&i.RefreshLeaseExpiresAt,
+		&i.OAuthExtraKeyID,
 	)
 	return i, err
 }
@@ -31282,7 +31294,7 @@ func (q *sqlQuerier) GetTemplateAverageBuildTime(ctx context.Context, templateID
 
 const getTemplateByID = `-- name: GetTemplateByID :one
 SELECT
-	id, created_at, updated_at, organization_id, deleted, name, provisioner, active_version_id, description, default_ttl, created_by, icon, user_acl, group_acl, display_name, allow_user_cancel_workspace_jobs, allow_user_autostart, allow_user_autostop, failure_ttl, time_til_dormant, time_til_dormant_autodelete, autostop_requirement_days_of_week, autostop_requirement_weeks, autostart_block_days_of_week, require_active_version, deprecated, activity_bump, max_port_sharing_level, use_classic_parameter_flow, cors_behavior, disable_module_cache, time_til_autostop_notify, agents_allowed, allow_workspace_renames, created_by_avatar_url, created_by_username, created_by_name, organization_name, organization_display_name, organization_icon
+	id, created_at, updated_at, organization_id, deleted, name, provisioner, active_version_id, description, default_ttl, created_by, icon, user_acl, group_acl, display_name, allow_user_cancel_workspace_jobs, allow_user_autostart, allow_user_autostop, failure_ttl, time_til_dormant, time_til_dormant_autodelete, autostop_requirement_days_of_week, autostop_requirement_weeks, autostart_block_days_of_week, require_active_version, deprecated, activity_bump, max_port_sharing_level, use_classic_parameter_flow, cors_behavior, disable_module_cache, time_til_autostop_notify, agents_allowed, allow_workspace_renames, browser_only, created_by_avatar_url, created_by_username, created_by_name, organization_name, organization_display_name, organization_icon
 FROM
 	template_with_names
 WHERE
@@ -31329,6 +31341,7 @@ func (q *sqlQuerier) GetTemplateByID(ctx context.Context, id uuid.UUID) (Templat
 		&i.TimeTilAutostopNotify,
 		&i.AgentsAllowed,
 		&i.AllowWorkspaceRenames,
+		&i.BrowserOnly,
 		&i.CreatedByAvatarURL,
 		&i.CreatedByUsername,
 		&i.CreatedByName,
@@ -31341,7 +31354,7 @@ func (q *sqlQuerier) GetTemplateByID(ctx context.Context, id uuid.UUID) (Templat
 
 const getTemplateByOrganizationAndName = `-- name: GetTemplateByOrganizationAndName :one
 SELECT
-	id, created_at, updated_at, organization_id, deleted, name, provisioner, active_version_id, description, default_ttl, created_by, icon, user_acl, group_acl, display_name, allow_user_cancel_workspace_jobs, allow_user_autostart, allow_user_autostop, failure_ttl, time_til_dormant, time_til_dormant_autodelete, autostop_requirement_days_of_week, autostop_requirement_weeks, autostart_block_days_of_week, require_active_version, deprecated, activity_bump, max_port_sharing_level, use_classic_parameter_flow, cors_behavior, disable_module_cache, time_til_autostop_notify, agents_allowed, allow_workspace_renames, created_by_avatar_url, created_by_username, created_by_name, organization_name, organization_display_name, organization_icon
+	id, created_at, updated_at, organization_id, deleted, name, provisioner, active_version_id, description, default_ttl, created_by, icon, user_acl, group_acl, display_name, allow_user_cancel_workspace_jobs, allow_user_autostart, allow_user_autostop, failure_ttl, time_til_dormant, time_til_dormant_autodelete, autostop_requirement_days_of_week, autostop_requirement_weeks, autostart_block_days_of_week, require_active_version, deprecated, activity_bump, max_port_sharing_level, use_classic_parameter_flow, cors_behavior, disable_module_cache, time_til_autostop_notify, agents_allowed, allow_workspace_renames, browser_only, created_by_avatar_url, created_by_username, created_by_name, organization_name, organization_display_name, organization_icon
 FROM
 	template_with_names AS templates
 WHERE
@@ -31396,6 +31409,7 @@ func (q *sqlQuerier) GetTemplateByOrganizationAndName(ctx context.Context, arg G
 		&i.TimeTilAutostopNotify,
 		&i.AgentsAllowed,
 		&i.AllowWorkspaceRenames,
+		&i.BrowserOnly,
 		&i.CreatedByAvatarURL,
 		&i.CreatedByUsername,
 		&i.CreatedByName,
@@ -31407,7 +31421,7 @@ func (q *sqlQuerier) GetTemplateByOrganizationAndName(ctx context.Context, arg G
 }
 
 const getTemplates = `-- name: GetTemplates :many
-SELECT id, created_at, updated_at, organization_id, deleted, name, provisioner, active_version_id, description, default_ttl, created_by, icon, user_acl, group_acl, display_name, allow_user_cancel_workspace_jobs, allow_user_autostart, allow_user_autostop, failure_ttl, time_til_dormant, time_til_dormant_autodelete, autostop_requirement_days_of_week, autostop_requirement_weeks, autostart_block_days_of_week, require_active_version, deprecated, activity_bump, max_port_sharing_level, use_classic_parameter_flow, cors_behavior, disable_module_cache, time_til_autostop_notify, agents_allowed, allow_workspace_renames, created_by_avatar_url, created_by_username, created_by_name, organization_name, organization_display_name, organization_icon FROM template_with_names AS templates
+SELECT id, created_at, updated_at, organization_id, deleted, name, provisioner, active_version_id, description, default_ttl, created_by, icon, user_acl, group_acl, display_name, allow_user_cancel_workspace_jobs, allow_user_autostart, allow_user_autostop, failure_ttl, time_til_dormant, time_til_dormant_autodelete, autostop_requirement_days_of_week, autostop_requirement_weeks, autostart_block_days_of_week, require_active_version, deprecated, activity_bump, max_port_sharing_level, use_classic_parameter_flow, cors_behavior, disable_module_cache, time_til_autostop_notify, agents_allowed, allow_workspace_renames, browser_only, created_by_avatar_url, created_by_username, created_by_name, organization_name, organization_display_name, organization_icon FROM template_with_names AS templates
 ORDER BY (name, id) ASC
 `
 
@@ -31455,6 +31469,7 @@ func (q *sqlQuerier) GetTemplates(ctx context.Context) ([]Template, error) {
 			&i.TimeTilAutostopNotify,
 			&i.AgentsAllowed,
 			&i.AllowWorkspaceRenames,
+			&i.BrowserOnly,
 			&i.CreatedByAvatarURL,
 			&i.CreatedByUsername,
 			&i.CreatedByName,
@@ -31477,7 +31492,7 @@ func (q *sqlQuerier) GetTemplates(ctx context.Context) ([]Template, error) {
 
 const getTemplatesWithFilter = `-- name: GetTemplatesWithFilter :many
 SELECT
-	t.id, t.created_at, t.updated_at, t.organization_id, t.deleted, t.name, t.provisioner, t.active_version_id, t.description, t.default_ttl, t.created_by, t.icon, t.user_acl, t.group_acl, t.display_name, t.allow_user_cancel_workspace_jobs, t.allow_user_autostart, t.allow_user_autostop, t.failure_ttl, t.time_til_dormant, t.time_til_dormant_autodelete, t.autostop_requirement_days_of_week, t.autostop_requirement_weeks, t.autostart_block_days_of_week, t.require_active_version, t.deprecated, t.activity_bump, t.max_port_sharing_level, t.use_classic_parameter_flow, t.cors_behavior, t.disable_module_cache, t.time_til_autostop_notify, t.agents_allowed, t.allow_workspace_renames, t.created_by_avatar_url, t.created_by_username, t.created_by_name, t.organization_name, t.organization_display_name, t.organization_icon
+	t.id, t.created_at, t.updated_at, t.organization_id, t.deleted, t.name, t.provisioner, t.active_version_id, t.description, t.default_ttl, t.created_by, t.icon, t.user_acl, t.group_acl, t.display_name, t.allow_user_cancel_workspace_jobs, t.allow_user_autostart, t.allow_user_autostop, t.failure_ttl, t.time_til_dormant, t.time_til_dormant_autodelete, t.autostop_requirement_days_of_week, t.autostop_requirement_weeks, t.autostart_block_days_of_week, t.require_active_version, t.deprecated, t.activity_bump, t.max_port_sharing_level, t.use_classic_parameter_flow, t.cors_behavior, t.disable_module_cache, t.time_til_autostop_notify, t.agents_allowed, t.allow_workspace_renames, t.browser_only, t.created_by_avatar_url, t.created_by_username, t.created_by_name, t.organization_name, t.organization_display_name, t.organization_icon
 FROM
 	template_with_names AS t
 LEFT JOIN
@@ -31648,6 +31663,7 @@ func (q *sqlQuerier) GetTemplatesWithFilter(ctx context.Context, arg GetTemplate
 			&i.TimeTilAutostopNotify,
 			&i.AgentsAllowed,
 			&i.AllowWorkspaceRenames,
+			&i.BrowserOnly,
 			&i.CreatedByAvatarURL,
 			&i.CreatedByUsername,
 			&i.CreatedByName,
@@ -31689,10 +31705,11 @@ INSERT INTO
 		use_classic_parameter_flow,
 		cors_behavior,
 		agents_allowed,
-		allow_workspace_renames
+		allow_workspace_renames,
+		browser_only
 	)
 VALUES
-	($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+	($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 `
 
 type InsertTemplateParams struct {
@@ -31715,6 +31732,7 @@ type InsertTemplateParams struct {
 	CorsBehavior                 CorsBehavior    `db:"cors_behavior" json:"cors_behavior"`
 	AgentsAllowed                bool            `db:"agents_allowed" json:"agents_allowed"`
 	AllowWorkspaceRenames        bool            `db:"allow_workspace_renames" json:"allow_workspace_renames"`
+	BrowserOnly                  bool            `db:"browser_only" json:"browser_only"`
 }
 
 func (q *sqlQuerier) InsertTemplate(ctx context.Context, arg InsertTemplateParams) error {
@@ -31738,6 +31756,7 @@ func (q *sqlQuerier) InsertTemplate(ctx context.Context, arg InsertTemplateParam
 		arg.CorsBehavior,
 		arg.AgentsAllowed,
 		arg.AllowWorkspaceRenames,
+		arg.BrowserOnly,
 	)
 	return err
 }
@@ -31842,7 +31861,8 @@ SET
 	cors_behavior = $11,
 	disable_module_cache = $12,
 	agents_allowed = $13,
-	allow_workspace_renames = $14
+	allow_workspace_renames = $14,
+	browser_only = $15
 WHERE
 	id = $1
 `
@@ -31862,6 +31882,7 @@ type UpdateTemplateMetaByIDParams struct {
 	DisableModuleCache           bool            `db:"disable_module_cache" json:"disable_module_cache"`
 	AgentsAllowed                bool            `db:"agents_allowed" json:"agents_allowed"`
 	AllowWorkspaceRenames        bool            `db:"allow_workspace_renames" json:"allow_workspace_renames"`
+	BrowserOnly                  bool            `db:"browser_only" json:"browser_only"`
 }
 
 func (q *sqlQuerier) UpdateTemplateMetaByID(ctx context.Context, arg UpdateTemplateMetaByIDParams) error {
@@ -31880,6 +31901,7 @@ func (q *sqlQuerier) UpdateTemplateMetaByID(ctx context.Context, arg UpdateTempl
 		arg.DisableModuleCache,
 		arg.AgentsAllowed,
 		arg.AllowWorkspaceRenames,
+		arg.BrowserOnly,
 	)
 	return err
 }
@@ -43484,7 +43506,7 @@ LEFT JOIN LATERAL (
 ) latest_build ON TRUE
 LEFT JOIN LATERAL (
 	SELECT
-		id, created_at, updated_at, organization_id, deleted, name, provisioner, active_version_id, description, default_ttl, created_by, icon, user_acl, group_acl, display_name, allow_user_cancel_workspace_jobs, allow_user_autostart, allow_user_autostop, failure_ttl, time_til_dormant, time_til_dormant_autodelete, autostop_requirement_days_of_week, autostop_requirement_weeks, autostart_block_days_of_week, require_active_version, deprecated, activity_bump, max_port_sharing_level, use_classic_parameter_flow, cors_behavior, disable_module_cache, time_til_autostop_notify, agents_allowed, allow_workspace_renames
+		id, created_at, updated_at, organization_id, deleted, name, provisioner, active_version_id, description, default_ttl, created_by, icon, user_acl, group_acl, display_name, allow_user_cancel_workspace_jobs, allow_user_autostart, allow_user_autostop, failure_ttl, time_til_dormant, time_til_dormant_autodelete, autostop_requirement_days_of_week, autostop_requirement_weeks, autostart_block_days_of_week, require_active_version, deprecated, activity_bump, max_port_sharing_level, use_classic_parameter_flow, cors_behavior, disable_module_cache, time_til_autostop_notify, agents_allowed, allow_workspace_renames, browser_only
 	FROM
 		templates
 	WHERE
@@ -44074,6 +44096,11 @@ WHERE
 	-- Filter by owner_id
 	workspaces.owner_id = $1 :: uuid
 	AND workspaces.deleted = false
+	-- Browser-only workspaces refuse tailnet tunnels, so clients should not be told to dial them.
+	AND NOT EXISTS (
+		SELECT 1 FROM templates
+		WHERE templates.id = workspaces.template_id AND templates.browser_only
+	)
 	-- Authorize Filter clause will be injected below in GetAuthorizedWorkspacesAndAgentsByOwnerID
 	-- @authorize_filter
 GROUP BY workspaces.id, workspaces.name, latest_build.job_status, latest_build.job_id, latest_build.transition

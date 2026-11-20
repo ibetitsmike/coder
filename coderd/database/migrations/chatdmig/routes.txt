@@ -9,3 +9,5 @@ split mcp_server_oauth2_client_registration
 000642 context_resource_plugin_name core
 000643 skill_display_name chatd
 000644 chat_project_templates chatd
+000645 external_auth_links_oauth_extra_key_id core
+000646 template_browser_only core
