@@ -332,9 +332,9 @@ it("shows a server validation error in the editor", async () => {
 it("keeps the draft and refetches when the server rejects the save with 409", async () => {
 	const user = userEvent.setup();
 	const info = vi.spyOn(toast, "info");
-	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflows").mockResolvedValue([
-		MockForkSavedWorkflowMetadata,
-	]);
+	const list = vi
+		.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflows")
+		.mockResolvedValue([MockForkSavedWorkflowMetadata]);
 	vi.spyOn(
 		forkSavedWorkflowsApi,
 		"getOrganizationSavedWorkflows",
@@ -357,6 +357,9 @@ it("keeps the draft and refetches when the server rejects the save with 409", as
 	await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
 	const dialog = await screen.findByRole("dialog");
 	const description = await within(dialog).findByLabelText("Description");
+	// The form only seeds its values once the editor's own fetches have
+	// settled, so every list call after this point is the conflict refetch.
+	const listCallsBeforeSave = list.mock.calls.length;
 	await user.type(description, " even harder");
 	await user.click(
 		within(dialog).getByRole("button", { name: "Save workflow" }),
@@ -368,6 +371,11 @@ it("keeps the draft and refetches when the server rejects the save with 409", as
 		MockForkSavedWorkflowMetadata.name,
 		expect.anything(),
 		{ expect_id: MockForkSavedWorkflow.id },
+	);
+	// The conflict refetches the list so the row shows what the name
+	// holds now.
+	await waitFor(() =>
+		expect(list.mock.calls.length).toBeGreaterThan(listCallsBeforeSave),
 	);
 	await waitFor(() => expect(info).toHaveBeenCalled());
 	// The draft stays, the editor stays open, and the list refetches what

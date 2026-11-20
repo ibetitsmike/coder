@@ -183,7 +183,9 @@ type UpdateSavedWorkflowArgs = {
 	req: UpdateSavedWorkflowRequest;
 	/**
 	 * The revision the caller opened, which the request keeps unless the
-	 * stored workflow still has its id. Undefined writes unconditionally.
+	 * stored workflow still has its id. Only an absent id writes
+	 * unconditionally; anything else, including an empty string, must reach
+	 * the server as an explicit expect_id.
 	 */
 	id?: string;
 };
@@ -199,7 +201,7 @@ export const updateSavedWorkflow = (queryClient: QueryClient) =>
 			scopeEndpoints(scope).update(
 				name,
 				req,
-				id ? { expect_id: id } : undefined,
+				id === undefined ? undefined : { expect_id: id },
 			),
 		// Writing the result keeps an accepted change visible even if the
 		// reconciling refetch below fails. Rows match by name, as the request

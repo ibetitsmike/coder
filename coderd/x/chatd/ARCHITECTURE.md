@@ -617,10 +617,12 @@ workflow still has that id, and answers 409 otherwise, so a stale writer
 cannot overwrite a replacement under the same name. An explicit but invalid
 expect_id, including an empty one, is a 400, and so is a query string that
 does not parse, so a client can never silently drop its concurrency guard.
-The conditional check lives in the authorized write query, so a caller whose
-read scope cannot see the row still gets its write: a mismatch answers 409
-when the caller may write the row and 404 when it may not, never a conflict
-that reveals a hidden replacement.
+The conditional check lives in the authorized write query for the member PATCH
+and organization DELETE routes, so there a caller whose read scope cannot see
+the row still gets its write: a mismatch answers 409 when the caller may write
+the row and 404 when it may not, never a conflict that reveals a hidden
+replacement. The organization PATCH route reads the row first, so a caller who
+cannot read it gets a 404 before the conditional write runs.
 
 The `fork-html-attachments` route `GET /api/v2/chats/fork/files/{file}/html` is registered by `registerForkChatRoutes` outside that mount, so its sandbox headers run before authentication, the files rate limit, and the experiment check, and cover every response. It serves a stored `.html` or `.htm` chat file as `text/html` with `Content-Security-Policy: sandbox allow-scripts; default-src 'none'`, `nosniff`, and `no-referrer`.
 
