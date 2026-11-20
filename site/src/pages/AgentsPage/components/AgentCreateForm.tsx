@@ -64,20 +64,22 @@ import { getModelSelectorHelp } from "./ModelSelectorHelp";
 import { useForkAgentTypePicker } from "./useForkAgentTypePicker";
 
 /**
- * The chat modes chatd treats as explore for its tools, so the mention menu
- * hides workflows the model would have no tool to run. A custom definition
- * with an explore base type starts in explore mode (rootAgentFromDefinition),
- * and every definition reports its base type through agentTypes.
+ * Whether the picked agent type starts the chat in explore mode: the
+ * built-in type by its name, or a custom definition by the base type the
+ * catalog reports. Unknown to the list means true, so a chat the menu
+ * cannot yet resolve stays gated; the list only ever confirms types.
  */
-export const forkExploreAgentTypes = (
+export const forkIsExploreAgentType = (
 	types: readonly TypesGen.ForkAgentType[] | undefined,
 	picked: string | undefined,
 ) =>
 	picked !== undefined &&
-	(types?.some(
-		(type) => type.name === picked && type.base_type === "explore",
-	) ??
-		false);
+	(types === undefined ||
+		types.some(
+			(type) =>
+				type.name === picked &&
+				(type.base_type === "explore" || type.name === "explore"),
+		));
 
 /** @internal Exported for testing. */
 export const emptyInputStorageKey = "agents.empty-input";
@@ -791,10 +793,11 @@ const AgentCreateFormContent: React.FC<AgentCreateFormProps> = ({
 		workspaceId: effectiveWorkspaceId ?? undefined,
 		modelConfigId: submittedModel,
 	});
-	// The picker reports undefined while its list loads or after an error,
-	// so an unknown type falls back to the general agent, which keeps
-	// run_workflow.
-	const isExploreAgentType = forkExploreAgentTypes(
+	// The picker reports undefined types while its list loads or after an
+	// error, which keeps the gate on; the submit path resolves the same way
+	// and falls back to the general agent only when the picker drops the
+	// type itself.
+	const isExploreAgentType = forkIsExploreAgentType(
 		forkAgentType.agentTypes,
 		forkAgentType.agentType,
 	);
