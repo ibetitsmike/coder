@@ -17,6 +17,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/httpapi"
+	"github.com/coder/coder/v2/coderd/httpapi/httperror"
 	"github.com/coder/coder/v2/coderd/httpmw"
 	"github.com/coder/coder/v2/coderd/rbac/policy"
 	"github.com/coder/coder/v2/codersdk"
@@ -158,16 +159,32 @@ func (api *API) patchForkOrganizationSavedWorkflow(rw http.ResponseWriter, r *ht
 		Name:           current.Name,
 		ExpectID:       expectID,
 	})
-	if !okAfterConditionalWrite(ctx, rw, err, expectID, true, func(ctx context.Context) (uuid.UUID, error) {
-		// The helper picks the context: the caller's for a denial probe,
-		// the system's for the conflict check, which the authorized update
-		// above covers.
-		//nolint:gocritic // The read only reports an id the write authorized.
+	probe := func(ctx context.Context) (uuid.UUID, error) {
 		row, err := fdb.GetOrganizationSavedWorkflowByName(ctx, forkdb.GetOrganizationSavedWorkflowByNameParams{
 			OrganizationID: current.OrganizationID,
 			Name:           current.Name,
 		})
 		return row.ID, err
+	}
+	if !okAfterConditionalWrite(ctx, rw, err, expectID, true, probe, func(ctx context.Context) (uuid.UUID, error) {
+		// The conditional write authorized this caller for the row as it
+		// was, so the conflict probe fetches the current row and authorizes
+		// it again for the same action. The fetch is system restricted,
+		// because a write-only API key scope cannot read, and the
+		// reauthorization keeps a replacement under the same name that
+		// hides from this caller at 404, never a conflict that proves it
+		// exists.
+		row, err := fdb.GetOrganizationSavedWorkflowByName(dbauthz.AsSystemRestricted(ctx), forkdb.GetOrganizationSavedWorkflowByNameParams{
+			OrganizationID: current.OrganizationID,
+			Name:           current.Name,
+		})
+		if err != nil {
+			return uuid.UUID{}, err
+		}
+		if !api.Authorize(r, policy.ActionUpdate, row) {
+			return uuid.UUID{}, httperror.ErrResourceNotFound
+		}
+		return row.ID, nil
 	}) {
 		return
 	}
@@ -210,16 +227,32 @@ func (api *API) deleteForkOrganizationSavedWorkflow(rw http.ResponseWriter, r *h
 		Name:           name,
 		ExpectID:       expectID,
 	})
-	if !okAfterConditionalWrite(ctx, rw, err, expectID, true, func(ctx context.Context) (uuid.UUID, error) {
-		// The helper picks the context: the caller's for a denial probe,
-		// the system's for the conflict check, so a delete-only caller
-		// still learns of a mismatch.
-		//nolint:gocritic // The read only reports an id the write authorized.
+	probe := func(ctx context.Context) (uuid.UUID, error) {
 		row, err := fdb.GetOrganizationSavedWorkflowByName(ctx, forkdb.GetOrganizationSavedWorkflowByNameParams{
 			OrganizationID: organizationID,
 			Name:           name,
 		})
 		return row.ID, err
+	}
+	if !okAfterConditionalWrite(ctx, rw, err, expectID, true, probe, func(ctx context.Context) (uuid.UUID, error) {
+		// The conditional write authorized this caller for the row as it
+		// was, so the conflict probe fetches the current row and authorizes
+		// it again for the same action. The fetch is system restricted,
+		// because a write-only API key scope cannot read, and the
+		// reauthorization keeps a replacement under the same name that
+		// hides from this caller at 404, never a conflict that proves it
+		// exists.
+		row, err := fdb.GetOrganizationSavedWorkflowByName(dbauthz.AsSystemRestricted(ctx), forkdb.GetOrganizationSavedWorkflowByNameParams{
+			OrganizationID: organizationID,
+			Name:           name,
+		})
+		if err != nil {
+			return uuid.UUID{}, err
+		}
+		if !api.Authorize(r, policy.ActionDelete, row) {
+			return uuid.UUID{}, httperror.ErrResourceNotFound
+		}
+		return row.ID, nil
 	}) {
 		return
 	}

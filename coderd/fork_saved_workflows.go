@@ -22,7 +22,6 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/coder/coder/v2/coderd/database"
-	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/httpapi"
 	"github.com/coder/coder/v2/coderd/httpmw"
@@ -191,14 +190,15 @@ func (api *API) patchForkUserSavedWorkflow(rw http.ResponseWriter, r *http.Reque
 	update.UserID = member.UserID
 	update.ExpectID = expectID
 	row, err := fdb.UpdateUserSavedWorkflowByName(ctx, update)
-	if !okAfterConditionalWrite(ctx, rw, err, expectID, false, func(ctx context.Context) (uuid.UUID, error) {
+	probe := func(ctx context.Context) (uuid.UUID, error) {
 		row, err := fdb.GetUserSavedWorkflowByName(ctx, forkdb.GetUserSavedWorkflowByNameParams{
 			OrganizationID: update.OrganizationID,
 			UserID:         update.UserID,
 			Name:           update.Name,
 		})
 		return row.ID, err
-	}) {
+	}
+	if !okAfterConditionalWrite(ctx, rw, err, expectID, false, probe, probe) {
 		return
 	}
 	httpapi.Write(ctx, rw, http.StatusOK, convertForkSavedWorkflow(row))
@@ -238,14 +238,15 @@ func (api *API) deleteForkUserSavedWorkflow(rw http.ResponseWriter, r *http.Requ
 		Name:           name,
 		ExpectID:       expectID,
 	})
-	if !okAfterConditionalWrite(ctx, rw, err, expectID, false, func(ctx context.Context) (uuid.UUID, error) {
+	probe := func(ctx context.Context) (uuid.UUID, error) {
 		row, err := fdb.GetUserSavedWorkflowByName(ctx, forkdb.GetUserSavedWorkflowByNameParams{
 			OrganizationID: member.OrganizationID,
 			UserID:         member.UserID,
 			Name:           name,
 		})
 		return row.ID, err
-	}) {
+	}
+	if !okAfterConditionalWrite(ctx, rw, err, expectID, false, probe, probe) {
 		return
 	}
 	rw.WriteHeader(http.StatusNoContent)
@@ -274,21 +275,25 @@ func readForkSavedWorkflowExpectID(rw http.ResponseWriter, r *http.Request) (uui
 // okAfterConditionalWrite turns the result of a conditional write into a
 // response. Without an expect_id it reports the write error as usual. With
 // one, sql.ErrNoRows can mean either a missing workflow (404) or a stored id
-// that differs from the expected one (409), and one read as the system tells
-// the two apart, so a delete-only caller still learns of a conflict. The org
-// wrapper marks a no-rows that its pre-authorization fetch returned: the
-// write never ran there, so the check skips the probe and reports the write
-// error, which says nothing about a workflow the caller cannot see.
+// that differs from the expected one (409), and currentID tells the two
+// apart with the caller's authorization, so a caller who cannot read a
+// hidden workflow gets 404 and never learns that it exists.
 //
-// A denial probes with the caller's authorization instead, so a caller who
-// cannot read a hidden workflow keeps getting 404, never a conflict or its
-// stored id. Denials probe only when probeDenial is set or the write was
-// conditional. The organization tier always probes, because its delete of a
-// hidden workflow answered 404 before expect_id existed; the user tier keeps
-// the plain write response unless the caller asked for the check.
+// The conflict check reads the row again with conflictID, which must
+// reauthorize the row it finds for the requested write action: the write
+// authorized the row as it was, and a replacement under the same name may
+// hide from this caller, who then keeps getting 404 instead of a conflict
+// that proves the replacement exists.
+//
+// A denial probes with currentID too, so a caller who cannot read a hidden
+// workflow keeps getting 404, never a conflict or its stored id. Denials
+// probe only when probeDenial is set or the write was conditional. The
+// organization tier always probes, because its delete of a hidden workflow
+// answered 404 before expect_id existed; the user tier keeps the plain
+// write response unless the caller asked for the check.
 //
 //nolint:revive // probeDenial encodes a real tier difference, not a mode switch.
-func okAfterConditionalWrite(ctx context.Context, rw http.ResponseWriter, err error, expectID uuid.NullUUID, probeDenial bool, currentID func(ctx context.Context) (uuid.UUID, error)) bool {
+func okAfterConditionalWrite(ctx context.Context, rw http.ResponseWriter, err error, expectID uuid.NullUUID, probeDenial bool, currentID, conflictID func(ctx context.Context) (uuid.UUID, error)) bool {
 	if err == nil {
 		return true
 	}
@@ -310,12 +315,8 @@ func okAfterConditionalWrite(ctx context.Context, rw http.ResponseWriter, err er
 		httpapi.InternalServerError(rw, readErr)
 		return false
 	}
-	if expectID.Valid && xerrors.Is(err, sql.ErrNoRows) && !dbauthz.IsForkFetchNoRows(err) {
-		// The write already authorized this caller, so the conflict check
-		// reads as the system and a delete-only caller still learns of a
-		// mismatch instead of a missing workflow.
-		//nolint:gocritic // Authorized by the conditional write above.
-		id, readErr := currentID(dbauthz.AsSystemRestricted(ctx))
+	if expectID.Valid && xerrors.Is(err, sql.ErrNoRows) {
+		id, readErr := conflictID(ctx)
 		switch {
 		case readErr == nil && id != expectID.UUID:
 			httpapi.Write(ctx, rw, http.StatusConflict, codersdk.Response{
@@ -324,8 +325,8 @@ func okAfterConditionalWrite(ctx context.Context, rw http.ResponseWriter, err er
 			})
 			return false
 		case httpapi.Is404Error(readErr):
-			// The row is gone after all, which the caller may not have been
-			// able to see: the write error below answers 404.
+			// The caller may not touch the row, whether it is gone or a
+			// hidden replacement: the write error below answers 404.
 		default:
 			// The probe itself failed, which says nothing about the workflow.
 			httpapi.InternalServerError(rw, readErr)

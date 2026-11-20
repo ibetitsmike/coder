@@ -9,11 +9,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"golang.org/x/xerrors"
-
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
-	"github.com/coder/coder/v2/coderd/httpapi"
 	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/rbac/policy"
 )
@@ -36,25 +33,6 @@ type forkQuerier struct {
 }
 
 var _ forkdb.Store = (*forkQuerier)(nil)
-
-// forkFetchNoRowsError marks a sql.ErrNoRows that fetchAndQuery returned
-// from its pre-authorization fetch. The write never ran, so a caller whose
-// conditional write answers with such an error must not learn anything
-// beyond a missing resource: reading the row as the system to tell a
-// conflict from a miss would confirm a hidden workflow's existence.
-type forkFetchNoRowsError struct{ err error }
-
-func (e forkFetchNoRowsError) Error() string { return e.err.Error() }
-func (e forkFetchNoRowsError) Unwrap() error { return e.err }
-
-// IsForkFetchNoRows reports whether err is a marked fetch-phase miss from the
-// wrapper of an organization saved workflow write. The conditional write of
-// the handler then skips its system conflict probe and answers as the write
-// error, which says nothing about a workflow the caller cannot see.
-func IsForkFetchNoRows(err error) bool {
-	var marked forkFetchNoRowsError
-	return xerrors.As(err, &marked)
-}
 
 func (f *forkQuerier) AcquirePluginLeases(ctx context.Context, arg forkdb.AcquirePluginLeasesParams) ([]forkdb.Plugin, error) {
 	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceSystem); err != nil {
@@ -1553,16 +1531,10 @@ func (f *forkQuerier) ListOrganizationSavedWorkflowMetadata(ctx context.Context,
 
 func (f *forkQuerier) UpdateOrganizationSavedWorkflowByName(ctx context.Context, arg forkdb.UpdateOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
 	fetch := func(ctx context.Context, arg forkdb.UpdateOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
-		row, err := f.db.GetOrganizationSavedWorkflowByName(ctx, forkdb.GetOrganizationSavedWorkflowByNameParams{
+		return f.db.GetOrganizationSavedWorkflowByName(ctx, forkdb.GetOrganizationSavedWorkflowByNameParams{
 			OrganizationID: arg.OrganizationID,
 			Name:           arg.Name,
 		})
-		if httpapi.Is404Error(err) {
-			// Mark a fetch-phase miss, which the conditional write of the
-			// handler must not confuse with a post-authorization mismatch.
-			return row, forkFetchNoRowsError{err: err}
-		}
-		return row, err
 	}
 	return updateWithReturn(f.q.log, f.q.auth, fetch, f.db.UpdateOrganizationSavedWorkflowByName)(ctx, arg)
 }
@@ -1579,16 +1551,10 @@ func (f *forkQuerier) UpdateOrganizationSavedWorkflowACLByName(ctx context.Conte
 
 func (f *forkQuerier) DeleteOrganizationSavedWorkflowByName(ctx context.Context, arg forkdb.DeleteOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
 	fetch := func(ctx context.Context, arg forkdb.DeleteOrganizationSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
-		row, err := f.db.GetOrganizationSavedWorkflowByName(ctx, forkdb.GetOrganizationSavedWorkflowByNameParams{
+		return f.db.GetOrganizationSavedWorkflowByName(ctx, forkdb.GetOrganizationSavedWorkflowByNameParams{
 			OrganizationID: arg.OrganizationID,
 			Name:           arg.Name,
 		})
-		if httpapi.Is404Error(err) {
-			// Mark a fetch-phase miss, which the conditional write of the
-			// handler must not confuse with a post-authorization mismatch.
-			return row, forkFetchNoRowsError{err: err}
-		}
-		return row, err
 	}
 	return fetchAndQuery(f.q.log, f.q.auth, policy.ActionDelete, fetch, f.db.DeleteOrganizationSavedWorkflowByName)(ctx, arg)
 }
