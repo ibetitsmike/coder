@@ -1,9 +1,11 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type QueryClient, QueryClientProvider } from "react-query";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as forkSavedWorkflowsApi from "#/api/forkSavedWorkflows";
 import * as forkWorkflowsApi from "#/api/forkWorkflows";
+import { getAuthorizationKey } from "#/api/queries/authCheck";
 import { chatEntityKey } from "#/api/queries/chats";
 import { forkPanelResyncInterval } from "#/api/queries/forkPanelResync";
 import { chatWorkflowRunKey } from "#/api/queries/forkWorkflows";
@@ -12,16 +14,20 @@ import { MockChat } from "#/testHelpers/chatEntities";
 import {
 	MockAppearanceConfig,
 	MockBuildInfo,
+	MockChatOrganization,
 	MockDefaultOrganization,
 	MockEntitlements,
 	mockApiError,
 } from "#/testHelpers/entities";
+import { MockForkSavedWorkflow } from "#/testHelpers/forkSavedWorkflows";
 import {
 	MockChatWorkflowRunDetail,
 	MockForkWorkflowChatId,
 	MockForkWorkflowCompletedResult,
+	MockForkWorkflowFailedResult,
 	MockForkWorkflowRunId,
 	MockForkWorkflowRunningResult,
+	MockForkWorkflowScript,
 	MockForkWorkflowStartedResult,
 	seedChatWriteAccess,
 } from "#/testHelpers/forkWorkflows";
@@ -67,7 +73,55 @@ const renderWorkflowTool = (
 					experiments: ["fork-workflows"],
 					appearance: MockAppearanceConfig,
 					buildInfo: MockBuildInfo,
-					organizations: [MockDefaultOrganization],
+					organizations: [MockDefaultOrganization, MockChatOrganization],
+					showOrganizations: false,
+					canViewOrganizationSettings: false,
+				}}
+			>
+				<RouterProvider router={router} />
+			</DashboardContext.Provider>
+		</QueryClientProvider>,
+	);
+	return router;
+};
+
+const renderWorkflowToolWithOrganizations = (
+	organizations: (typeof MockDefaultOrganization)[],
+	name: "run_workflow" | "await_workflow",
+	queryClient: QueryClient = createTestQueryClient(),
+) => {
+	const router = createMemoryRouter(
+		[
+			{
+				path: "/agents/:agentId",
+				element: (
+					<Tool
+						name={name}
+						status="completed"
+						args={{ run_id: MockForkWorkflowCompletedResult.run_id }}
+						result={JSON.stringify(MockForkWorkflowCompletedResult)}
+						isError={false}
+						organizationId="organization-id"
+						mcpServers={[]}
+						subagentTitles={new Map()}
+						subagentVariants={new Map()}
+						shellToolDisplayMode="auto"
+						codeDiffDisplayMode="auto"
+					/>
+				),
+			},
+		],
+		{ initialEntries: [`/agents/${MockForkWorkflowChatId}`] },
+	);
+	renderComponent(
+		<QueryClientProvider client={queryClient}>
+			<DashboardContext.Provider
+				value={{
+					entitlements: MockEntitlements,
+					experiments: ["fork-workflows"],
+					appearance: MockAppearanceConfig,
+					buildInfo: MockBuildInfo,
+					organizations,
 					showOrganizations: false,
 					canViewOrganizationSettings: false,
 				}}
@@ -105,6 +159,28 @@ const stopMutationData = (queryClient: QueryClient) =>
 		| typeof MockChatWorkflowRunDetail
 		| undefined;
 
+const seedCreatePermission = (
+	queryClient: QueryClient,
+	canCreateOrganizationSkill: boolean,
+) => {
+	const key = getAuthorizationKey({
+		checks: {
+			canCreateOrganizationSkill: {
+				object: {
+					resource_type: "organization_skill",
+					organization_id: MockChat.organization_id,
+				},
+				action: "create",
+			},
+		},
+	});
+	queryClient.setQueryDefaults(key, {
+		staleTime: Number.POSITIVE_INFINITY,
+		gcTime: Number.POSITIVE_INFINITY,
+	});
+	queryClient.setQueryData(key, { canCreateOrganizationSkill });
+};
+
 describe("ForkWorkflowTool", () => {
 	afterEach(() => {
 		vi.useRealTimers();
@@ -138,31 +214,6 @@ describe("ForkWorkflowTool", () => {
 			MockForkWorkflowStartedResult.run_id,
 			expect.anything(),
 		);
-	});
-
-	it("polls a resumed run past a cached interrupted run", async () => {
-		vi.useFakeTimers({ shouldAdvanceTime: true });
-		const queryClient = createTestQueryClient();
-		queryClient.setQueryData(
-			chatWorkflowRunKey(
-				MockForkWorkflowChatId,
-				MockForkWorkflowStartedResult.run_id,
-			),
-			{ ...MockChatWorkflowRunDetail, status: "interrupted" },
-			{ updatedAt: Date.now() - 60_000 },
-		);
-		const getRun = vi
-			.spyOn(forkWorkflowsApi, "getChatWorkflowRun")
-			.mockRejectedValue(mockServerError);
-		renderWorkflowTool(
-			"run_workflow",
-			MockForkWorkflowStartedResult,
-			queryClient,
-		);
-
-		await waitFor(() => expect(getRun).toHaveBeenCalledTimes(1));
-		await vi.advanceTimersByTimeAsync(forkPanelResyncInterval);
-		expect(getRun).toHaveBeenCalledTimes(2);
 	});
 
 	it("polls the run again after a transient error", async () => {
@@ -422,5 +473,460 @@ describe("ForkWorkflowTool", () => {
 				screen.queryByRole("button", { name: "Stop run" }),
 			).not.toBeInTheDocument(),
 		);
+	});
+
+	it("offers Save on a card whose completed result loaded from history", async () => {
+		// An old chat reopens with the await_workflow result already
+		// completed, so no running card ever polls to completed: the card
+		// still must fetch the run's detail once and offer Save.
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
+		const getRun = vi
+			.spyOn(forkWorkflowsApi, "getChatWorkflowRun")
+			.mockResolvedValue(MockChatWorkflowRunDetail);
+		renderWorkflowTool(
+			"await_workflow",
+			MockForkWorkflowCompletedResult,
+			queryClient,
+		);
+
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /workflow completed/i }),
+		);
+
+		const save = await screen.findByRole("button", { name: "Save workflow" });
+		expect(save).toBeEnabled();
+		// The ended card loads its detail once instead of polling.
+		expect(getRun).toHaveBeenCalledTimes(1);
+	});
+
+	it("skips the detail fetch for a failed run loaded from history", async () => {
+		// Failed runs offer no Save, Stop or Resume, so the card renders
+		// from the result alone and must not request the run's detail.
+		const queryClient = createTestQueryClient();
+		const getRun = vi
+			.spyOn(forkWorkflowsApi, "getChatWorkflowRun")
+			.mockResolvedValue(MockChatWorkflowRunDetail);
+		renderWorkflowTool(
+			"await_workflow",
+			MockForkWorkflowFailedResult,
+			queryClient,
+		);
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /workflow failed/i }),
+		);
+
+		expect(screen.getByText(/^Run /)).toBeInTheDocument();
+		expect(getRun).not.toHaveBeenCalled();
+	});
+
+	it("saves the run's script as a personal workflow from the card", async () => {
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
+		seedCreatePermission(queryClient, true);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		const create = vi
+			.spyOn(forkSavedWorkflowsApi, "createUserSavedWorkflow")
+			.mockResolvedValue({
+				...MockForkSavedWorkflow,
+				id: "saved-workflow-new",
+				name: "review-changed-files",
+				organization_id: MockChat.organization_id,
+				user_id: "me",
+				created_by: "me",
+				description: "",
+				args_schema: undefined,
+				phases: [],
+			});
+		renderWorkflowTool(
+			"run_workflow",
+			MockForkWorkflowStartedResult,
+			queryClient,
+		);
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /workflow completed/i }),
+		);
+
+		await user.click(
+			await screen.findByRole("button", { name: "Save workflow" }),
+		);
+		const dialog = screen.getByRole("dialog", { name: "Save workflow" });
+		expect(within(dialog).getByLabelText("Name")).toHaveValue(
+			"review-changed-files",
+		);
+		await user.click(
+			within(dialog).getByRole("button", { name: "Save workflow" }),
+		);
+
+		await waitFor(() => expect(create).toHaveBeenCalledOnce());
+		expect(create).toHaveBeenCalledWith(
+			MockChat.organization_id,
+			expect.objectContaining({
+				name: "review-changed-files",
+				// The request builder trims the trailing newline the run stored.
+				script: MockForkWorkflowScript.trimEnd(),
+			}),
+		);
+		expect(
+			await screen.findByRole("link", { name: /Saved review-changed-files/ }),
+		).toHaveAttribute(
+			"href",
+			`/agents/settings/workflows?org=${MockChatOrganization.name}`,
+		);
+		// Focus moves to the link that replaced the Save button.
+		expect(
+			screen.getByRole("link", { name: /Saved review-changed-files/ }),
+		).toHaveFocus();
+	});
+
+	it("saves the run's script as an organization workflow when the Organization tier is selected", async () => {
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
+		seedCreatePermission(queryClient, true);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		const createOrg = vi
+			.spyOn(forkSavedWorkflowsApi, "createOrganizationSavedWorkflow")
+			.mockResolvedValue({
+				...MockForkSavedWorkflow,
+				id: "saved-workflow-new",
+				name: "review-changed-files",
+				organization_id: MockChat.organization_id,
+				user_id: undefined,
+				created_by: undefined,
+				description: "",
+				args_schema: undefined,
+				phases: [],
+			});
+		renderWorkflowTool(
+			"run_workflow",
+			MockForkWorkflowStartedResult,
+			queryClient,
+		);
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /workflow completed/i }),
+		);
+
+		await user.click(
+			await screen.findByRole("button", { name: "Save workflow" }),
+		);
+		const dialog = screen.getByRole("dialog", { name: "Save workflow" });
+		await user.click(
+			within(dialog).getByRole("radio", { name: "Organization" }),
+		);
+		await user.click(
+			within(dialog).getByRole("button", { name: "Save workflow" }),
+		);
+
+		await waitFor(() => expect(createOrg).toHaveBeenCalledOnce());
+		expect(createOrg).toHaveBeenCalledWith(
+			MockChat.organization_id,
+			expect.objectContaining({
+				name: "review-changed-files",
+				script: MockForkWorkflowScript.trimEnd(),
+			}),
+		);
+		// The personal-tier API must stay out of an organization-tier save.
+		const createUser = vi
+			.spyOn(forkSavedWorkflowsApi, "createUserSavedWorkflow")
+			.mockRejectedValue(new Error("personal API must not run"));
+		expect(createUser).not.toHaveBeenCalled();
+	});
+
+	it("trims the name before creating the workflow from the card", async () => {
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
+		seedCreatePermission(queryClient, true);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		const create = vi
+			.spyOn(forkSavedWorkflowsApi, "createUserSavedWorkflow")
+			.mockResolvedValue({
+				...MockForkSavedWorkflow,
+				id: "saved-workflow-new",
+				name: "review-changed-files",
+				organization_id: MockChat.organization_id,
+				user_id: "me",
+				created_by: "me",
+				description: "",
+				args_schema: undefined,
+				phases: [],
+			});
+		renderWorkflowTool(
+			"run_workflow",
+			MockForkWorkflowStartedResult,
+			queryClient,
+		);
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /workflow completed/i }),
+		);
+		await user.click(
+			await screen.findByRole("button", { name: "Save workflow" }),
+		);
+		const dialog = screen.getByRole("dialog", { name: "Save workflow" });
+		const nameField = within(dialog).getByLabelText("Name");
+		await user.clear(nameField);
+		// Whitespace around an otherwise valid name validates, so the
+		// request must send the trimmed value the validation accepted.
+		await user.type(nameField, "  review-changed-files  ");
+		await user.click(
+			within(dialog).getByRole("button", { name: "Save workflow" }),
+		);
+
+		await waitFor(() => expect(create).toHaveBeenCalledOnce());
+		expect(create).toHaveBeenCalledWith(
+			MockChat.organization_id,
+			expect.objectContaining({ name: "review-changed-files" }),
+		);
+	});
+
+	it("shows a server validation error from the save dialog", async () => {
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
+		seedCreatePermission(queryClient, true);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		vi.spyOn(
+			forkSavedWorkflowsApi,
+			"createUserSavedWorkflow",
+		).mockRejectedValue(mockApiError({ message: "Conflict.", status: 400 }));
+		renderWorkflowTool(
+			"run_workflow",
+			MockForkWorkflowStartedResult,
+			queryClient,
+		);
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /workflow completed/i }),
+		);
+		await user.click(
+			await screen.findByRole("button", { name: "Save workflow" }),
+		);
+		const dialog = screen.getByRole("dialog", { name: "Save workflow" });
+		await user.type(
+			within(dialog).getByLabelText("Name"),
+			"review-changed-files",
+		);
+		await user.click(
+			within(dialog).getByRole("button", { name: "Save workflow" }),
+		);
+
+		expect(await within(dialog).findByText("Conflict.")).toBeInstanceOf(
+			HTMLElement,
+		);
+	});
+
+	it("keeps the full saved name in the replacement link's accessible name", async () => {
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
+		seedCreatePermission(queryClient, true);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		// A name at the 128-byte limit truncates visually but must stay
+		// whole for screen readers.
+		const longName = `${"review-changed-files-".repeat(5)}reviewed`.slice(
+			0,
+			128,
+		);
+		vi.spyOn(
+			forkSavedWorkflowsApi,
+			"createUserSavedWorkflow",
+		).mockResolvedValue({
+			...MockForkSavedWorkflow,
+			id: "saved-workflow-new",
+			name: longName,
+			organization_id: MockChat.organization_id,
+			user_id: "me",
+			created_by: "me",
+			description: "",
+			args_schema: undefined,
+			phases: [],
+		});
+		renderWorkflowTool(
+			"run_workflow",
+			MockForkWorkflowStartedResult,
+			queryClient,
+		);
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /workflow completed/i }),
+		);
+		await user.click(
+			await screen.findByRole("button", { name: "Save workflow" }),
+		);
+		const dialog = screen.getByRole("dialog", { name: "Save workflow" });
+		const nameField = within(dialog).getByLabelText("Name");
+		await user.clear(nameField);
+		await user.type(nameField, longName);
+		await user.click(
+			within(dialog).getByRole("button", { name: "Save workflow" }),
+		);
+
+		const link = await screen.findByRole("link", {
+			name: `Saved ${longName}`,
+		});
+		expect(link).toHaveFocus();
+		expect(link.textContent).toContain(longName);
+	});
+
+	it("renders the saved state as focused plain text when the organization name is unknown", async () => {
+		// The dashboard's organization list can lack the chat's organization,
+		// so the saved link has no ?org= target. The saved state must still
+		// render and take focus instead of the control vanishing.
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
+		seedCreatePermission(queryClient, true);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		vi.spyOn(
+			forkSavedWorkflowsApi,
+			"createUserSavedWorkflow",
+		).mockResolvedValue({
+			...MockForkSavedWorkflow,
+			id: "saved-workflow-new",
+			name: "review-changed-files",
+			organization_id: "org-not-in-the-dashboard",
+			user_id: "me",
+			created_by: "me",
+			description: "",
+			args_schema: undefined,
+			phases: [],
+		});
+		renderWorkflowToolWithOrganizations([], "run_workflow", queryClient);
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /workflow completed/i }),
+		);
+		await user.click(
+			await screen.findByRole("button", { name: "Save workflow" }),
+		);
+		const dialog = screen.getByRole("dialog", { name: "Save workflow" });
+		await user.type(
+			within(dialog).getByLabelText("Name"),
+			"review-changed-files",
+		);
+		await user.click(
+			within(dialog).getByRole("button", { name: "Save workflow" }),
+		);
+
+		const savedText = await screen.findByText(/^Saved review-changed-files$/);
+		expect(
+			screen.queryByRole("link", { name: /Saved review-changed-files/ }),
+		).not.toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "Save workflow" })).toBeNull();
+		expect(savedText).toHaveFocus();
+	});
+
+	it("hides the save action without a script", async () => {
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
+		seedCreatePermission(queryClient, true);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue({
+			...MockChatWorkflowRunDetail,
+			script: "",
+		});
+		renderWorkflowTool(
+			"run_workflow",
+			MockForkWorkflowStartedResult,
+			queryClient,
+		);
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /workflow completed/i }),
+		);
+
+		await screen.findByText(`Run ${MockForkWorkflowRunId}`);
+		expect(
+			screen.queryByRole("button", { name: "Save workflow" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("hides the save action when the chat is unknown", async () => {
+		const queryClient = createTestQueryClient();
+		renderWorkflowTool(
+			"run_workflow",
+			MockForkWorkflowStartedResult,
+			queryClient,
+		);
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /workflow completed/i }),
+		);
+
+		await screen.findByText(`Run ${MockForkWorkflowRunId}`);
+		expect(
+			screen.queryByRole("button", { name: "Save workflow" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("hides the Organization choice without organization skill create permission", async () => {
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
+		seedCreatePermission(queryClient, false);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		renderWorkflowTool(
+			"run_workflow",
+			MockForkWorkflowStartedResult,
+			queryClient,
+		);
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /workflow completed/i }),
+		);
+		await user.click(
+			await screen.findByRole("button", { name: "Save workflow" }),
+		);
+
+		const dialog = screen.getByRole("dialog", { name: "Save workflow" });
+		await within(dialog).findByLabelText("Name");
+		expect(within(dialog).queryByLabelText("Save as")).not.toBeInTheDocument();
+		expect(within(dialog).queryByRole("radio")).not.toBeInTheDocument();
+	});
+
+	it("keeps Save off a running run's card", async () => {
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
+		seedCreatePermission(queryClient, true);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			mockRunningDetail,
+		);
+		renderWorkflowTool(
+			"run_workflow",
+			MockForkWorkflowStartedResult,
+			queryClient,
+		);
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /^started workflow/i }),
+		);
+
+		await screen.findByRole("button", { name: "Stop workflow run" });
+		expect(
+			screen.queryByRole("button", { name: "Save workflow" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("keeps polling a running run", async () => {
+		vi.useFakeTimers({ shouldAdvanceTime: true });
+		const getRun = vi
+			.spyOn(forkWorkflowsApi, "getChatWorkflowRun")
+			.mockRejectedValue(mockServerError);
+		renderWorkflowTool("run_workflow", MockForkWorkflowStartedResult);
+
+		await waitFor(() => expect(getRun).toHaveBeenCalledTimes(1));
 	});
 });

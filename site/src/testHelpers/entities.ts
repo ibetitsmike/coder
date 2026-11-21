@@ -29,6 +29,15 @@ export const MockDefaultOrganization: TypesGen.Organization = {
 	is_default: true,
 };
 
+/** The organization the mock chats belong to. */
+export const MockChatOrganization: TypesGen.Organization = {
+	...MockOrganization,
+	id: "test-org-id",
+	name: "test-organization",
+	display_name: "Test Organization",
+	is_default: false,
+};
+
 export const MockOrganization2: TypesGen.Organization = {
 	id: "my-organization-2-id",
 	name: "my-organization-2",

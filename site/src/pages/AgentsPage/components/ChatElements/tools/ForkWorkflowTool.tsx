@@ -15,6 +15,7 @@ import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import { ForkWorkflowLongText } from "../../ForkWorkflows/ForkWorkflowLongText";
 import { ForkWorkflowPhaseRail } from "../../ForkWorkflows/ForkWorkflowPhaseRail";
 import { ForkWorkflowResumeButton } from "../../ForkWorkflows/ForkWorkflowResumeButton";
+import { ForkWorkflowSaveAction } from "../../ForkWorkflows/ForkWorkflowSaveAction";
 import { ForkWorkflowStatusBadge } from "../../ForkWorkflows/ForkWorkflowStatusBadge";
 import { ForkWorkflowSteps } from "../../ForkWorkflows/ForkWorkflowSteps";
 import { ForkWorkflowStopButton } from "../../ForkWorkflows/ForkWorkflowStopButton";
@@ -73,6 +74,24 @@ export const ForkWorkflowToolRenderer: React.FC<ForkToolRendererProps> = ({
 	if (!props.isError && !snapshot && props.status !== "running") {
 		return <Fallback {...props} />;
 	}
+	// A card whose run has already ended, for example when an old chat
+	// reopens, never polls: it fetches its detail once to get the chat and
+	// save data the running card gets from polling. Only completed and
+	// interrupted runs render a control, so failed and stopped cards skip
+	// the fetch and render from the result alone.
+	if (
+		agentId &&
+		snapshot &&
+		(snapshot.status === "completed" || snapshot.status === "interrupted")
+	) {
+		return (
+			<EndedForkWorkflowTool
+				{...props}
+				chatId={agentId}
+				resultSnapshot={snapshot}
+			/>
+		);
+	}
 	if (agentId && snapshot?.status === "running") {
 		return (
 			<LiveForkWorkflowTool
@@ -87,9 +106,56 @@ export const ForkWorkflowToolRenderer: React.FC<ForkToolRendererProps> = ({
 
 type ForkWorkflowToolProps = Omit<ForkToolRendererProps, "fallback"> & {
 	snapshot: ForkWorkflowRunSnapshot | null;
-	/** Present on the live card only, which owns the run controls. */
+	/** Present on the cards that fetch the run's detail, which own the run controls. */
 	chatId?: string;
 	detail?: WorkflowRunDetail;
+};
+
+type EndedForkWorkflowToolProps = Omit<ForkWorkflowToolProps, "snapshot"> & {
+	chatId: string;
+	resultSnapshot: ForkWorkflowRunSnapshot;
+};
+
+/**
+ * Fetches the detail of a run whose tool result already shows it ended, so
+ * the card gets the run's chat and save data without polling. The snapshot
+ * stays the source while the detail is in flight or fails to load.
+ */
+const EndedForkWorkflowTool: React.FC<EndedForkWorkflowToolProps> = ({
+	chatId,
+	resultSnapshot,
+	...props
+}) => {
+	const runQuery = useQuery({
+		...chatWorkflowRun(chatId, resultSnapshot.runId),
+		refetchInterval: () => false,
+		// The app disables retries and this card does not poll, so one
+		// transient failure would leave a completed run without Save until
+		// the card remounts. Retry briefly; a 403 or 404 means this viewer
+		// cannot read the run, so it stops.
+		retry: (count, error) =>
+			count < 2 &&
+			getErrorStatus(error) !== 403 &&
+			getErrorStatus(error) !== 404,
+	});
+	const detail =
+		runQuery.data &&
+		runQuery.data.status === resultSnapshot.status &&
+		runQuery.data.id === resultSnapshot.runId
+			? runQuery.data
+			: undefined;
+	return (
+		<ForkWorkflowTool
+			{...props}
+			chatId={chatId}
+			detail={detail}
+			snapshot={
+				detail
+					? mergeForkWorkflowRunDetail(resultSnapshot, detail)
+					: resultSnapshot
+			}
+		/>
+	);
 };
 
 type LiveForkWorkflowToolProps = Omit<ForkWorkflowToolProps, "snapshot"> & {
@@ -284,14 +350,28 @@ const ForkWorkflowRunControls: React.FC<{
 		detail.status === snapshot.status
 			? detail
 			: undefined;
-	if (!chatId || !run || canWriteChat !== true) {
+	if (!chatId || !run) {
 		return null;
 	}
 	return (
 		<div className="flex items-center gap-1.5">
-			<ForkWorkflowStopButton run={run} fallbackFocusRef={fallbackFocusRef} />
-			{run.status === "interrupted" && isResumeAvailable && (
-				<ForkWorkflowResumeButton runId={run.id} chatId={chatId} />
+			{canWriteChat === true && (
+				<ForkWorkflowStopButton run={run} fallbackFocusRef={fallbackFocusRef} />
+			)}
+			{run.status === "interrupted" &&
+				canWriteChat === true &&
+				isResumeAvailable && (
+					<ForkWorkflowResumeButton runId={run.id} chatId={chatId} />
+				)}
+			{/* Saving creates a new workflow and does not update the chat, so
+			    it stays available when the update check is pending, failed or
+			    denies, including on archived chats. */}
+			{run.status === "completed" && (
+				<ForkWorkflowSaveAction
+					title={run.title}
+					script={run.script}
+					organizationId={chatQuery.data?.organization_id}
+				/>
 			)}
 		</div>
 	);

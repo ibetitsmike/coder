@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn, screen, spyOn, userEvent } from "storybook/test";
+import { fn, screen, spyOn, userEvent, within } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
 import { API } from "#/api/api";
 import { getAuthorizationKey } from "#/api/queries/authCheck";
@@ -7,9 +7,15 @@ import { chatEntityKey } from "#/api/queries/chats";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import { MockChat } from "#/testHelpers/chatEntities";
 import {
+	MockChatOrganization,
+	MockDefaultOrganization,
+} from "#/testHelpers/entities";
+import { MockForkSavedWorkflow } from "#/testHelpers/forkSavedWorkflows";
+import {
 	MockChatWorkflowRunDetail,
 	MockForkWorkflowNow,
 } from "#/testHelpers/forkWorkflows";
+import { withDashboardProvider } from "#/testHelpers/storybook";
 import { ForkWorkflowRunDetailView } from "./ForkWorkflowRunDetail";
 
 const mockRunningRunDetail: WorkflowRunDetail = {
@@ -106,41 +112,49 @@ const mockPhasedRunDetail: WorkflowRunDetail = {
 	})),
 };
 
+const baseQueries = [
+	{
+		key: chatEntityKey(MockChatWorkflowRunDetail.chat_id),
+		data: { ...MockChat, id: MockChatWorkflowRunDetail.chat_id },
+	},
+	{
+		key: getAuthorizationKey({
+			checks: {
+				canUpdateChat: {
+					object: {
+						resource_type: "chat",
+						owner_id: MockChat.owner_id,
+						organization_id: MockChat.organization_id,
+					},
+					action: "update",
+				},
+			},
+		}),
+		data: { canUpdateChat: true },
+	},
+];
+
 const meta: Meta<typeof ForkWorkflowRunDetailView> = {
 	title: "pages/AgentsPage/RightPanel/ForkWorkflowRunDetail",
 	component: ForkWorkflowRunDetailView,
 	args: { run: MockChatWorkflowRunDetail, error: null, onBack: fn() },
 	parameters: {
+		experiments: ["fork-workflows"],
 		reactRouter: reactRouterParameters({ routing: { path: "/" } }),
 		// The stories spy on Date.now. Storybook's actions addon logs every
 		// mock call, and its log line calls Date.now, so the spy recurses.
 		actions: { disable: true },
-		queries: [
-			{
-				key: chatEntityKey(MockChatWorkflowRunDetail.chat_id),
-				data: { ...MockChat, id: MockChatWorkflowRunDetail.chat_id },
-			},
-			{
-				key: getAuthorizationKey({
-					checks: {
-						canUpdateChat: {
-							object: {
-								resource_type: "chat",
-								owner_id: MockChat.owner_id,
-								organization_id: MockChat.organization_id,
-							},
-							action: "update",
-						},
-					},
-				}),
-				data: { canUpdateChat: true },
-			},
-		],
+		queries: baseQueries,
+		organizations: [MockDefaultOrganization, MockChatOrganization],
 	},
 	beforeEach: () => {
 		// Named "spy" so Storybook's actions addon skips logging it: its log
 		// line calls Date.now, which would recurse into the mock.
 		spyOn(Date, "now").mockName("spy").mockReturnValue(MockForkWorkflowNow);
+		spyOn(API, "checkAuthorization").mockResolvedValue({
+			canUpdateChat: true,
+			canCreateOrganizationSkill: true,
+		});
 	},
 	decorators: [
 		(Story) => (
@@ -148,6 +162,7 @@ const meta: Meta<typeof ForkWorkflowRunDetailView> = {
 				<Story />
 			</div>
 		),
+		withDashboardProvider,
 	],
 };
 
@@ -155,6 +170,227 @@ export default meta;
 type Story = StoryObj<typeof ForkWorkflowRunDetailView>;
 
 export const Completed: Story = {};
+
+/** A completed run whose Save button opened the save dialog. */
+export const CompletedSaveDialog: Story = {
+	parameters: {
+		queries: [
+			...baseQueries,
+			{
+				key: getAuthorizationKey({
+					checks: {
+						canCreateOrganizationSkill: {
+							object: {
+								resource_type: "organization_skill",
+								organization_id: MockChat.organization_id,
+							},
+							action: "create",
+						},
+					},
+				}),
+				data: { canCreateOrganizationSkill: true },
+			},
+		],
+	},
+	play: async ({ canvas }) => {
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Save workflow" }),
+		);
+		await screen.findByRole("dialog", { name: "Save workflow" });
+	},
+};
+
+/**
+ * The save dialog of a viewer who may not create organization workflows: the
+ * tier choice is gone and only Personal remains.
+ */
+export const CompletedSaveDialogPersonalOnly: Story = {
+	parameters: {
+		queries: [
+			...baseQueries,
+			{
+				key: getAuthorizationKey({
+					checks: {
+						canCreateOrganizationSkill: {
+							object: {
+								resource_type: "organization_skill",
+								organization_id: MockChat.organization_id,
+							},
+							action: "create",
+						},
+					},
+				}),
+				data: { canCreateOrganizationSkill: false },
+			},
+		],
+	},
+	play: async ({ canvas }) => {
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Save workflow" }),
+		);
+		await screen.findByRole("dialog", { name: "Save workflow" });
+	},
+};
+
+/**
+ * The save dialog while the organization permission check is still loading:
+ * the tier choice shows a loader and the submit waits for the answer.
+ */
+export const CompletedSaveDialogPermissionPending: Story = {
+	parameters: {
+		queries: baseQueries,
+	},
+	beforeEach: () => {
+		// The permission check never answers, so the pending state stays.
+		spyOn(API, "checkAuthorization").mockReturnValue(new Promise(() => {}));
+	},
+	play: async ({ canvas }) => {
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Save workflow" }),
+		);
+		await screen.findByRole("status", {
+			name: "Checking organization permission",
+		});
+	},
+};
+
+/**
+ * The save dialog when the organization permission check fails: the error
+ * shows in place of the tier choice and Personal stays usable.
+ */
+export const CompletedSaveDialogPermissionFailed: Story = {
+	parameters: {
+		queries: baseQueries,
+	},
+	beforeEach: () => {
+		spyOn(API, "checkAuthorization").mockRejectedValue(
+			new Error("check failed") as never,
+		);
+	},
+	play: async ({ canvas }) => {
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Save workflow" }),
+		);
+		await screen.findByText("check failed");
+	},
+};
+
+// A name at the 128-byte limit, for the story whose saved link has to
+// truncate visually without losing its accessible name.
+const mockLongSavedName = `${"review-changed-files-".repeat(5)}reviewed`.slice(
+	0,
+	128,
+);
+
+/**
+ * A completed run after the run's script was saved under a name at the
+ * 128-byte limit: the saved link truncates instead of overflowing.
+ */
+export const CompletedSavedLongName: Story = {
+	parameters: {
+		queries: [
+			...baseQueries,
+			{
+				key: getAuthorizationKey({
+					checks: {
+						canCreateOrganizationSkill: {
+							object: {
+								resource_type: "organization_skill",
+								organization_id: MockChat.organization_id,
+							},
+							action: "create",
+						},
+					},
+				}),
+				data: { canCreateOrganizationSkill: true },
+			},
+		],
+	},
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "post").mockResolvedValue({
+			data: {
+				...MockForkSavedWorkflow,
+				id: "saved-workflow-new",
+				name: mockLongSavedName,
+				organization_id: MockChat.organization_id,
+				user_id: "me",
+				created_by: "me",
+				description: "",
+				args_schema: undefined,
+				phases: [],
+			},
+		});
+	},
+	play: async ({ canvas }) => {
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Save workflow" }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Save workflow",
+		});
+		const nameField = within(dialog).getByLabelText("Name");
+		await userEvent.clear(nameField);
+		await userEvent.type(nameField, mockLongSavedName);
+		await userEvent.click(
+			within(dialog).getByRole("button", { name: "Save workflow" }),
+		);
+		// Awaiting the link sets the screenshot state; the accessible-name
+		// assertion lives in ForkWorkflowRunDetail.test.tsx.
+		await screen.findByRole("link", { name: `Saved ${mockLongSavedName}` });
+	},
+};
+
+/** A completed run after the run's script was saved. */
+export const CompletedSaved: Story = {
+	parameters: {
+		queries: [
+			...baseQueries,
+			{
+				key: getAuthorizationKey({
+					checks: {
+						canCreateOrganizationSkill: {
+							object: {
+								resource_type: "organization_skill",
+								organization_id: MockChat.organization_id,
+							},
+							action: "create",
+						},
+					},
+				}),
+				data: { canCreateOrganizationSkill: true },
+			},
+		],
+	},
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "post").mockResolvedValue({
+			data: {
+				...MockForkSavedWorkflow,
+				id: "saved-workflow-new",
+				name: "review-changed-files",
+				organization_id: MockChat.organization_id,
+				user_id: "me",
+				created_by: "me",
+				description: "",
+				args_schema: undefined,
+				phases: [],
+			},
+		});
+	},
+	play: async ({ canvas }) => {
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Save workflow" }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Save workflow",
+		});
+		await userEvent.click(
+			within(dialog).getByRole("button", { name: "Save workflow" }),
+		);
+		// Awaiting the link sets the screenshot state; the behavior
+		// assertions live in ForkWorkflowRunDetail.test.tsx.
+		await screen.findByRole("link", { name: /Saved review-changed-files/ });
+	},
+};
 
 export const Running: Story = {
 	args: { run: mockRunningRunDetail },
