@@ -230,17 +230,26 @@ describe("ForkSavedWorkflowsPage", () => {
 
 		const dialog = await openShareDialog(user);
 		const userCalls = listUser.mock.calls.length;
+		// The refetch never settles, so only the mutation can drop the row.
+		listUser.mockReturnValue(new Promise(() => {}));
 		await user.click(within(dialog).getByRole("button", { name: "Share" }));
 
 		await waitFor(() =>
 			expect(info).toHaveBeenCalledWith(
-				`${MockForkSavedWorkflowMetadata.name} was deleted or moved since you picked it, so nothing was shared.`,
+				`${MockForkSavedWorkflowMetadata.name} is no longer available to share, so nothing was shared.`,
 			),
 		);
 		expect(share).toHaveBeenCalledTimes(1);
 		expect(success).not.toHaveBeenCalled();
 		await waitFor(() =>
 			expect(listUser.mock.calls.length).toBeGreaterThan(userCalls),
+		);
+		// The row left before the dialog closed, so focus went to the
+		// table's fallback, not to the removed row's menu.
+		await waitFor(() =>
+			expect(
+				screen.getAllByRole("button", { name: "New workflow" })[0],
+			).toHaveFocus(),
 		);
 	});
 

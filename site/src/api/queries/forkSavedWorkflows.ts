@@ -318,7 +318,9 @@ type ShareSavedWorkflowArgs = {
 /**
  * Mutation options that move a personal workflow to the organization. The
  * server rejects the move with 409 when the name holds another personal
- * workflow, the organization has a workflow of that name, or it is full.
+ * workflow, the organization has a workflow of that name, or it is full. A
+ * 404 drops the picked row at once, so focus leaves it before the dialog
+ * closes.
  */
 export const shareSavedWorkflow = (queryClient: QueryClient) =>
 	mutationOptions({
@@ -338,6 +340,14 @@ export const shareSavedWorkflow = (queryClient: QueryClient) =>
 			const cached = queryClient.getQueryData<ForkSavedWorkflow>(detailKey);
 			if (cached === undefined || cached.id === id) {
 				queryClient.removeQueries({ queryKey: detailKey, exact: true });
+			}
+		},
+		onError: (error, { organizationId, id }) => {
+			if (isAxiosError(error) && error.response?.status === 404) {
+				queryClient.setQueryData(
+					savedWorkflows({ tier: "user", organizationId }).queryKey,
+					(workflows) => workflows?.filter((workflow) => workflow.id !== id),
+				);
 			}
 		},
 		onSettled: (_data, _error, { organizationId }) => {

@@ -486,6 +486,35 @@ describe("shareSavedWorkflow", () => {
 			queryKey: savedWorkflowsKey(organizationScope),
 		});
 	});
+
+	it("drops the personal row when the workflow to share is gone", async () => {
+		const queryClient = createQueryClient();
+		const listKey = savedWorkflowsKey(scope);
+		const other = {
+			...metadataOf(MockForkSavedWorkflowCreated),
+			id: "saved-workflow-other",
+			name: "other-workflow",
+		};
+		queryClient.setQueryData(listKey, [
+			metadataOf(MockForkSavedWorkflowCreated),
+			other,
+		]);
+		vi.spyOn(forkSavedWorkflowsApi, "shareUserSavedWorkflow").mockRejectedValue(
+			mockApiError({ message: "Resource not found", status: 404 }),
+		);
+
+		await expect(
+			new MutationObserver(queryClient, shareSavedWorkflow(queryClient)).mutate(
+				{
+					organizationId: scope.organizationId,
+					name,
+					id: MockForkSavedWorkflowCreated.id,
+				},
+			),
+		).rejects.toBeTruthy();
+
+		expect(queryClient.getQueryData(listKey)).toEqual([other]);
+	});
 });
 
 describe("savedWorkflow", () => {

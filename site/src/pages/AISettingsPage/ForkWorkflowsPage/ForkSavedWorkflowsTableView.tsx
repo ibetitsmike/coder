@@ -87,7 +87,6 @@ type ForkSavedWorkflowsTableViewProps = {
 	onView: (workflow: ForkSavedWorkflowMetadata) => void;
 	onEdit: (workflow: ForkSavedWorkflowMetadata) => void;
 	onDelete: (workflow: ForkSavedWorkflowMetadata) => void;
-	/** Offers a Share action on every row, which opens shareState. */
 	onShare?: (workflow: ForkSavedWorkflowMetadata) => void;
 	/**
 	 * The caller opens its own dialog and passes onCloseAutoFocus to it so

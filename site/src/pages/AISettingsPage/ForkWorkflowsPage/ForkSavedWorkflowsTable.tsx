@@ -156,13 +156,14 @@ export const ForkSavedWorkflowsTable: React.FC<
 							);
 						},
 						// The personal workflow is gone, for example shared or
-						// deleted in another tab. The list refetch shows that, so
-						// the stale confirmation closes.
+						// deleted in another tab, or the member left the
+						// organization. The mutation drops the row, so the stale
+						// confirmation closes.
 						onError: (error) => {
 							if (isAxiosError(error) && error.response?.status === 404) {
 								setShareTarget(undefined);
 								toast.info(
-									`${activeShareTarget.name} was deleted or moved since you picked it, so nothing was shared.`,
+									`${activeShareTarget.name} is no longer available to share, so nothing was shared.`,
 								);
 							}
 						},
