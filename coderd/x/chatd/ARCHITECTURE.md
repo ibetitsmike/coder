@@ -611,10 +611,23 @@ Fork-only chat routes are registered by `registerForkChatRoutes` and mounted und
 
 With fork-workflows on, the mount also serves saved workflows, stored in `chatd.saved_workflows`. `/organizations/{organization}/members/{user}/workflows` lists, creates, reads, updates and deletes a member's personal workflows by name. A saved workflow has a name (lowercase dash-separated words, at most 128 bytes), a description (at most 4096 bytes, without NUL, invalid UTF-8, control or Unicode format characters such as bidi overrides and zero-width spaces, except line breaks and tabs, the rule a phase name follows with that exception, since both reach the model through `list_workflows`), a Starlark script that must compile and define `main(args)`, an optional args schema with an object top level (at most 12 KiB in compact form and nested at most 64 levels, so one `list_workflows` result holds it), and up to 32 declared phases. dbauthz checks a personal row like a personal skill of its owner in that organization, so another member can neither read nor change it. A trigger caps each member at 100 personal workflows per organization, and the routes answer 400 for a field over its limit, a field holding a NUL character, a description holding a control or Unicode format (Cf) character other than a line break or tab, or a phase name holding a control or Unicode format (Cf) character, and 409 for a duplicate name or a full cap. `/organizations/{organization}/workflows` serves organization workflows with the same routes. dbauthz checks an organization row like an organization skill with the row's `group_acl` and `user_acl`: org admins create, change and delete them, and a new one is shared with the Everyone group, so every member can read it. `/{workflow}/acl`, `/{workflow}/acl/available` and a `PATCH` of `/{workflow}/acl` read the grants, list users who can be granted, and change the grants; they need the share action, and a reader without it gets 404. A member who cannot read a workflow gets 404 from every route of it, and a reader who cannot change it gets 403. The trigger caps organization workflows at 100 per organization, and a personal workflow and an organization workflow can have the same name.
 
-<!-- TODO(fork): the saved workflow PATCH and DELETE routes take an optional
-expect_id query parameter for conditional writes. The request answers 409
-when the stored workflow has another id, and 400 for an explicit but
-invalid expect_id, so a stale writer cannot overwrite a replacement. -->
+The saved workflow PATCH and DELETE routes take an optional expect_id query
+parameter for a conditional write: the request writes only when the stored
+workflow still has that id. A stored id that differs answers 409 when the
+stored workflow exists and the caller may write it, so a stale writer cannot
+overwrite a replacement under the same name; a workflow deleted before the
+write, or a row or replacement the caller may not see, answers the plain
+not-found 404 instead of a conflict. A caller who reads the row but may not
+write it gets 403. An explicit but invalid
+expect_id, including an empty one, is a 400, and so is a query string that
+does not parse, so a client can never silently drop its concurrency guard.
+The conditional check lives in the authorized write query for the member PATCH
+and organization DELETE routes, so there a caller whose read scope cannot see
+the row still gets its write: a mismatch answers 409 when the caller may write
+the row, 403 when the caller reads it but may not write it, and 404 when the
+row is hidden from the caller, never a conflict that reveals a hidden
+replacement. The organization PATCH route reads the row first, so a caller who
+cannot read it gets a 404 before the conditional write runs.
 
 The `fork-html-attachments` route `GET /api/v2/chats/fork/files/{file}/html` is registered by `registerForkChatRoutes` outside that mount, so its sandbox headers run before authentication, the files rate limit, and the experiment check, and cover every response. It serves a stored `.html` or `.htm` chat file as `text/html` with `Content-Security-Policy: sandbox allow-scripts; default-src 'none'`, `nosniff`, and `no-referrer`.
 

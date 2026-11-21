@@ -7,6 +7,7 @@ import type {
 	CreateForkSavedWorkflowRequest,
 	ForkSavedWorkflow,
 	ForkSavedWorkflowMetadata,
+	ForkSavedWorkflowWriteParams,
 	OrganizationSkillACL,
 	UpdateForkSavedWorkflowRequest,
 	UpdateOrganizationSkillACLRequest,
@@ -61,14 +62,38 @@ export const createUserSavedWorkflow = async (
 	return response.data;
 };
 
+/**
+ * The query parameters of a conditional saved workflow write. Undefined, or
+ * a params object without expect_id, leaves the write unconditional. An
+ * explicit but empty expect_id is a caller error: the search-param builder
+ * drops empty strings, so it would silently turn a guarded write into an
+ * unconditional one, the failure the server's 400-on-empty rule exists to
+ * prevent.
+ */
+const savedWorkflowWriteSearchParams = (
+	params?: ForkSavedWorkflowWriteParams,
+): Record<string, string | undefined> => {
+	if (params?.expect_id === undefined) {
+		return {};
+	}
+	if (params.expect_id === "") {
+		throw new Error("expect_id must be a UUID.");
+	}
+	return { expect_id: params.expect_id };
+};
+
 /** Updates one of the signed-in member's personal saved workflows. */
 export const updateUserSavedWorkflow = async (
 	organizationId: string,
 	name: string,
 	req: UpdateSavedWorkflowRequest,
+	params?: ForkSavedWorkflowWriteParams,
 ): Promise<ForkSavedWorkflow> => {
 	const response = await API.getAxiosInstance().patch<ForkSavedWorkflow>(
-		userSavedWorkflowPath(organizationId, name),
+		getURLWithSearchParams(
+			userSavedWorkflowPath(organizationId, name),
+			savedWorkflowWriteSearchParams(params),
+		),
 		req,
 	);
 	return response.data;
@@ -78,9 +103,13 @@ export const updateUserSavedWorkflow = async (
 export const deleteUserSavedWorkflow = async (
 	organizationId: string,
 	name: string,
+	params?: ForkSavedWorkflowWriteParams,
 ): Promise<void> => {
 	await API.getAxiosInstance().delete(
-		userSavedWorkflowPath(organizationId, name),
+		getURLWithSearchParams(
+			userSavedWorkflowPath(organizationId, name),
+			savedWorkflowWriteSearchParams(params),
+		),
 	);
 };
 
@@ -127,9 +156,13 @@ export const updateOrganizationSavedWorkflow = async (
 	organizationId: string,
 	name: string,
 	req: UpdateSavedWorkflowRequest,
+	params?: ForkSavedWorkflowWriteParams,
 ): Promise<ForkSavedWorkflow> => {
 	const response = await API.getAxiosInstance().patch<ForkSavedWorkflow>(
-		organizationSavedWorkflowPath(organizationId, name),
+		getURLWithSearchParams(
+			organizationSavedWorkflowPath(organizationId, name),
+			savedWorkflowWriteSearchParams(params),
+		),
 		req,
 	);
 	return response.data;
@@ -139,9 +172,13 @@ export const updateOrganizationSavedWorkflow = async (
 export const deleteOrganizationSavedWorkflow = async (
 	organizationId: string,
 	name: string,
+	params?: ForkSavedWorkflowWriteParams,
 ): Promise<void> => {
 	await API.getAxiosInstance().delete(
-		organizationSavedWorkflowPath(organizationId, name),
+		getURLWithSearchParams(
+			organizationSavedWorkflowPath(organizationId, name),
+			savedWorkflowWriteSearchParams(params),
+		),
 	);
 };
 
