@@ -10696,7 +10696,7 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
 ## codersdk.Experiment
 
 ```json
-"fork-chat-todos"
+"example"
 ```
 
 ### Properties

@@ -8,20 +8,20 @@ import (
 	"sync"
 	"testing"
 
-	"cdr.dev/slog/v3"
 	"charm.land/fantasy"
-	"github.com/coder/quartz"
 	"github.com/google/uuid"
 	"github.com/sqlc-dev/pqtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/pubsub"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprompt"
 	"github.com/coder/coder/v2/coderd/x/chatd/chatprovider"
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/quartz"
 )
 
 // warningSink records the messages of warn-and-worse entries.
@@ -426,7 +426,8 @@ func TestForkWorkflowReport(t *testing.T) {
 
 		// A long plain mantissa is refused the same way.
 		resp, err = tool.Run(context.Background(), fantasy.ToolCall{
-			Input: `{"n":` + strings.Repeat("1", 65) + `}`})
+			Input: `{"n":` + strings.Repeat("1", 65) + `}`,
+		})
 		require.NoError(t, err)
 		assert.True(t, resp.IsError)
 
