@@ -2,8 +2,9 @@
 // (fork-workflows experiment). It puts the Save button next to the run's
 // other controls and turns into a link to the saved workflow once saved.
 
+import { BookmarkCheckIcon } from "lucide-react";
 import type React from "react";
-import { useContext, useRef } from "react";
+import { useContext, useEffect, useRef } from "react";
 import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
 import { useForkExperiment } from "../ChatElements/tools/forkToolUtils";
 import {
@@ -60,6 +61,7 @@ const ForkWorkflowSaveActionInner: React.FC<
 	ForkWorkflowSaveActionInnerProps
 > = ({ title, script, organizationId, organizations }) => {
 	const savedLinkRef = useRef<HTMLAnchorElement>(null);
+	const savedTextRef = useRef<HTMLSpanElement>(null);
 	const { saved, openSave, dialog } = useForkWorkflowSave({
 		organizationId,
 		savedLinkRef,
@@ -67,12 +69,31 @@ const ForkWorkflowSaveActionInner: React.FC<
 	const organizationName = organizations.find(
 		(organization) => organization.id === organizationId,
 	)?.name;
+	// The plain-text saved state takes focus after the dialog closes, the
+	// same move the link branch makes through the dialog's savedLinkRef.
+	useEffect(() => {
+		if (saved && !organizationName && !dialog) {
+			savedTextRef.current?.focus();
+		}
+	}, [saved, organizationName, dialog]);
 	if (saved) {
-		// Without the organization's name the link could not select it, so
-		// it renders as plain text rather than a link to a wrong or empty
-		// ?org= parameter.
 		if (!organizationName) {
-			return dialog;
+			// Without the organization's name the link could not select it,
+			// so the saved state renders as plain text with focus, not as a
+			// link to a wrong or empty ?org= parameter and not as nothing.
+			return (
+				<>
+					{dialog}
+					<span
+						ref={savedTextRef}
+						tabIndex={-1}
+						className="inline-flex min-w-0 shrink items-center gap-1.5 text-sm text-content-secondary"
+					>
+						<BookmarkCheckIcon className="size-4 shrink-0" />
+						Saved {saved.name}
+					</span>
+				</>
+			);
 		}
 		return (
 			<>

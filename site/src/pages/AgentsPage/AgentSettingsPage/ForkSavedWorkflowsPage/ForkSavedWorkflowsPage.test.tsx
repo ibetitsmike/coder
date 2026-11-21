@@ -380,10 +380,11 @@ describe("ForkSavedWorkflowsPage", () => {
 		await waitFor(() =>
 			expect(listUser).toHaveBeenLastCalledWith(MockOrganization2.id),
 		);
-		const historyLength = window.history.length;
 
 		// Reselecting the shown organization changes nothing, so it must
-		// not spend a history entry that Back would land on again.
+		// not spend a history entry: Back has to reach the previous
+		// organization's entry, not land on a duplicate of the current
+		// one.
 		await user.click(
 			await screen.findByRole("combobox", {
 				name: `Organization ${MockOrganization2.display_name}`,
@@ -395,8 +396,21 @@ describe("ForkSavedWorkflowsPage", () => {
 			}),
 		);
 		await act(async () => {});
-		expect(window.history.length).toBe(historyLength);
 		expect(router.state.location.search).toBe(`?org=${MockOrganization2.name}`);
+
+		await act(async () => {
+			void router.navigate(-1);
+		});
+		await act(async () => {});
+		// Back reaches the entry before the org2 pick, the bare path, and
+		// the bare path shows the default organization. Without skipping
+		// the no-op write, Back would land on a duplicate org2 entry and
+		// appear to do nothing.
+		await waitFor(() => {
+			expect(router.state.location.search).toBe("");
+			expect(router.state.location.pathname).toBe("/agents/settings/workflows");
+			expect(listUser).toHaveBeenLastCalledWith(MockDefaultOrganization.id);
+		});
 	});
 
 	it("renders an unavailable state for an organization the URL names that the member is not in", async () => {

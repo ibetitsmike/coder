@@ -75,7 +75,7 @@ const ForkSavedWorkflowsPage: React.FC = () => {
 					    there is nothing to pick. */}
 					<div className="flex justify-end">
 						<OrganizationAutocomplete
-							ariaLabel="Organization Select an organization"
+							ariaLabel="Organization Select an organization (optional)"
 							value={null}
 							options={memberOrganizations}
 							triggerClassName="w-full sm:w-60"

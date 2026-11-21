@@ -85,6 +85,54 @@ const renderWorkflowTool = (
 	return router;
 };
 
+const renderWorkflowToolWithOrganizations = (
+	organizations: (typeof MockDefaultOrganization)[],
+	name: "run_workflow" | "await_workflow",
+	queryClient: QueryClient = createTestQueryClient(),
+) => {
+	const router = createMemoryRouter(
+		[
+			{
+				path: "/agents/:agentId",
+				element: (
+					<Tool
+						name={name}
+						status="completed"
+						args={{ run_id: MockForkWorkflowCompletedResult.run_id }}
+						result={JSON.stringify(MockForkWorkflowCompletedResult)}
+						isError={false}
+						organizationId="organization-id"
+						mcpServers={[]}
+						subagentTitles={new Map()}
+						subagentVariants={new Map()}
+						shellToolDisplayMode="auto"
+						codeDiffDisplayMode="auto"
+					/>
+				),
+			},
+		],
+		{ initialEntries: [`/agents/${MockForkWorkflowChatId}`] },
+	);
+	renderComponent(
+		<QueryClientProvider client={queryClient}>
+			<DashboardContext.Provider
+				value={{
+					entitlements: MockEntitlements,
+					experiments: ["fork-workflows"],
+					appearance: MockAppearanceConfig,
+					buildInfo: MockBuildInfo,
+					organizations,
+					showOrganizations: false,
+					canViewOrganizationSettings: false,
+				}}
+			>
+				<RouterProvider router={router} />
+			</DashboardContext.Provider>
+		</QueryClientProvider>,
+	);
+	return router;
+};
+
 const mockServerError = {
 	...mockApiError({ message: "Internal error." }),
 	status: 500,
@@ -730,6 +778,55 @@ describe("ForkWorkflowTool", () => {
 		});
 		expect(link).toHaveFocus();
 		expect(link.textContent).toContain(longName);
+	});
+
+	it("renders the saved state as focused plain text when the organization name is unknown", async () => {
+		// The dashboard's organization list can lack the chat's organization,
+		// so the saved link has no ?org= target. The saved state must still
+		// render and take focus instead of the control vanishing.
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
+		seedCreatePermission(queryClient, true);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		vi.spyOn(
+			forkSavedWorkflowsApi,
+			"createUserSavedWorkflow",
+		).mockResolvedValue({
+			...MockForkSavedWorkflow,
+			id: "saved-workflow-new",
+			name: "review-changed-files",
+			organization_id: "org-not-in-the-dashboard",
+			user_id: "me",
+			created_by: "me",
+			description: "",
+			args_schema: undefined,
+			phases: [],
+		});
+		renderWorkflowToolWithOrganizations([], "run_workflow", queryClient);
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /workflow completed/i }),
+		);
+		await user.click(
+			await screen.findByRole("button", { name: "Save workflow" }),
+		);
+		const dialog = screen.getByRole("dialog", { name: "Save workflow" });
+		await user.type(
+			within(dialog).getByLabelText("Name"),
+			"review-changed-files",
+		);
+		await user.click(
+			within(dialog).getByRole("button", { name: "Save workflow" }),
+		);
+
+		const savedText = await screen.findByText(/^Saved review-changed-files$/);
+		expect(
+			screen.queryByRole("link", { name: /Saved review-changed-files/ }),
+		).not.toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "Save workflow" })).toBeNull();
+		expect(savedText).toHaveFocus();
 	});
 
 	it("hides the save action without a script", async () => {
