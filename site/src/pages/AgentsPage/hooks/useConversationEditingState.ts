@@ -492,7 +492,7 @@ export function useConversationEditingState(deps: {
 		workspaceUploads,
 		busyBehavior,
 	}: SendChatMessageOptions) => {
-const sendTarget = target ?? undefined;
+		const sendTarget = target ?? undefined;
 		// An edit opened during the request keeps its editor: skip the
 		// rollback and the send's own bookkeeping for it.
 		const targetLoadCount = targetLoadCountRef.current;
@@ -503,7 +503,7 @@ const sendTarget = target ?? undefined;
 			attachments,
 			workspaceUploads,
 			busyBehavior,
-editingTarget: sendTarget,
+			editingTarget: sendTarget,
 			composerParts: answerPrefix
 				? prependAnswerPrefix(
 						answerPrefix,

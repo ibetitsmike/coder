@@ -15,7 +15,6 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	agentproto "github.com/coder/coder/v2/agent/proto"
-
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/codersdk"

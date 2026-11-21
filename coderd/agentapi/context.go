@@ -643,7 +643,7 @@ func marshalContextResourceBody(r *agentproto.ContextResource) (kind database.Wo
 		}
 		body, err = marshalBody(payload)
 		return database.WorkspaceAgentContextBodyKindAcpHarness, body, err
-case *agentproto.ContextResource_Plugin:
+	case *agentproto.ContextResource_Plugin:
 		body, err = marshalBody(&agentproto.PluginBody{
 			Name:        b.Plugin.GetName(),
 			Version:     b.Plugin.GetVersion(),
