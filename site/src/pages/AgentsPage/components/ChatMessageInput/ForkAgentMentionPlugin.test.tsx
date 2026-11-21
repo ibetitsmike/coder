@@ -17,7 +17,10 @@ import * as forkAgentDefinitionsApi from "#/api/forkAgentDefinitions";
 import * as forkSavedWorkflowsApi from "#/api/forkSavedWorkflows";
 import { chat } from "#/api/queries/chats";
 import { agentDefinitions } from "#/api/queries/forkAgentDefinitions";
-import { savedWorkflowsKey } from "#/api/queries/forkSavedWorkflows";
+import {
+	savedWorkflows,
+	savedWorkflowsKey,
+} from "#/api/queries/forkSavedWorkflows";
 import { userSkills } from "#/api/queries/userSkills";
 import type { Chat, Experiment } from "#/api/typesGenerated";
 import {
@@ -667,13 +670,15 @@ describe("ForkAgentMentionPlugin", () => {
 		expect(onEnter).not.toHaveBeenCalled();
 	});
 
-	it("keeps a failed workflow refetch from blocking Enter while cached workflows stay usable", async () => {
-		const { getUserWorkflows, queryClient, inputRef } = renderComposer({
+	it("keeps Enter usable when a failed workflow refetch leaves cached data", async () => {
+		const { getUserWorkflows, queryClient, onEnter } = renderComposer({
 			experiments: ["fork-workflows"],
 		});
-		// A cached list goes stale at updatedAt 0, so opening the menu
-		// refetches it; the refetch failing must keep the cached options
-		// usable instead of dead-ending Enter behind a retry notice.
+		// The cached list goes stale at updatedAt 0, so opening the menu
+		// refetches it. When that refetch failed, the error used to put the
+		// menu in its retry state and swallow Enter even though the cached
+		// options were still usable: a failed refetch must leave Enter to
+		// pass through to the normal send path.
 		queryClient.setQueryData(
 			savedWorkflowsKey({
 				tier: "user",
@@ -682,16 +687,19 @@ describe("ForkAgentMentionPlugin", () => {
 			[MockForkSavedWorkflowMetadata],
 			{ updatedAt: 0 },
 		);
+		// The stale refetch must fail while the cached list survives, which
+		// the old error state treated as a dead end that swallowed Enter.
 		getUserWorkflows.mockRejectedValue(new Error("offline"));
-		const user = await typeIntoComposer("@");
-		await user.click(
-			await screen.findByRole("option", {
-				name: new RegExp(`^@${MockForkSavedWorkflowMetadata.name}`),
-			}),
+		const userKey = savedWorkflows({
+			tier: "user",
+			organizationId: MockDefaultOrganization.id,
+		}).queryKey;
+		const user = await typeIntoComposer("@zzz");
+		await waitFor(() =>
+			expect(queryClient.getQueryState(userKey)?.status).toBe("error"),
 		);
-		expect(inputRef.current?.getValue()).toBe(
-			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}), with args: files (required). `,
-		);
+		await user.keyboard("{Enter}");
+		expect(onEnter).toHaveBeenCalledTimes(1);
 	});
 
 	it("keeps / opening the skills menu", async () => {
