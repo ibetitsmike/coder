@@ -30,6 +30,7 @@ import {
 	type SavedWorkflowFormValues,
 	savedWorkflowFormErrors,
 } from "#/pages/AISettingsPage/ForkWorkflowsPage/savedWorkflowForm";
+import type { SaveTier } from "./useForkWorkflowSave";
 
 type ForkWorkflowSaveDialogProps = {
 	/** The run title, which prefills the name in the panel. */
@@ -45,10 +46,10 @@ type ForkWorkflowSaveDialogProps = {
 	/** The authorization check's error, shown in place of the tier choice. */
 	canCreateOrganizationError: unknown;
 	/** Whether the authorization check is still loading, as opposed to failed. */
-	isPermissionPending: boolean;
+	isPermissionChecking: boolean;
 	isSubmitting: boolean;
 	submitError?: SkillErrorDisplay;
-	onSubmit: (tier: "user" | "organization", values: SaveValues) => void;
+	onSubmit: (tier: SaveTier, values: SaveValues) => void;
 	onClose: () => void;
 	/**
 	 * Receives the dialog's close-focus event before the
@@ -83,21 +84,21 @@ export const ForkWorkflowSaveDialog: React.FC<ForkWorkflowSaveDialogProps> = ({
 	script,
 	canCreateOrganization,
 	canCreateOrganizationError,
-	isPermissionPending,
+	isPermissionChecking,
 	isSubmitting,
 	submitError,
 	onSubmit,
 	onClose,
 	onCloseAutoFocus,
 }) => {
-	const [tier, setTier] = useState<"user" | "organization">("user");
+	const [tier, setTier] = useState<SaveTier>("user");
 	const [values, setValues] = useState<SaveValues>({
 		name: nameFromTitle(title),
 		description: "",
 	});
-	// The form values mirror the editor's shape so the shared validation
-	// applies; script and schema are fixed by the run and stay out. React
-	// Compiler memoizes this subtree, so the object is built on each render.
+	// The dialog reuses the editor's value shape so its validation applies.
+	// The run's own phases are run state, not the script's declared PHASES
+	// list the form wants, so argsSchema and phases are saved empty.
 	const formValues: SavedWorkflowFormValues = {
 		name: values.name,
 		description: values.description,
@@ -111,7 +112,14 @@ export const ForkWorkflowSaveDialog: React.FC<ForkWorkflowSaveDialogProps> = ({
 	// failed check does not hold the Personal tier, which needs no
 	// organization-create permission; its error shows instead of the choice.
 	const canSubmit =
-		!isSubmitting && !isPermissionPending && Object.keys(errors).length === 0;
+		!isSubmitting && !isPermissionChecking && Object.keys(errors).length === 0;
+
+	// Once the choice settles as personal-only, a selection made while the
+	// answer was pending must not survive as the submitted tier.
+	const effectiveTier: SaveTier =
+		!canCreateOrganizationError && canCreateOrganization === true
+			? tier
+			: "user";
 
 	const saveAsLabelId = "save-workflow-tier-label";
 
@@ -130,16 +138,7 @@ export const ForkWorkflowSaveDialog: React.FC<ForkWorkflowSaveDialogProps> = ({
 					onSubmit={(event) => {
 						event.preventDefault();
 						if (canSubmit) {
-							// A denied or failed answer hides the tier choice,
-							// so a selection made before the answer arrived
-							// cannot send an organization write it may not
-							// make; the personal tier needs no permission.
-							onSubmit(
-								!canCreateOrganizationError && canCreateOrganization === true
-									? tier
-									: "user",
-								values,
-							);
+							onSubmit(effectiveTier, values);
 						}
 					}}
 				>
@@ -188,15 +187,13 @@ export const ForkWorkflowSaveDialog: React.FC<ForkWorkflowSaveDialogProps> = ({
 					{!canCreateOrganizationError && canCreateOrganization !== false && (
 						<div className="flex flex-col gap-2">
 							<Label id={saveAsLabelId}>Save as</Label>
-							{isPermissionPending ? (
+							{isPermissionChecking ? (
 								<Loader size="sm" label="Checking organization permission" />
 							) : (
 								<RadioGroup
 									value={tier}
 									aria-labelledby={saveAsLabelId}
-									onValueChange={(value) =>
-										setTier(value as "user" | "organization")
-									}
+									onValueChange={(value) => setTier(value as SaveTier)}
 									disabled={isSubmitting}
 								>
 									<div className="flex items-center gap-2">

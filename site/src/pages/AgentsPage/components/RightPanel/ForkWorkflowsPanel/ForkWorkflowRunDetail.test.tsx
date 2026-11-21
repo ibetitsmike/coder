@@ -39,7 +39,11 @@ const mockRunningRunDetail: WorkflowRunDetail = {
 const seedCreatePermission = (
 	queryClient: QueryClient,
 	canCreateOrganizationSkill: boolean,
-) => {
+	options: {
+		/** Leave the seeded answer stale, so opening the dialog refetches it. */
+		stale?: boolean;
+	} = {},
+): ReturnType<typeof getAuthorizationKey> => {
 	const key = getAuthorizationKey({
 		checks: {
 			canCreateOrganizationSkill: {
@@ -51,11 +55,23 @@ const seedCreatePermission = (
 			},
 		},
 	});
-	queryClient.setQueryDefaults(key, {
-		staleTime: Number.POSITIVE_INFINITY,
-		gcTime: Number.POSITIVE_INFINITY,
-	});
+	if (!options.stale) {
+		// Without this the test client's gcTime of 0 would drop the seeded
+		// answer before anything observes it.
+		queryClient.setQueryDefaults(key, {
+			staleTime: Number.POSITIVE_INFINITY,
+			gcTime: Number.POSITIVE_INFINITY,
+		});
+	} else {
+		// Keep the seed alive but stale: no staleTime means the dialog's
+		// observer refetches it on mount, while the cached answer still
+		// renders until that refetch settles.
+		queryClient.setQueryDefaults(key, {
+			gcTime: Number.POSITIVE_INFINITY,
+		});
+	}
 	queryClient.setQueryData(key, { canCreateOrganizationSkill });
+	return key;
 };
 
 // Each rerender stands in for a poll that returns the run. The chat and its
@@ -317,6 +333,97 @@ describe("ForkWorkflowRunDetail", () => {
 		await within(dialog).findByLabelText("Organization");
 		expect(submit).toBeEnabled();
 		authorizationSpy.mockRestore();
+	});
+
+	it("holds the submit while a cached permission answer refetches", async () => {
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
+		// The seeded grant is left stale, so opening the dialog refetches it
+		// while the cached answer still renders.
+		const createPermissionKey = seedCreatePermission(queryClient, true, {
+			stale: true,
+		});
+		// After the seed, every check request goes into this list, so the
+		// test resolves each refetch separately.
+		const refetchDeferreds: Array<
+			(value: { canCreateOrganizationSkill: boolean }) => void
+		> = [];
+		// The spy survives the afterEach, which only clears call state, so the
+		// test restores it before it ends and the next test sees real checks.
+		const authorizationSpy = vi
+			.spyOn(API, "checkAuthorization")
+			.mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						refetchDeferreds.push(resolve);
+					}) as never,
+			);
+		const create = vi
+			.spyOn(forkSavedWorkflowsApi, "createUserSavedWorkflow")
+			.mockRejectedValue(new Error("must not be called"));
+		const createOrg = vi
+			.spyOn(forkSavedWorkflowsApi, "createOrganizationSavedWorkflow")
+			.mockRejectedValue(new Error("must not be called"));
+		renderDetail(MockChatWorkflowRunDetail, { queryClient });
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Save workflow" }),
+		);
+		const dialog = screen.getByRole("dialog", { name: "Save workflow" });
+		const nameField = await within(dialog).findByLabelText("Name");
+		const submit = within(dialog).getByRole("button", {
+			name: "Save workflow",
+		});
+		// The seeded grant renders the choice, but its in-flight refetch
+		// replaces it with the loader and holds the submit, so a revoked
+		// grant cannot take a submission made from the cached answer.
+		await within(dialog).findByRole("status", {
+			name: "Checking organization permission",
+		});
+		expect(submit).toBeDisabled();
+		await user.click(submit);
+		expect(create).not.toHaveBeenCalled();
+		expect(createOrg).not.toHaveBeenCalled();
+
+		// The refetch confirms the grant, so the choice and submit return.
+		refetchDeferreds[0]?.({ canCreateOrganizationSkill: true });
+		const organizationRadio = await within(dialog).findByRole("radio", {
+			name: "Organization",
+		});
+		expect(submit).toBeEnabled();
+
+		// Select Organization, then invalidate the grant: the refetch runs
+		// while the selection survives, and this fresh answer denies it.
+		await user.click(organizationRadio);
+		expect(organizationRadio).toBeChecked();
+		queryClient.invalidateQueries({ queryKey: createPermissionKey });
+		await within(dialog).findByRole("status", {
+			name: "Checking organization permission",
+		});
+		// The submit holds again while the fresh answer is in flight, so a
+		// click here sends nothing even though the cached grant still shows.
+		await user.click(submit);
+		expect(create).not.toHaveBeenCalled();
+		expect(createOrg).not.toHaveBeenCalled();
+		refetchDeferreds[1]?.({ canCreateOrganizationSkill: false });
+		// The fresh denial hides the choice again, and the stale selection
+		// must not survive as the submitted tier.
+		await waitFor(() =>
+			expect(
+				within(dialog).queryByRole("radio", { name: "Organization" }),
+			).toBeNull(),
+		);
+		await user.clear(nameField);
+		await user.type(nameField, "review-changed-files");
+		await user.click(submit);
+		await waitFor(() => expect(create).toHaveBeenCalledOnce());
+		expect(createOrg).not.toHaveBeenCalled();
+		// The spies survive the afterEach, which only clears call state, so
+		// restore all three and the next test sees real requests.
+		authorizationSpy.mockRestore();
+		create.mockRestore();
+		createOrg.mockRestore();
 	});
 
 	it("keeps Personal usable when the organization permission check fails", async () => {
