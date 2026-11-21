@@ -252,18 +252,19 @@ describe("ForkAgentMentionPlugin", () => {
 
 	it("keeps cached agents usable when a refetch fails", async () => {
 		const { getPersonal, queryClient, inputRef } = renderComposer();
+		const userKey = agentDefinitions({
+			tier: "user",
+			organizationId: MockDefaultOrganization.id,
+		}).queryKey;
 		queryClient.setQueryData(
-			agentDefinitions({
-				tier: "user",
-				organizationId: MockDefaultOrganization.id,
-			}).queryKey,
+			userKey,
 			[{ ...MockForkAgentDefinitionMetadata, name: "cached" }],
 			{ updatedAt: 0 },
 		);
 		getPersonal.mockRejectedValue(new Error("offline"));
 		const user = await typeIntoComposer("@");
-		await screen.findByText(
-			"Could not load some agents. Close and type @ again to retry.",
+		await waitFor(() =>
+			expect(queryClient.getQueryState(userKey)?.status).toBe("error"),
 		);
 		await user.click(screen.getByRole("option", { name: /^@cached/ }));
 		expect(inputRef.current?.getValue()).toBe(

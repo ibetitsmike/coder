@@ -402,10 +402,13 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 		...(isRootProjectUnknown ? [rootChat] : []),
 	].filter((result) => !result.data);
 	const isLoading = unresolved.some((result) => result.isFetching);
+	// A failed refetch keeps the cached list, so a stale error must not
+	// block Enter while the cached options stay usable. Only an error
+	// with no data to fall back on does, matching hasWorkflowError below.
 	const hasError = [
 		...(canOfferAgents ? storedQueries : []),
 		...(rootChatId ? [rootChat] : []),
-	].some((result) => result.isError);
+	].some((result) => result.isError && !result.data);
 	const hasWorkflowError =
 		canRunWorkflows &&
 		// A failed refetch keeps the cached list, so a stale error must not
