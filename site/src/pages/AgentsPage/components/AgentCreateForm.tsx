@@ -66,14 +66,18 @@ import { useForkAgentTypePicker } from "./useForkAgentTypePicker";
 /**
  * Whether the picked agent type starts the chat in explore mode: the
  * built-in type by its name, or a custom definition by the base type the
- * catalog reports. Unknown to the list means true, so a chat the menu
- * cannot yet resolve stays gated; the list only ever confirms types.
+ * catalog reports. Known built-ins resolve by name even while the catalog
+ * reloads, so a model or project change does not flicker the gate; a name
+ * the list does not know means true, so a chat the menu cannot yet resolve
+ * stays gated and the list only ever confirms types.
  */
 export const forkIsExploreAgentType = (
 	types: readonly TypesGen.ForkAgentType[] | undefined,
 	picked: string | undefined,
 ) =>
 	picked !== undefined &&
+	picked !== "general" &&
+	picked !== "computer_use" &&
 	(types === undefined ||
 		types.some(
 			(type) =>
