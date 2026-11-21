@@ -88,8 +88,10 @@ func TestCustomAgentToolPolicyFilter(t *testing.T) {
 		padded,
 	}
 	candidates := []deferredMCPTool{
-		{tool: docs, server: "docs"}, {tool: other, server: "other"},
-		{tool: workspace, server: "Workspace"}, {tool: padded, server: " Workspace "},
+		{tool: docs, server: "docs"},
+		{tool: other, server: "other"},
+		{tool: workspace, server: "Workspace"},
+		{tool: padded, server: " Workspace "},
 	}
 	providerTools := []chatloop.ProviderTool{
 		{Definition: fantasy.ProviderDefinedTool{Name: "web_search"}},

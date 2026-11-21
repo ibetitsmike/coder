@@ -637,9 +637,7 @@ it("deletes nothing when the name now holds another workflow", async () => {
 	// so the conditional delete refuses with 409.
 	const remove = vi
 		.spyOn(forkSavedWorkflowsApi, "deleteUserSavedWorkflow")
-		.mockRejectedValue(
-			mockApiError({ message: "Conflict.", status: 409 }),
-		);
+		.mockRejectedValue(mockApiError({ message: "Conflict.", status: 409 }));
 	renderPage(`?org=${MockOrganization2.name}`);
 
 	await user.click(

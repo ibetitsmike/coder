@@ -449,7 +449,7 @@ export const InterruptingShowsBusyComposer: Story = {
 	render: () => {
 		const store = buildInterruptingStore();
 		return (
-<div className="flex h-full flex-col">
+			<div className="flex h-full flex-col">
 				<StoryChatPageTimeline store={store} />
 				<StoryChatPageInput
 					store={store}
