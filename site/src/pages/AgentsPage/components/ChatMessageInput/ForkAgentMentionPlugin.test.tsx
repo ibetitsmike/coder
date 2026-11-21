@@ -378,7 +378,7 @@ describe("ForkAgentMentionPlugin", () => {
 			}),
 		);
 		expect(inputRef.current?.getValue()).toBe(
-			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}) with args: files (required). `,
+			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}), with args: files (required). `,
 		);
 		expect(getUserWorkflows).toHaveBeenCalledWith(MockDefaultOrganization.id);
 		expect(getOrganizationWorkflows).toHaveBeenCalledWith(
@@ -400,14 +400,15 @@ describe("ForkAgentMentionPlugin", () => {
 			}),
 		);
 		expect(inputRef.current?.getValue()).toBe(
-			`Run the ${MockForkOrganizationSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkOrganizationSavedWorkflowMetadata.name}) with no args: `,
+			`Run the ${MockForkOrganizationSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkOrganizationSavedWorkflowMetadata.name}): `,
 		);
 	});
 
 	it("hides an organization workflow that a personal one hides", async () => {
-		const { getUserWorkflows, getOrganizationWorkflows } = renderComposer({
-			experiments: ["fork-workflows"],
-		});
+		const { getUserWorkflows, getOrganizationWorkflows, inputRef } =
+			renderComposer({
+				experiments: ["fork-workflows"],
+			});
 		getUserWorkflows.mockResolvedValue([
 			{
 				...MockForkSavedWorkflowMetadata,
@@ -417,21 +418,24 @@ describe("ForkAgentMentionPlugin", () => {
 		getOrganizationWorkflows.mockResolvedValue([
 			MockForkOrganizationSavedWorkflowMetadata,
 		]);
-		await typeIntoComposer("@");
-		await screen.findByRole("option", {
-			name: new RegExp(
-				`^@${MockForkOrganizationSavedWorkflowMetadata.name}\\s*personal`,
-			),
-		});
-		expect(
-			screen.getAllByRole("option", {
-				name: new RegExp(`^@${MockForkOrganizationSavedWorkflowMetadata.name}`),
+		const user = await typeIntoComposer("@");
+		await user.click(
+			await screen.findByRole("option", {
+				name: new RegExp(
+					`^@${MockForkOrganizationSavedWorkflowMetadata.name}\\s*personal`,
+				),
 			}),
-		).toHaveLength(1);
+		);
+		// The click must run the personal tier the way run_workflow resolves
+		// the name, so the composer holds the personal workflow's prompt, not
+		// the org workflow's.
+		expect(inputRef.current?.getValue()).toBe(
+			`Run the ${MockForkOrganizationSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkOrganizationSavedWorkflowMetadata.name}), with args: files (required). `,
+		);
 	});
 
 	it("hides a workflow whose name an agent mention already takes", async () => {
-		const { getUserWorkflows } = renderComposer({
+		const { getUserWorkflows, inputRef } = renderComposer({
 			experiments: ["fork-workflows"],
 		});
 		// explore is a built-in agent type, so the workflow would otherwise
@@ -439,16 +443,17 @@ describe("ForkAgentMentionPlugin", () => {
 		getUserWorkflows.mockResolvedValue([
 			{ ...MockForkSavedWorkflowMetadata, name: "explore" },
 		]);
-		await typeIntoComposer("@");
-		await screen.findByRole("option", { name: /^@explore/ });
-		expect(screen.getAllByRole("option", { name: /^@explore/ })).toHaveLength(
-			1,
+		const user = await typeIntoComposer("@");
+		await user.click(await screen.findByRole("option", { name: /^@explore/ }));
+		// The one @explore option must delegate to the built-in type, not run
+		// the workflow that took its name.
+		expect(inputRef.current?.getValue()).toBe(
+			"Delegate to the explore agent (spawn_agent type explore): ",
 		);
-		expect(screen.queryByText("Workflows")).toBeNull();
 	});
 
 	it("hides a workflow whose name a reserved agent type takes", async () => {
-		const { getUserWorkflows } = renderComposer({
+		const { getUserWorkflows, inputRef } = renderComposer({
 			experiments: ["fork-workflows"],
 		});
 		// chatd names the reserved types for spawn_agent only, so run_workflow
@@ -457,12 +462,13 @@ describe("ForkAgentMentionPlugin", () => {
 		getUserWorkflows.mockResolvedValue([
 			{ ...MockForkSavedWorkflowMetadata, name: "general" },
 		]);
-		await typeIntoComposer("@");
-		await screen.findByRole("option", { name: /^@general/ });
-		expect(screen.getAllByRole("option", { name: /^@general/ })).toHaveLength(
-			1,
+		const user = await typeIntoComposer("@");
+		await user.click(await screen.findByRole("option", { name: /^@general/ }));
+		// The one @general option must delegate to the built-in type, which
+		// is the only resolution run_workflow could never be asked for.
+		expect(inputRef.current?.getValue()).toBe(
+			"Delegate to the general agent (spawn_agent type general): ",
 		);
-		expect(screen.queryByText("Workflows")).toBeNull();
 	});
 
 	it("summarizes a schema that constrains args through required alone", async () => {
@@ -482,7 +488,7 @@ describe("ForkAgentMentionPlugin", () => {
 			}),
 		);
 		expect(inputRef.current?.getValue()).toBe(
-			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}) with args: topic (required). `,
+			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}), with args: topic (required). `,
 		);
 	});
 
@@ -507,12 +513,12 @@ describe("ForkAgentMentionPlugin", () => {
 			}),
 		);
 		expect(inputRef.current?.getValue()).toBe(
-			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}) with args: note, topic (required). `,
+			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}), with args: note, topic (required). `,
 		);
 	});
 
 	it("filters the workflows by the typed text", async () => {
-		const { getUserWorkflows } = renderComposer({
+		const { getUserWorkflows, inputRef } = renderComposer({
 			experiments: ["fork-workflows"],
 		});
 		getUserWorkflows.mockResolvedValue([
@@ -528,8 +534,14 @@ describe("ForkAgentMentionPlugin", () => {
 				name: new RegExp(`^@${MockForkSavedWorkflowMetadata.name}`),
 			}),
 		).toBeNull();
-		await user.keyboard("{Escape}");
-		await user.keyboard(" @");
+		// The filtered option must be the one Enter inserts, so the composer
+		// value proves the filtering fed the selectable result.
+		await user.keyboard("{Enter}");
+		expect(inputRef.current?.getValue()).toBe(
+			`Run the ${MockForkOrganizationSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkOrganizationSavedWorkflowMetadata.name}): `,
+		);
+		// Reopening with an empty query restores every workflow.
+		await typeIntoComposer(" @");
 		await screen.findByRole("option", {
 			name: new RegExp(`^@${MockForkSavedWorkflowMetadata.name}`),
 		});
@@ -551,7 +563,7 @@ describe("ForkAgentMentionPlugin", () => {
 		});
 		await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{Enter}");
 		expect(inputRef.current?.getValue()).toBe(
-			`Run the ${MockForkOrganizationSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkOrganizationSavedWorkflowMetadata.name}) with no args: `,
+			`Run the ${MockForkOrganizationSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkOrganizationSavedWorkflowMetadata.name}): `,
 		);
 	});
 
@@ -653,6 +665,33 @@ describe("ForkAgentMentionPlugin", () => {
 		await screen.findByText("Loading workflows...");
 		await user.keyboard("{Enter}");
 		expect(onEnter).not.toHaveBeenCalled();
+	});
+
+	it("keeps a failed workflow refetch from blocking Enter while cached workflows stay usable", async () => {
+		const { getUserWorkflows, queryClient, inputRef } = renderComposer({
+			experiments: ["fork-workflows"],
+		});
+		// A cached list goes stale at updatedAt 0, so opening the menu
+		// refetches it; the refetch failing must keep the cached options
+		// usable instead of dead-ending Enter behind a retry notice.
+		queryClient.setQueryData(
+			savedWorkflowsKey({
+				tier: "user",
+				organizationId: MockDefaultOrganization.id,
+			}),
+			[MockForkSavedWorkflowMetadata],
+			{ updatedAt: 0 },
+		);
+		getUserWorkflows.mockRejectedValue(new Error("offline"));
+		const user = await typeIntoComposer("@");
+		await user.click(
+			await screen.findByRole("option", {
+				name: new RegExp(`^@${MockForkSavedWorkflowMetadata.name}`),
+			}),
+		);
+		expect(inputRef.current?.getValue()).toBe(
+			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}), with args: files (required). `,
+		);
 	});
 
 	it("keeps / opening the skills menu", async () => {

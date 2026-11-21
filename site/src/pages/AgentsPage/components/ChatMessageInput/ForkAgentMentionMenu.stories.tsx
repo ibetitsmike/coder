@@ -108,6 +108,10 @@ export const LoadingWorkflows: Story = {
 	args: { options: [], status: "Loading workflows..." },
 };
 
+export const LoadingAgentsAndWorkflows: Story = {
+	args: { options: [], status: "Loading agents and workflows..." },
+};
+
 export const LoadError: Story = {
 	args: {
 		status: "Could not load some agents. Close and type @ again to retry.",

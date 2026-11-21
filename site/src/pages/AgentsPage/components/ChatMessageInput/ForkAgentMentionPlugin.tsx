@@ -135,7 +135,11 @@ const workspaceAgents = (
 		}));
 };
 
-/** The empty string means the workflow takes no args. */
+/**
+ * Summarizes the args a saved workflow takes for the menu row. A required
+ * name can sit outside properties, and run_workflow validates against
+ * both, so the summary unions them; required ones are marked.
+ */
 const workflowArgsSummary = (schema: ForkSavedWorkflowSchema): string => {
 	const properties = asRecord(schema.properties);
 	const required =
@@ -232,10 +236,13 @@ const handleSelect = (
 			.selectEnd();
 	} else {
 		const { name, argsSummary } = option.workflow;
+		// An empty summary only means the workflow declares no named args:
+		// a saved workflow without an args schema still accepts any args
+		// object, so the prompt must not tell the model to send none.
 		textNode
 			?.setTextContent(
-				`Run the ${name} saved workflow (run_workflow name ${name}) with${
-					argsSummary ? ` args: ${argsSummary}. ` : " no args: "
+				`Run the ${name} saved workflow (run_workflow name ${name})${
+					argsSummary ? `, with args: ${argsSummary}. ` : ": "
 				}`,
 			)
 			.selectEnd();
@@ -400,7 +407,12 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 		...(rootChatId ? [rootChat] : []),
 	].some((result) => result.isError);
 	const hasWorkflowError =
-		canRunWorkflows && workflowQueries.some((result) => result.isError);
+		canRunWorkflows &&
+		// A failed refetch keeps the cached list, so a stale error must not
+		// block Enter while the cached options stay usable. Only an error
+		// with no data to fall back on does, as the loading calculation
+		// above already treats it.
+		workflowQueries.some((result) => result.isError && !result.data);
 	const isWorkflowsLoading =
 		canRunWorkflows &&
 		workflowQueries.some((result) => !result.data && result.isFetching);
