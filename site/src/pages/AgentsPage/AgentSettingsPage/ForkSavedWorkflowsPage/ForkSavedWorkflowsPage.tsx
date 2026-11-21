@@ -2,7 +2,6 @@
 // workflows in AI settings. Members share their personal workflows with the
 // organization here and edit the ones they shared.
 
-import { useState } from "react";
 import { Navigate, useSearchParams } from "react-router";
 import { OrganizationField } from "#/components/OrganizationAutocomplete/OrganizationAutocomplete";
 import { useAuthenticated } from "#/hooks/useAuthenticated";
@@ -28,21 +27,29 @@ const ForkSavedWorkflowsPage: React.FC = () => {
 	const { experiments, organizations } = useDashboard();
 	const memberOrganizations = getMemberOrganizations(organizations, user);
 	const [searchParams, setSearchParams] = useSearchParams();
-	const [selectedOrganizationId, setSelectedOrganizationId] =
-		useState<string>();
 
 	if (!experiments.includes("fork-workflows")) {
 		return <Navigate to="/agents/settings" replace />;
 	}
 
-	const organization =
-		memberOrganizations.find((org) => org.id === selectedOrganizationId) ??
-		memberOrganizations.find(
-			(org) => org.name === searchParams.get(orgSearchParam),
-		) ??
-		memberOrganizations.find((org) => org.is_default) ??
-		memberOrganizations.at(0);
+	// The URL names the organization the page shows. A param that names an
+	// organization the member does not belong to, or an unknown one, renders
+	// an unavailable state instead of falling back, so a stale or forged
+	// link cannot quietly show another organization's workflows view.
+	const requestedOrgName = searchParams.get(orgSearchParam);
+	const organization = requestedOrgName
+		? memberOrganizations.find((org) => org.name === requestedOrgName)
+		: (memberOrganizations.find((org) => org.is_default) ??
+			memberOrganizations.at(0));
 	if (!organization) {
+		if (requestedOrgName) {
+			return (
+				<SectionHeader
+					label="Workflows"
+					description={`You are not a member of an organization named ${requestedOrgName}, so its workflows are not available here. Pick one of your organizations above the list instead.`}
+				/>
+			);
+		}
 		return (
 			<SectionHeader
 				label="Workflows"
@@ -63,7 +70,6 @@ const ForkSavedWorkflowsPage: React.FC = () => {
 						organizations={memberOrganizations}
 						organization={organization}
 						onChange={(org) => {
-							setSelectedOrganizationId(org.id);
 							setSearchParams(
 								(prev) => {
 									const next = new URLSearchParams(prev);

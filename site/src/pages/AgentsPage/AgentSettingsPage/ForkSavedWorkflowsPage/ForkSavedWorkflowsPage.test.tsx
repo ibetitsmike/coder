@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
@@ -263,6 +263,67 @@ describe("ForkSavedWorkflowsPage", () => {
 		await screen.findByRole("table", { name: "Personal workflows" });
 		expect(listUser).toHaveBeenCalledWith(MockOrganization2.id);
 		expect(listOrganization).toHaveBeenCalledWith(MockOrganization2.id);
+	});
+
+	it("keeps the picker choice in the URL so back and forward follow it", async () => {
+		const user = userEvent.setup();
+		const { listUser, router } = renderPage();
+		await waitFor(() =>
+			expect(listUser).toHaveBeenCalledWith(MockDefaultOrganization.id),
+		);
+
+		await user.click(
+			await screen.findByRole("combobox", {
+				name: `Organization ${MockDefaultOrganization.display_name}`,
+			}),
+		);
+		await user.click(
+			screen.getByRole("option", {
+				name: new RegExp(MockOrganization2.display_name),
+			}),
+		);
+		await waitFor(() =>
+			expect(listUser).toHaveBeenLastCalledWith(MockOrganization2.id),
+		);
+		expect(router.state.location.search).toBe(`?org=${MockOrganization2.name}`);
+
+		// The page reads the organization from the URL alone, so forward and
+		// back follow the param. A push to the same page with the param and a
+		// step back restore it, which a replaced entry could not show.
+		await act(async () => {
+			router.navigate(
+				`/agents/settings/workflows?org=${MockOrganization2.name}`,
+			);
+		});
+		await waitFor(() =>
+			expect(listUser).toHaveBeenLastCalledWith(MockOrganization2.id),
+		);
+		await act(async () => {
+			router.navigate(-1);
+		});
+		await waitFor(() =>
+			expect(router.state.location.search).toBe(
+				`?org=${MockOrganization2.name}`,
+			),
+		);
+		expect(router.state.location.pathname).toBe("/agents/settings/workflows");
+	});
+
+	it("renders an unavailable state for an organization the URL names that the member is not in", async () => {
+		const { listUser, listOrganization } = renderPage({
+			// MockOrganization3 exists but the member does not belong to it.
+			route: `/agents/settings/workflows?org=${MockOrganization3.name}`,
+		});
+
+		await screen.findByText(
+			`You are not a member of an organization named ${MockOrganization3.name}, so its workflows are not available here. Pick one of your organizations above the list instead.`,
+		);
+		// No table and no create control of the default organization is
+		// reachable while the URL names an organization the member is not in.
+		expect(screen.queryByRole("table")).toBeNull();
+		expect(screen.queryByRole("button", { name: "New workflow" })).toBeNull();
+		expect(listUser).not.toHaveBeenCalled();
+		expect(listOrganization).not.toHaveBeenCalled();
 	});
 
 	it("offers only the member's organizations in the picker", async () => {

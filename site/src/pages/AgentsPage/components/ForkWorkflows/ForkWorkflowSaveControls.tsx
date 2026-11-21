@@ -27,7 +27,12 @@ export const ForkWorkflowSavedLink: React.FC<{
 	href: string;
 	ref?: React.Ref<HTMLAnchorElement>;
 }> = ({ name, href, ref }) => (
-	<Button variant="outline" size="sm" asChild className="max-w-full min-w-0">
+	<Button
+		variant="outline"
+		size="sm"
+		asChild
+		className="max-w-full min-w-0 shrink"
+	>
 		<a href={href} ref={ref} className="min-w-0">
 			<BookmarkCheckIcon className="shrink-0" />
 			<span className="truncate">Saved {name}</span>
