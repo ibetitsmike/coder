@@ -17,6 +17,7 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "#/components/DropdownMenu/DropdownMenu";
+import { RetryButton } from "#/components/RetryButton/RetryButton";
 import {
 	Table,
 	TableBody,
@@ -32,7 +33,6 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "#/components/Tooltip/Tooltip";
-import { RetryButton } from "#/pages/AgentsPage/components/RetryButton";
 import { SectionHeader } from "#/pages/AgentsPage/components/SectionHeader";
 import { formatUpdatedAt } from "#/pages/AgentsPage/components/SkillsTableView";
 import { useDialogFocusReturn } from "#/pages/AgentsPage/components/useDialogFocusReturn";

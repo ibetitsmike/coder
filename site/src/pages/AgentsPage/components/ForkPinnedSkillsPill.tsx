@@ -36,6 +36,7 @@ import {
 	CommandList,
 } from "#/components/Command/Command";
 import { Loader } from "#/components/Loader/Loader";
+import { RetryButton } from "#/components/RetryButton/RetryButton";
 import { toast } from "#/components/Toaster/toast";
 import { useAuthenticated } from "#/hooks/useAuthenticated";
 import { getSkillAlias, type SkillSourceList } from "../utils/skillAliases";
@@ -44,7 +45,6 @@ import { canManageChat } from "./ChatActionsMenuItems";
 import { EditableSkillChip, SkillChip } from "./ChatMessageInput/SkillChip";
 import type { SkillMetadata } from "./ChatMessageInput/SkillsTriggerMenu";
 import { ComposerPillPopover } from "./ComposerPillPopover";
-import { RetryButton } from "./RetryButton";
 
 const isSamePin = (a: ChatPinnedSkill, b: ChatPinnedSkill) =>
 	a.source === b.source && a.name === b.name;

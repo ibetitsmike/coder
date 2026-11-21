@@ -14,7 +14,7 @@ import {
 	DialogTitle,
 } from "#/components/Dialog/Dialog";
 import { Loader } from "#/components/Loader/Loader";
-import { RetryButton } from "#/pages/AgentsPage/components/RetryButton";
+import { RetryButton } from "#/components/RetryButton/RetryButton";
 import { SavedWorkflowTextArea } from "./ForkSavedWorkflowEditorDialog";
 import { formatSavedWorkflowPhases } from "./savedWorkflowForm";
 

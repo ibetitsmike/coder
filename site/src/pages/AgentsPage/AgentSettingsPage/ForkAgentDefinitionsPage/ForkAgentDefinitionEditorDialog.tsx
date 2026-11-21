@@ -18,9 +18,9 @@ import {
 import { Input } from "#/components/Input/Input";
 import { Label } from "#/components/Label/Label";
 import { Loader } from "#/components/Loader/Loader";
+import { RetryButton } from "#/components/RetryButton/RetryButton";
 import { Spinner } from "#/components/Spinner/Spinner";
 import { formatKiB } from "#/utils/fileSize";
-import { RetryButton } from "../../components/RetryButton";
 import {
 	SkillEditorBodyField,
 	SkillEditorDescriptionField,

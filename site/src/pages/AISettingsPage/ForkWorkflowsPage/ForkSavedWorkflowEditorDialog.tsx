@@ -17,8 +17,8 @@ import {
 import { Input } from "#/components/Input/Input";
 import { Label } from "#/components/Label/Label";
 import { Loader } from "#/components/Loader/Loader";
+import { RetryButton } from "#/components/RetryButton/RetryButton";
 import { Spinner } from "#/components/Spinner/Spinner";
-import { RetryButton } from "#/pages/AgentsPage/components/RetryButton";
 import {
 	SkillEditorFields,
 	SkillEditorSubmitError,

@@ -18,9 +18,9 @@ import {
 import type { ForkEnabledPluginPack } from "#/api/typesGenerated";
 import { ErrorAlert } from "#/components/Alert/ErrorAlert";
 import { Loader } from "#/components/Loader/Loader";
+import { RetryButton } from "#/components/RetryButton/RetryButton";
 import { Switch } from "#/components/Switch/Switch";
 import { toast } from "#/components/Toaster/toast";
-import { RetryButton } from "./RetryButton";
 import { SkillEnabledStatus } from "./SkillEnabledSwitch";
 
 const has = (packs: readonly ForkEnabledPluginPack[], packId: string) =>
