@@ -12,6 +12,7 @@ A workflow run is one call to the `run_workflow` tool.
 The call starts a Starlark script, a Python dialect, that runs sub-agent steps and combines their results.
 The script runs in the background, and the chat reads its result with `await_workflow`.
 The server keeps the run in its database, so a run survives a restart and can resume.
+The database holds a run that has ended for 30&nbsp;days after its last activity, and then a cleanup job deletes it, so the API and the web UI stop returning it and it can no longer resume.
 
 ## Who can run a workflow
 

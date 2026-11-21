@@ -48,7 +48,7 @@ If you can share a workflow, select **Manage permissions** in its row and change
 ## Share a personal workflow
 
 **Share with organization…** in a personal workflow's row moves it to the organization tier under the same name.
-Only the owner can share, and the owner keeps the right to edit and delete it.
-An organization admin can change who has access.
-Every member of the organization can read and run it after the share.
+Only the owner can share.
+The share starts the owner with read, update, and delete, and every member of the organization with read and run.
+These are the initial grants, not permanent rights: an organization admin can change them with **Manage permissions**, and can take the owner's edit and delete away or stop members from reading and running it.
 When the organization already has a workflow with that name, the move is refused with status 409 and asks you to rename your workflow.

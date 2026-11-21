@@ -908,19 +908,19 @@ A chat whose client supplies a tool with one of those names keeps the workflow t
 `run_workflow` starts a run and returns at once with a `run_id` and status `"running"`.
 Send the script inline as `script`, or write it to a file and send its absolute path as `script_path`.
 The server reads the file one time, when the run starts.
-Send `args` as a JSON object, or `name` to run a saved workflow instead.
+Send `args` as a JSON object, and `name` to run a saved workflow by name instead of a script; `name` can take `args` too, and they must match the workflow's args schema.
 The tool runs after the other tool calls of the same step, so a `write_file` that changed `script_path` in that step is done first.
 
 The script must define `main(args)`, which receives `args` and returns a JSON value.
 The builtins are `agent(prompt, type="general", schema=None, title="")`, which starts one step, waits for it, and returns its value or fails the script when the step fails, `spawn(...)` and `wait(handles)`, which start steps and collect handles, `log(message)` and `print()`, `json.encode` and `json.decode`, and `phase(name)`.
 `type` is `"general"` or `"explore"`.
-A step is a child chat of this chat that also gets the `workflow_report` tool, and its value must match `schema`, a JSON Schema dict with `"type": "object"` at the top level in draft-07 or draft 2020-12.
+A step is a child chat of this chat that also gets the `workflow_report` tool, and its value must match `schema`, a JSON Schema dict with `"type": "object"` at the top level in draft-07 or draft 2020-12, with no composition keywords such as `allOf` or `oneOf`, no `additionalProperties: false`, and local `$refs` that inline without recursion.
 Without a schema, the value is `{"text": "..."}`.
 A step's status is `running`, `reminded`, `reported`, or `failed`, and `reminded` means it got its one retry reminder.
 
 The script has no `load()`, no clock, no file access, and no network.
 `while` loops are allowed, and recursion is not.
-The limits are: script 64&nbsp;KiB, args 64&nbsp;KiB, 50 steps per run with reused ones included, where a further step fails the script, 10,000,000 Starlark execution steps, a result of 64&nbsp;KiB, a step value or report of 256&nbsp;KiB, 32 phases with names of 128&nbsp;bytes at most, one step at most 1&nbsp;hour, and 50 log lines in a result with one line cut to 4&nbsp;KiB.
+The limits are: script 64&nbsp;KiB, args 64&nbsp;KiB, 50 steps per run with reused ones included, where a further step fails the script, 10,000,000 Starlark execution steps, a result of 64&nbsp;KiB, a step value or report of 256&nbsp;KiB, 32 phases with names of 128&nbsp;bytes at most, a wait on one step of 1&nbsp;hour at most from when the script waits on it, and log lines in a result of 50 at most, one cut to 4&nbsp;KiB, and 64&nbsp;KiB together with the oldest dropped first.
 An optional top-level `PHASES = ["plan", "build", "review"]` list names the phases before the first step, and names first set by `phase()` are appended behind the declared ones.
 A `phase` call past the 32-phase cap fails the run.
 
