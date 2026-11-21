@@ -582,6 +582,73 @@ export const CompletedSaveDialogPermissionFailed: Story = {
 	},
 };
 
+// A name at the 128-byte limit, for the story whose saved link has to
+// truncate visually without losing its accessible name.
+const mockLongSavedName = `${"review-changed-files-".repeat(5)}reviewed`.slice(
+	0,
+	128,
+);
+
+/**
+ * A completed live card after the run's script was saved under a name at
+ * the 128-byte limit: the saved link truncates instead of overflowing.
+ */
+export const CompletedSavedLongName: Story = {
+	args: {
+		name: "run_workflow",
+		args: mockRunWorkflowArgs,
+		result: MockForkWorkflowStartedResult,
+	},
+	parameters: {
+		queries: [
+			chatQuery,
+			canUpdateChatQuery(true),
+			{
+				key: getAuthorizationKey({
+					checks: {
+						canCreateOrganizationSkill: {
+							object: {
+								resource_type: "organization_skill",
+								organization_id: MockChat.organization_id,
+							},
+							action: "create",
+						},
+					},
+				}),
+				data: { canCreateOrganizationSkill: true },
+			},
+		],
+		reactRouter: liveCardReactRouter,
+	},
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "get").mockResolvedValue({
+			data: MockChatWorkflowRunDetail,
+		});
+		spyOn(API.getAxiosInstance(), "post").mockResolvedValue({
+			data: { ...mockSavedWorkflow, name: mockLongSavedName },
+		});
+		spyOn(API, "checkAuthorization").mockResolvedValue({
+			canUpdateChat: true,
+			canCreateOrganizationSkill: true,
+		});
+	},
+	play: async (context) => {
+		await clickSave(context);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Save workflow",
+		});
+		const nameField = within(dialog).getByLabelText("Name");
+		await userEvent.clear(nameField);
+		await userEvent.type(nameField, mockLongSavedName);
+		await userEvent.click(
+			within(dialog).getByRole("button", { name: "Save workflow" }),
+		);
+		// Awaiting the link sets the screenshot state; the accessible-name
+		// assertion lives in ForkWorkflowTool.test.tsx.
+		await screen.findByRole("link", { name: `Saved ${mockLongSavedName}` });
+	},
+};
+
 /** A completed live card after the run's script was saved. */
 export const CompletedSaved: Story = {
 	args: {

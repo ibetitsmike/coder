@@ -275,6 +275,71 @@ export const CompletedSaveDialogPermissionFailed: Story = {
 	},
 };
 
+// A name at the 128-byte limit, for the story whose saved link has to
+// truncate visually without losing its accessible name.
+const mockLongSavedName = `${"review-changed-files-".repeat(5)}reviewed`.slice(
+	0,
+	128,
+);
+
+/**
+ * A completed run after the run's script was saved under a name at the
+ * 128-byte limit: the saved link truncates instead of overflowing.
+ */
+export const CompletedSavedLongName: Story = {
+	parameters: {
+		queries: [
+			...baseQueries,
+			{
+				key: getAuthorizationKey({
+					checks: {
+						canCreateOrganizationSkill: {
+							object: {
+								resource_type: "organization_skill",
+								organization_id: MockChat.organization_id,
+							},
+							action: "create",
+						},
+					},
+				}),
+				data: { canCreateOrganizationSkill: true },
+			},
+		],
+	},
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "post").mockResolvedValue({
+			data: {
+				...MockForkSavedWorkflow,
+				id: "saved-workflow-new",
+				name: mockLongSavedName,
+				organization_id: MockChat.organization_id,
+				user_id: "me",
+				created_by: "me",
+				description: "",
+				args_schema: undefined,
+				phases: [],
+			},
+		});
+	},
+	play: async ({ canvas }) => {
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Save workflow" }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Save workflow",
+		});
+		const nameField = within(dialog).getByLabelText("Name");
+		await userEvent.clear(nameField);
+		await userEvent.type(nameField, mockLongSavedName);
+		await userEvent.click(
+			within(dialog).getByRole("button", { name: "Save workflow" }),
+		);
+		// Awaiting the link sets the screenshot state; the accessible-name
+		// assertion lives in ForkWorkflowRunDetail.test.tsx.
+		await screen.findByRole("link", { name: `Saved ${mockLongSavedName}` });
+	},
+};
+
 /** A completed run after the run's script was saved. */
 export const CompletedSaved: Story = {
 	parameters: {

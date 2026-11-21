@@ -75,8 +75,8 @@ export const nameFromTitle = (title: string): string =>
 
 /**
  * The dialog starts from these values. Both the card and the panel pass
- * the run's title, so the name starts as its slug and the submit stays
- * disabled until the user types a valid one.
+ * the run's title, so the name starts as its slug, which can already be
+ * valid and enable the submit without typing.
  */
 export const ForkWorkflowSaveDialog: React.FC<ForkWorkflowSaveDialogProps> = ({
 	title,

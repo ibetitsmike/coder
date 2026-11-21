@@ -574,6 +574,60 @@ describe("ForkWorkflowTool", () => {
 		);
 	});
 
+	it("keeps the full saved name in the replacement link's accessible name", async () => {
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
+		seedCreatePermission(queryClient, true);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		// A name at the 128-byte limit truncates visually but must stay
+		// whole for screen readers.
+		const longName = `${"review-changed-files-".repeat(5)}reviewed`.slice(
+			0,
+			128,
+		);
+		vi.spyOn(
+			forkSavedWorkflowsApi,
+			"createUserSavedWorkflow",
+		).mockResolvedValue({
+			...MockForkSavedWorkflow,
+			id: "saved-workflow-new",
+			name: longName,
+			organization_id: MockChat.organization_id,
+			user_id: "me",
+			created_by: "me",
+			description: "",
+			args_schema: undefined,
+			phases: [],
+		});
+		renderWorkflowTool(
+			"run_workflow",
+			MockForkWorkflowStartedResult,
+			queryClient,
+		);
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /workflow completed/i }),
+		);
+		await user.click(
+			await screen.findByRole("button", { name: "Save workflow" }),
+		);
+		const dialog = screen.getByRole("dialog", { name: "Save workflow" });
+		const nameField = within(dialog).getByLabelText("Name");
+		await user.clear(nameField);
+		await user.type(nameField, longName);
+		await user.click(
+			within(dialog).getByRole("button", { name: "Save workflow" }),
+		);
+
+		const link = await screen.findByRole("link", {
+			name: `Saved ${longName}`,
+		});
+		expect(link).toHaveFocus();
+		expect(link.textContent).toContain(longName);
+	});
+
 	it("hides the save action without a script", async () => {
 		const queryClient = createTestQueryClient();
 		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);

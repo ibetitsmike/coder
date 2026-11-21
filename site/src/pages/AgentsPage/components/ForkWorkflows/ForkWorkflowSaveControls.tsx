@@ -6,6 +6,7 @@ import { BookmarkCheckIcon, BookmarkPlusIcon } from "lucide-react";
 import type React from "react";
 import { Button } from "#/components/Button/Button";
 
+/** The button that opens the run's save dialog. */
 export const ForkWorkflowSaveButton: React.FC<{
 	onClick: () => void;
 }> = ({ onClick }) => (
@@ -15,15 +16,21 @@ export const ForkWorkflowSaveButton: React.FC<{
 	</Button>
 );
 
+/**
+ * The link that replaces the save button once a save succeeds. It takes
+ * the button's place and receives its focus after the dialog closes.
+ * Long names shrink with the control and truncate visually while the
+ * accessible name keeps the full name.
+ */
 export const ForkWorkflowSavedLink: React.FC<{
 	name: string;
 	href: string;
 	ref?: React.Ref<HTMLAnchorElement>;
 }> = ({ name, href, ref }) => (
-	<Button variant="outline" size="sm" asChild>
-		<a href={href} ref={ref}>
-			<BookmarkCheckIcon />
-			Saved {name}
+	<Button variant="outline" size="sm" asChild className="max-w-full min-w-0">
+		<a href={href} ref={ref} className="min-w-0">
+			<BookmarkCheckIcon className="shrink-0" />
+			<span className="truncate">Saved {name}</span>
 		</a>
 	</Button>
 );
