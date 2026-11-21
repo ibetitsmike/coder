@@ -324,6 +324,16 @@ While plan mode is active:
 This keeps planning turns focused on analysis and plan authoring rather than implementation.
 Once you select **Implement plan**, the next turn runs in normal mode again.
 
+## Workflows
+
+With the `fork-workflows` experiment, a root chat can fan work out to sub-agent steps and combine their results with `run_workflow`, `await_workflow`, and `list_workflows`.
+Refer to [Workflows on Coder Agents](../fork/workflows.md) for scripts, limits, saved workflows, and the API.
+
+## Saved workflow administration
+
+Organization administrators save, share, and manage workflows for their members in **AI Settings** > **Workflows**.
+Refer to [Saved workflow administration](../fork/workflow-administration.md) for the editor, the permissions, and the sharing.
+
 ## Questions outside plan mode
 
 In chats created from the Coder dashboard, the agent can also call `ask_user_question` outside plan mode.
