@@ -388,6 +388,21 @@ describe("ForkAgentMentionPlugin", () => {
 		expect(getOrganizationWorkflows).toHaveBeenCalledWith(
 			MockDefaultOrganization.id,
 		);
+		// The organization workflow stays offered next to the personal one,
+		// so the org result reaches the menu and its insertion carries the
+		// org name. The insertion replaced the query, so typing "@" reopens
+		// the menu.
+		await user.keyboard("@");
+		await user.click(
+			screen.getByRole("option", {
+				name: new RegExp(`^@${MockForkOrganizationSavedWorkflowMetadata.name}`),
+			}),
+		);
+		// The first insertion stays in the composer: the org mention is
+		// appended after it.
+		expect(inputRef.current?.getValue()).toBe(
+			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}), with args: "files" (required). Run the ${MockForkOrganizationSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkOrganizationSavedWorkflowMetadata.name}): `,
+		);
 	});
 
 	it("omits the args summary for a workflow without an args schema", async () => {
