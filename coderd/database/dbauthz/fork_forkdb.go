@@ -1573,3 +1573,53 @@ func (f *forkQuerier) DeleteOrganizationSavedWorkflowByName(ctx context.Context,
 	}
 	return fetchAndQuery(f.q.log, f.q.auth, policy.ActionDelete, fetch, f.db.DeleteOrganizationSavedWorkflowByName)(ctx, arg)
 }
+
+// The APNs device queries authorize like upstream's web push subscriptions:
+// a user manages their own devices, and the notifier, which sends the
+// pushes, reads and prunes every user's.
+
+func (f *forkQuerier) UpsertChatAPNsDevice(ctx context.Context, arg forkdb.UpsertChatAPNsDeviceParams) error {
+	if err := f.q.authorizeContext(ctx, policy.ActionCreate, rbac.ResourceWebpushSubscription.WithOwner(arg.UserID.String())); err != nil {
+		return err
+	}
+	return f.db.UpsertChatAPNsDevice(ctx, arg)
+}
+
+func (f *forkQuerier) GetChatAPNsDevice(ctx context.Context, arg forkdb.GetChatAPNsDeviceParams) (forkdb.ChatApnsDevice, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceWebpushSubscription.WithOwner(arg.UserID.String())); err != nil {
+		return forkdb.ChatApnsDevice{}, err
+	}
+	return f.db.GetChatAPNsDevice(ctx, arg)
+}
+
+func (f *forkQuerier) GetChatAPNsDevicesByUserID(ctx context.Context, userID uuid.UUID) ([]forkdb.ChatApnsDevice, error) {
+	if err := f.q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceWebpushSubscription.WithOwner(userID.String())); err != nil {
+		return nil, err
+	}
+	return f.db.GetChatAPNsDevicesByUserID(ctx, userID)
+}
+
+func (f *forkQuerier) DeleteChatAPNsDevice(ctx context.Context, arg forkdb.DeleteChatAPNsDeviceParams) error {
+	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceWebpushSubscription.WithOwner(arg.UserID.String())); err != nil {
+		return err
+	}
+	return f.db.DeleteChatAPNsDevice(ctx, arg)
+}
+
+// DeleteChatAPNsDeviceByToken names no owner, so it needs site-wide delete,
+// which only the notifier has.
+func (f *forkQuerier) DeleteChatAPNsDeviceByToken(ctx context.Context, deviceToken string) error {
+	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceWebpushSubscription); err != nil {
+		return err
+	}
+	return f.db.DeleteChatAPNsDeviceByToken(ctx, deviceToken)
+}
+
+// UpdateChatAPNsDeviceEnvironment names no owner, so it needs site-wide
+// update, which only the notifier has.
+func (f *forkQuerier) UpdateChatAPNsDeviceEnvironment(ctx context.Context, arg forkdb.UpdateChatAPNsDeviceEnvironmentParams) error {
+	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceWebpushSubscription); err != nil {
+		return err
+	}
+	return f.db.UpdateChatAPNsDeviceEnvironment(ctx, arg)
+}

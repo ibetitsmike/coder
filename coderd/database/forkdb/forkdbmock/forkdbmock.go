@@ -191,6 +191,34 @@ func (mr *MockStoreMockRecorder) CountLiveSubagentsInFamily(ctx, rootChatID any)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountLiveSubagentsInFamily", reflect.TypeOf((*MockStore)(nil).CountLiveSubagentsInFamily), ctx, rootChatID)
 }
 
+// DeleteChatAPNsDevice mocks base method.
+func (m *MockStore) DeleteChatAPNsDevice(ctx context.Context, arg forkdb.DeleteChatAPNsDeviceParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteChatAPNsDevice", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteChatAPNsDevice indicates an expected call of DeleteChatAPNsDevice.
+func (mr *MockStoreMockRecorder) DeleteChatAPNsDevice(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChatAPNsDevice", reflect.TypeOf((*MockStore)(nil).DeleteChatAPNsDevice), ctx, arg)
+}
+
+// DeleteChatAPNsDeviceByToken mocks base method.
+func (m *MockStore) DeleteChatAPNsDeviceByToken(ctx context.Context, deviceToken string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteChatAPNsDeviceByToken", ctx, deviceToken)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteChatAPNsDeviceByToken indicates an expected call of DeleteChatAPNsDeviceByToken.
+func (mr *MockStoreMockRecorder) DeleteChatAPNsDeviceByToken(ctx, deviceToken any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChatAPNsDeviceByToken", reflect.TypeOf((*MockStore)(nil).DeleteChatAPNsDeviceByToken), ctx, deviceToken)
+}
+
 // DeleteChatExcludedPluginPack mocks base method.
 func (m *MockStore) DeleteChatExcludedPluginPack(ctx context.Context, arg forkdb.DeleteChatExcludedPluginPackParams) error {
 	m.ctrl.T.Helper()
@@ -595,6 +623,36 @@ func (m *MockStore) FireChatProcessWatches(ctx context.Context, arg forkdb.FireC
 func (mr *MockStoreMockRecorder) FireChatProcessWatches(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FireChatProcessWatches", reflect.TypeOf((*MockStore)(nil).FireChatProcessWatches), ctx, arg)
+}
+
+// GetChatAPNsDevice mocks base method.
+func (m *MockStore) GetChatAPNsDevice(ctx context.Context, arg forkdb.GetChatAPNsDeviceParams) (forkdb.ChatApnsDevice, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetChatAPNsDevice", ctx, arg)
+	ret0, _ := ret[0].(forkdb.ChatApnsDevice)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetChatAPNsDevice indicates an expected call of GetChatAPNsDevice.
+func (mr *MockStoreMockRecorder) GetChatAPNsDevice(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatAPNsDevice", reflect.TypeOf((*MockStore)(nil).GetChatAPNsDevice), ctx, arg)
+}
+
+// GetChatAPNsDevicesByUserID mocks base method.
+func (m *MockStore) GetChatAPNsDevicesByUserID(ctx context.Context, userID uuid.UUID) ([]forkdb.ChatApnsDevice, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetChatAPNsDevicesByUserID", ctx, userID)
+	ret0, _ := ret[0].([]forkdb.ChatApnsDevice)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetChatAPNsDevicesByUserID indicates an expected call of GetChatAPNsDevicesByUserID.
+func (mr *MockStoreMockRecorder) GetChatAPNsDevicesByUserID(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatAPNsDevicesByUserID", reflect.TypeOf((*MockStore)(nil).GetChatAPNsDevicesByUserID), ctx, userID)
 }
 
 // GetChatFamilyMessageRecipient mocks base method.
@@ -2233,6 +2291,20 @@ func (mr *MockStoreMockRecorder) SumOrganizationWakeupChatCostMicrosSince(ctx, a
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SumOrganizationWakeupChatCostMicrosSince", reflect.TypeOf((*MockStore)(nil).SumOrganizationWakeupChatCostMicrosSince), ctx, arg)
 }
 
+// UpdateChatAPNsDeviceEnvironment mocks base method.
+func (m *MockStore) UpdateChatAPNsDeviceEnvironment(ctx context.Context, arg forkdb.UpdateChatAPNsDeviceEnvironmentParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateChatAPNsDeviceEnvironment", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateChatAPNsDeviceEnvironment indicates an expected call of UpdateChatAPNsDeviceEnvironment.
+func (mr *MockStoreMockRecorder) UpdateChatAPNsDeviceEnvironment(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateChatAPNsDeviceEnvironment", reflect.TypeOf((*MockStore)(nil).UpdateChatAPNsDeviceEnvironment), ctx, arg)
+}
+
 // UpdateChatSubagentWorkspaceID mocks base method.
 func (m *MockStore) UpdateChatSubagentWorkspaceID(ctx context.Context, arg forkdb.UpdateChatSubagentWorkspaceIDParams) error {
 	m.ctrl.T.Helper()
@@ -2511,6 +2583,20 @@ func (m *MockStore) UpdateWorkflowStep(ctx context.Context, arg forkdb.UpdateWor
 func (mr *MockStoreMockRecorder) UpdateWorkflowStep(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateWorkflowStep", reflect.TypeOf((*MockStore)(nil).UpdateWorkflowStep), ctx, arg)
+}
+
+// UpsertChatAPNsDevice mocks base method.
+func (m *MockStore) UpsertChatAPNsDevice(ctx context.Context, arg forkdb.UpsertChatAPNsDeviceParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpsertChatAPNsDevice", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpsertChatAPNsDevice indicates an expected call of UpsertChatAPNsDevice.
+func (mr *MockStoreMockRecorder) UpsertChatAPNsDevice(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertChatAPNsDevice", reflect.TypeOf((*MockStore)(nil).UpsertChatAPNsDevice), ctx, arg)
 }
 
 // UpsertChatDescendantQuestion mocks base method.

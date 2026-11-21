@@ -290,6 +290,18 @@ type AgentDefinition struct {
 	UpdatedAt time.Time        `db:"updated_at" json:"updated_at"`
 }
 
+type ChatApnsDevice struct {
+	DeviceToken   string    `db:"device_token" json:"device_token"`
+	UserID        uuid.UUID `db:"user_id" json:"user_id"`
+	Environment   string    `db:"environment" json:"environment"`
+	FinishedTurns bool      `db:"finished_turns" json:"finished_turns"`
+	Questions     bool      `db:"questions" json:"questions"`
+	AgentErrors   bool      `db:"agent_errors" json:"agent_errors"`
+	Sound         bool      `db:"sound" json:"sound"`
+	CreatedAt     time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt     time.Time `db:"updated_at" json:"updated_at"`
+}
+
 // The latest question each descendant chat asked the user with ask_user_question. The question is pending while answered_at is NULL. The transaction that inserts the user message that answers or retires it sets answered_at, and a new question of the chat clears it.
 type ChatDescendantQuestion struct {
 	ChatID     uuid.UUID       `db:"chat_id" json:"chat_id"`
