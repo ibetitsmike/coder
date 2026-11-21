@@ -3,7 +3,11 @@ import type {
 	ForkSavedWorkflowMetadata,
 } from "#/api/typesGenerated";
 import { MOCK_TIMESTAMP } from "./chatEntities";
-import { MockDefaultOrganization, MockUserOwner } from "./entities";
+import {
+	MockDefaultOrganization,
+	MockUserMember,
+	MockUserOwner,
+} from "./entities";
 import { MockForkWorkflowScript } from "./forkWorkflows";
 
 export const MockForkSavedWorkflowMetadata: ForkSavedWorkflowMetadata = {
@@ -41,3 +45,11 @@ export const MockForkOrganizationSavedWorkflowMetadata: ForkSavedWorkflowMetadat
 		created_by: undefined,
 		phases: [],
 	};
+
+/** MockForkSavedWorkflowMetadata after MockUserMember shared it. */
+export const MockForkSharedSavedWorkflowMetadata: ForkSavedWorkflowMetadata = {
+	...MockForkSavedWorkflowMetadata,
+	id: "saved-workflow-shared",
+	user_id: undefined,
+	created_by: MockUserMember.id,
+};

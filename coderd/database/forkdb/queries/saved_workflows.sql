@@ -37,6 +37,27 @@ WHERE organization_id = @organization_id::uuid AND user_id = @user_id::uuid AND 
   AND (sqlc.narg('expect_id')::uuid IS NULL OR id = sqlc.narg('expect_id')::uuid)
 RETURNING *;
 
+-- name: ShareUserSavedWorkflowByName :one
+-- Moves a personal workflow to the organization tier under the same name in
+-- one statement, so a failed insert, such as a taken name or a full
+-- organization, keeps the personal row. The owner keeps read, update and
+-- delete through a user grant, and every member reads it through the
+-- Everyone group, whose id is the organization's. Set ExpectID to move only
+-- when the personal row still has that id.
+WITH moved AS (
+    DELETE FROM saved_workflows
+    WHERE organization_id = @organization_id::uuid AND user_id = @user_id::uuid AND name = @name::text
+      AND (sqlc.narg('expect_id')::uuid IS NULL OR id = sqlc.narg('expect_id')::uuid)
+    RETURNING *
+)
+INSERT INTO saved_workflows (organization_id, created_by, name, description, script, args_schema, phases, group_acl, user_acl)
+SELECT
+    organization_id, user_id, name, description, script, args_schema, phases,
+    jsonb_build_object(organization_id::text, jsonb_build_object('permissions', jsonb_build_array('read'))),
+    jsonb_build_object(user_id::text, jsonb_build_object('permissions', jsonb_build_array('read', 'update', 'delete')))
+FROM moved
+RETURNING *;
+
 -- name: InsertOrganizationSavedWorkflow :one
 INSERT INTO saved_workflows (organization_id, created_by, name, description, script, args_schema, phases, group_acl, user_acl)
 VALUES (@organization_id::uuid, @created_by::uuid, @name::text, @description::text, @script::text, @args_schema, COALESCE(@phases::text[], '{}'), @group_acl, @user_acl)

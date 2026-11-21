@@ -1,5 +1,6 @@
 // This file is fork code. Organization admins manage organization
-// workflows in AI settings, so members only read them here.
+// workflows in AI settings. Members share their personal workflows with the
+// organization here and edit the ones they shared.
 
 import { useState } from "react";
 import { Navigate } from "react-router";
@@ -11,7 +12,15 @@ import {
 } from "#/modules/dashboard/useDashboard";
 import { ForkSavedWorkflowsTable } from "#/pages/AISettingsPage/ForkWorkflowsPage/ForkSavedWorkflowsTable";
 import { SectionHeader } from "../../components/SectionHeader";
-import { readOnlySkillAccess } from "../../utils/skills";
+import { readOnlySkillAccess, type SkillAccess } from "../../utils/skills";
+
+// A member who shared a workflow keeps the right to edit and delete it,
+// unless an admin revoked it. The server checks either way.
+const sharedWorkflowAccess: SkillAccess = {
+	create: false,
+	update: true,
+	delete: true,
+};
 
 const ForkSavedWorkflowsPage: React.FC = () => {
 	const { user } = useAuthenticated();
@@ -55,13 +64,19 @@ const ForkSavedWorkflowsPage: React.FC = () => {
 			)}
 			<ForkSavedWorkflowsTable
 				scope={{ tier: "user", organizationId: organization.id }}
+				canShare
 			/>
 			<ForkSavedWorkflowsTable
 				scope={{ tier: "organization", organizationId: organization.id }}
 				access={readOnlySkillAccess}
+				rowAccess={(workflow) =>
+					workflow.created_by === user.id
+						? sharedWorkflowAccess
+						: readOnlySkillAccess
+				}
 				copy={{
 					description:
-						"Organization workflows you can read. Your chats in this organization run one with run_workflow. Ask an organization admin to change them.",
+						"Organization workflows you can read. Your chats in this organization run one with run_workflow. You can edit and delete the ones you shared. Ask an organization admin to change the others.",
 					emptyMessage: "No organization workflows are available to you.",
 				}}
 			/>
