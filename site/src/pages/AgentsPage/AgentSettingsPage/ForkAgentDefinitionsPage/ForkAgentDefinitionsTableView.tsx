@@ -13,6 +13,7 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "#/components/DropdownMenu/DropdownMenu";
+import { RetryButton } from "#/components/RetryButton/RetryButton";
 import { Switch } from "#/components/Switch/Switch";
 import {
 	Table,
@@ -24,7 +25,6 @@ import {
 } from "#/components/Table/Table";
 import { TableEmpty } from "#/components/TableEmpty/TableEmpty";
 import { TableLoader } from "#/components/TableLoader/TableLoader";
-import { RetryButton } from "../../components/RetryButton";
 import { SectionHeader } from "../../components/SectionHeader";
 import { SkillEnabledStatus } from "../../components/SkillEnabledSwitch";
 import { formatUpdatedAt } from "../../components/SkillsTableView";

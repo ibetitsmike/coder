@@ -11,6 +11,7 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "#/components/DropdownMenu/DropdownMenu";
+import { RetryButton } from "#/components/RetryButton/RetryButton";
 import {
 	Table,
 	TableBody,
@@ -21,7 +22,6 @@ import {
 } from "#/components/Table/Table";
 import { TableEmpty } from "#/components/TableEmpty/TableEmpty";
 import { TableLoader } from "#/components/TableLoader/TableLoader";
-import { RetryButton } from "#/pages/AgentsPage/components/RetryButton";
 import { SectionHeader } from "#/pages/AgentsPage/components/SectionHeader";
 import { formatUpdatedAt } from "#/pages/AgentsPage/components/SkillsTableView";
 import type { useDialogFocusReturn } from "#/pages/AgentsPage/components/useDialogFocusReturn";
