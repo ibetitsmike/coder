@@ -59,9 +59,10 @@ func TestForkChatPushKind(t *testing.T) {
 }
 
 // A key that does not load stops the server from starting.
-// A key that does not load turns APNs off and leaves chatd with upstream's
-// dispatcher, so a bad key never stops the server.
-func TestForkChatPushDispatcherBadKey(t *testing.T) {
+// A missing option or a key that does not load turns APNs off and leaves
+// chatd with upstream's dispatcher, so a bad APNs config never stops the
+// server.
+func TestForkChatPushDispatcherBadConfig(t *testing.T) {
 	t.Parallel()
 
 	garbage := filepath.Join(t.TempDir(), "AuthKey.p8")
@@ -69,15 +70,21 @@ func TestForkChatPushDispatcherBadKey(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		keyFile string
+		keyID   string
+		message string
 		reason  string
 	}{
-		{name: "Unreadable", keyFile: filepath.Join(t.TempDir(), "missing.p8"), reason: "read APNs key file"},
-		{name: "NotPEM", keyFile: garbage, reason: "APNs key file is not PEM"},
+		{name: "Unreadable", keyFile: filepath.Join(t.TempDir(), "missing.p8"), keyID: "TESTKEY123", message: "APNs push is off: the APNs key does not load", reason: "read APNs key file"},
+		{name: "NotPEM", keyFile: garbage, keyID: "TESTKEY123", message: "APNs push is off: the APNs key does not load", reason: "APNs key file is not PEM"},
+		{name: "MissingKeyID", keyFile: garbage, message: "APNs push is off: an APNs option is not set", reason: "--chat-apns-key-id"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			values := &codersdk.DeploymentValues{}
 			require.NoError(t, values.AI.Chat.Fork.APNsKeyFile.Set(tc.keyFile))
+			require.NoError(t, values.AI.Chat.Fork.APNsKeyID.Set(tc.keyID))
+			require.NoError(t, values.AI.Chat.Fork.APNsTeamID.Set("TEAM123456"))
+			require.NoError(t, values.AI.Chat.Fork.APNsTopic.Set(codersdk.DefaultChatAPNsTopic))
 			sink := testutil.NewFakeSink(t)
 			api := &API{
 				ctx:         context.Background(),
@@ -91,7 +98,7 @@ func TestForkChatPushDispatcherBadKey(t *testing.T) {
 
 			errors := sink.Entries(func(e slog.SinkEntry) bool { return e.Level == slog.LevelError })
 			require.Len(t, errors, 2)
-			require.Equal(t, "APNs push is off: the APNs key does not load", errors[0].Message)
+			require.Equal(t, tc.message, errors[0].Message)
 			fields := fmt.Sprint(errors[0].Fields)
 			require.Contains(t, fields, tc.reason)
 			require.NotContains(t, fields, "SECRETGARBAGE")

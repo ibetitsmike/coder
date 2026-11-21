@@ -69,15 +69,17 @@ func TestForkChatAPNsOptions(t *testing.T) {
 	require.False(t, values.AI.Chat.Fork.APNsConfigured())
 	require.NoError(t, values.Validate())
 
-	// Validate covers YAML, which sets values without per-option validators.
-	require.NoError(t, opts.ByFlag("chat-apns-key-file").Value.Set("/keys/AuthKey.p8"))
-	require.ErrorContains(t, values.Validate(), "must be set together")
+	// Partial APNs options never fail validation: coderd logs what is
+	// missing and leaves APNs off.
 	require.NoError(t, opts.ByFlag("chat-apns-key-id").Value.Set("ABC123DEFG"))
-	require.ErrorContains(t, values.Validate(), "must be set together")
-	require.NoError(t, opts.ByFlag("chat-apns-team-id").Value.Set("TEAM123456"))
-	require.NoError(t, values.Validate())
 	require.True(t, values.AI.Chat.Fork.APNsConfigured())
+	require.Equal(t, []string{"--chat-apns-key-file", "--chat-apns-team-id"}, values.AI.Chat.Fork.APNsMissing())
+	require.NoError(t, values.Validate())
+	require.NoError(t, opts.ByFlag("chat-apns-key-file").Value.Set("/keys/AuthKey.p8"))
+	require.NoError(t, opts.ByFlag("chat-apns-team-id").Value.Set("TEAM123456"))
+	require.Empty(t, values.AI.Chat.Fork.APNsMissing())
 
 	require.NoError(t, opts.ByFlag("chat-apns-topic").Value.Set(""))
-	require.ErrorContains(t, values.Validate(), "--chat-apns-topic must not be empty")
+	require.Equal(t, []string{"--chat-apns-topic"}, values.AI.Chat.Fork.APNsMissing())
+	require.NoError(t, values.Validate())
 }

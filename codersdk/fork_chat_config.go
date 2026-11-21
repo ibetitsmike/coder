@@ -4,7 +4,6 @@ package codersdk
 // upstream's ChatConfig and Options gain only one hook line each.
 
 import (
-	"slices"
 	"strconv"
 
 	"golang.org/x/xerrors"
@@ -53,9 +52,30 @@ type ForkChatConfig struct {
 // DefaultChatAPNsTopic is the bundle ID of Coder for iOS.
 const DefaultChatAPNsTopic = "com.coder.ios"
 
-// APNsConfigured reports whether the APNs key options are set.
+// APNsConfigured reports whether any APNs key option is set.
 func (c ForkChatConfig) APNsConfigured() bool {
-	return c.APNsKeyFile.Value() != ""
+	return c.APNsKeyFile.Value() != "" || c.APNsKeyID.Value() != "" || c.APNsTeamID.Value() != ""
+}
+
+// APNsMissing lists the flags of the APNs options that are empty. APNs
+// needs them all. The server never refuses to start over them: coderd logs
+// what is missing and leaves APNs off.
+func (c ForkChatConfig) APNsMissing() []string {
+	var missing []string
+	for _, opt := range []struct {
+		flag  string
+		value string
+	}{
+		{"--chat-apns-key-file", c.APNsKeyFile.Value()},
+		{"--chat-apns-key-id", c.APNsKeyID.Value()},
+		{"--chat-apns-team-id", c.APNsTeamID.Value()},
+		{"--chat-apns-topic", c.APNsTopic.Value()},
+	} {
+		if opt.value == "" {
+			missing = append(missing, opt.flag)
+		}
+	}
+	return missing
 }
 
 func (c *DeploymentValues) forkChatOptions(group *serpent.Group) serpent.OptionSet {
@@ -157,13 +177,6 @@ func (c *DeploymentValues) validateForkChat() error {
 		if limit.value < 0 {
 			return xerrors.Errorf("--%s (%d) must be 0 or greater", limit.flag, limit.value)
 		}
-	}
-	apns := []string{c.AI.Chat.Fork.APNsKeyFile.Value(), c.AI.Chat.Fork.APNsKeyID.Value(), c.AI.Chat.Fork.APNsTeamID.Value()}
-	if slices.Contains(apns, "") && slices.ContainsFunc(apns, func(s string) bool { return s != "" }) {
-		return xerrors.New("--chat-apns-key-file, --chat-apns-key-id and --chat-apns-team-id must be set together")
-	}
-	if c.AI.Chat.Fork.APNsConfigured() && c.AI.Chat.Fork.APNsTopic.Value() == "" {
-		return xerrors.New("--chat-apns-topic must not be empty when --chat-apns-key-file is set")
 	}
 	return nil
 }
