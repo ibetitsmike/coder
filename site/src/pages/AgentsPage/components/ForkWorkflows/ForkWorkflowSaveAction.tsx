@@ -68,13 +68,19 @@ const ForkWorkflowSaveActionInner: React.FC<
 		(organization) => organization.id === organizationId,
 	)?.name;
 	if (saved) {
+		// Without the organization's name the link could not select it, so
+		// it renders as plain text rather than a link to a wrong or empty
+		// ?org= parameter.
+		if (!organizationName) {
+			return dialog;
+		}
 		return (
 			<>
 				{dialog}
 				<ForkWorkflowSavedLink
 					ref={savedLinkRef}
 					name={saved.name}
-					href={savedWorkflowSettingsPath(saved.tier, organizationName ?? "")}
+					href={savedWorkflowSettingsPath(saved.tier, organizationName)}
 				/>
 			</>
 		);

@@ -426,6 +426,32 @@ describe("ForkWorkflowTool", () => {
 		);
 	});
 
+	it("offers Save on a card whose completed result loaded from history", async () => {
+		// An old chat reopens with the await_workflow result already
+		// completed, so no running card ever polls to completed: the card
+		// still must fetch the run's detail once and offer Save.
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
+		const getRun = vi
+			.spyOn(forkWorkflowsApi, "getChatWorkflowRun")
+			.mockResolvedValue(MockChatWorkflowRunDetail);
+		renderWorkflowTool(
+			"await_workflow",
+			MockForkWorkflowCompletedResult,
+			queryClient,
+		);
+
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /workflow completed/i }),
+		);
+
+		const save = await screen.findByRole("button", { name: "Save workflow" });
+		expect(save).toBeEnabled();
+		// The ended card loads its detail once instead of polling.
+		expect(getRun).toHaveBeenCalledTimes(1);
+	});
+
 	it("saves the run's script as a personal workflow from the card", async () => {
 		const queryClient = createTestQueryClient();
 		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
@@ -486,6 +512,62 @@ describe("ForkWorkflowTool", () => {
 		expect(
 			screen.getByRole("link", { name: /Saved review-changed-files/ }),
 		).toHaveFocus();
+	});
+
+	it("saves the run's script as an organization workflow when the Organization tier is selected", async () => {
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
+		seedCreatePermission(queryClient, true);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		const createOrg = vi
+			.spyOn(forkSavedWorkflowsApi, "createOrganizationSavedWorkflow")
+			.mockResolvedValue({
+				...MockForkSavedWorkflow,
+				id: "saved-workflow-new",
+				name: "review-changed-files",
+				organization_id: MockChat.organization_id,
+				user_id: undefined,
+				created_by: undefined,
+				description: "",
+				args_schema: undefined,
+				phases: [],
+			});
+		renderWorkflowTool(
+			"run_workflow",
+			MockForkWorkflowStartedResult,
+			queryClient,
+		);
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /workflow completed/i }),
+		);
+
+		await user.click(
+			await screen.findByRole("button", { name: "Save workflow" }),
+		);
+		const dialog = screen.getByRole("dialog", { name: "Save workflow" });
+		await user.click(
+			within(dialog).getByRole("radio", { name: "Organization" }),
+		);
+		await user.click(
+			within(dialog).getByRole("button", { name: "Save workflow" }),
+		);
+
+		await waitFor(() => expect(createOrg).toHaveBeenCalledOnce());
+		expect(createOrg).toHaveBeenCalledWith(
+			MockChat.organization_id,
+			expect.objectContaining({
+				name: "review-changed-files",
+				script: MockForkWorkflowScript.trimEnd(),
+			}),
+		);
+		// The personal-tier API must stay out of an organization-tier save.
+		const createUser = vi
+			.spyOn(forkSavedWorkflowsApi, "createUserSavedWorkflow")
+			.mockRejectedValue(new Error("personal API must not run"));
+		expect(createUser).not.toHaveBeenCalled();
 	});
 
 	it("trims the name before creating the workflow from the card", async () => {

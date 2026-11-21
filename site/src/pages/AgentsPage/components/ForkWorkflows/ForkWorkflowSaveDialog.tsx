@@ -130,7 +130,16 @@ export const ForkWorkflowSaveDialog: React.FC<ForkWorkflowSaveDialogProps> = ({
 					onSubmit={(event) => {
 						event.preventDefault();
 						if (canSubmit) {
-							onSubmit(tier, values);
+							// A denied or failed answer hides the tier choice,
+							// so a selection made before the answer arrived
+							// cannot send an organization write it may not
+							// make; the personal tier needs no permission.
+							onSubmit(
+								!canCreateOrganizationError && canCreateOrganization === true
+									? tier
+									: "user",
+								values,
+							);
 						}
 					}}
 				>

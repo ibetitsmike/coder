@@ -267,11 +267,13 @@ describe("ForkSavedWorkflowsPage", () => {
 
 	it("keeps the picker choice in the URL so back and forward follow it", async () => {
 		const user = userEvent.setup();
-		const { listUser, router } = renderPage();
+		const { listUser, listOrganization, router } = renderPage();
 		await waitFor(() =>
 			expect(listUser).toHaveBeenCalledWith(MockDefaultOrganization.id),
 		);
 
+		// Each picker write pushes a history entry, so the page keeps the
+		// member's steps in the session history.
 		await user.click(
 			await screen.findByRole("combobox", {
 				name: `Organization ${MockDefaultOrganization.display_name}`,
@@ -279,7 +281,7 @@ describe("ForkSavedWorkflowsPage", () => {
 		);
 		await user.click(
 			screen.getByRole("option", {
-				name: new RegExp(MockOrganization2.display_name),
+				name: new RegExp(`${MockOrganization2.display_name}$`),
 			}),
 		);
 		await waitFor(() =>
@@ -287,25 +289,47 @@ describe("ForkSavedWorkflowsPage", () => {
 		);
 		expect(router.state.location.search).toBe(`?org=${MockOrganization2.name}`);
 
-		// The page reads the organization from the URL alone, so forward and
-		// back follow the param. A push to the same page with the param and a
-		// step back restore it, which a replaced entry could not show.
-		await act(async () => {
-			router.navigate(
-				`/agents/settings/workflows?org=${MockOrganization2.name}`,
-			);
-		});
-		await waitFor(() =>
-			expect(listUser).toHaveBeenLastCalledWith(MockOrganization2.id),
+		await user.click(
+			await screen.findByRole("combobox", {
+				name: `Organization ${MockOrganization2.display_name}`,
+			}),
 		);
-		await act(async () => {
-			router.navigate(-1);
-		});
+		await user.click(
+			screen.getByRole("option", {
+				name: new RegExp(`${MockDefaultOrganization.display_name}$`),
+			}),
+		);
 		await waitFor(() =>
+			expect(listUser).toHaveBeenLastCalledWith(MockDefaultOrganization.id),
+		);
+		expect(router.state.location.search).toBe(
+			`?org=${MockDefaultOrganization.name}`,
+		);
+
+		// The page reads the organization from the URL alone, so back and
+		// forward must request the organizations their entries name, which
+		// catches a page that ignores the search parameter.
+		await act(async () => {
+			void router.navigate(-1);
+		});
+		await act(async () => {});
+		await waitFor(() => {
 			expect(router.state.location.search).toBe(
 				`?org=${MockOrganization2.name}`,
-			),
-		);
+			);
+			expect(listUser).toHaveBeenLastCalledWith(MockOrganization2.id);
+			expect(listOrganization).toHaveBeenLastCalledWith(MockOrganization2.id);
+		});
+		await act(async () => {
+			void router.navigate(1);
+		});
+		await act(async () => {});
+		await waitFor(() => {
+			expect(router.state.location.search).toBe(
+				`?org=${MockDefaultOrganization.name}`,
+			);
+			expect(listUser).toHaveBeenLastCalledWith(MockDefaultOrganization.id);
+		});
 		expect(router.state.location.pathname).toBe("/agents/settings/workflows");
 	});
 
@@ -319,6 +343,10 @@ describe("ForkSavedWorkflowsPage", () => {
 		await screen.findByText(
 			`You are not a member of an organization named ${MockOrganization3.name}, so its workflows are not available here. Pick one of your organizations instead.`,
 		);
+		// The unavailable state takes focus on mount, so recovering from a
+		// stale link never leaves focus on an element the state swap removed
+		// (such as the picker a one-organization member no longer has).
+		expect(screen.getByTestId("workflows-unavailable-focus")).toHaveFocus();
 		// No table and no create control of the default organization is
 		// reachable while the URL names an organization the member is not in.
 		expect(screen.queryByRole("table")).toBeNull();
@@ -346,6 +374,13 @@ describe("ForkSavedWorkflowsPage", () => {
 		const create = screen.getAllByRole("button", { name: "New workflow" });
 		expect(create).toHaveLength(1);
 		expect(create[0]).toBeEnabled();
+		// The picker is mounted in both states at the same tree position,
+		// so choosing an organization keeps its focus through the swap.
+		expect(
+			screen.getByRole("combobox", {
+				name: `Organization ${MockDefaultOrganization.display_name}`,
+			}),
+		).toHaveFocus();
 	});
 
 	it("offers only the member's organizations in the picker", async () => {
