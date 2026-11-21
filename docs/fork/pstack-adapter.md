@@ -925,8 +925,11 @@ An optional top-level `PHASES = ["plan", "build", "review"]` list names the phas
 A `phase` call past the 32-phase cap fails the run.
 
 `await_workflow` takes the `run_id` and waits until the run ends, or until `wait_seconds` passes, 600&nbsp;seconds by default and 780&nbsp;seconds at most, with `wait_seconds: 0` returning the status at once.
+On a server replica that does not own the run, the call answers the run's saved state at once instead of waiting, so retry the call when the status is still `running`.
 The result holds `status` (`running`, `completed`, `failed`, `interrupted`, or `stopped`), `result`, `error`, `phases`, `current_phase`, `steps`, and the last 50 log lines.
-When a run ends and no `await_workflow` waits for it, the chat gets a message that names the run and its status and asks for `await_workflow`, and the message goes away once an `await_workflow` call has delivered the result.
+When a run ends and no `await_workflow` waits for it, the chat gets a message that names the run and its status and asks for `await_workflow`.
+When the chat was busy, the message sat queued, and an `await_workflow` call that delivers the result deletes it.
+When the chat was idle, the message starts a turn and stays in the transcript.
 
 An `interrupted` status means the server restarted during the run.
 Call `run_workflow` again with `resume_run_id` set to the run's ID, and the `script` and `args` can be omitted, because the server replays them from its journal, and changes to the script don't apply to a resumed run.

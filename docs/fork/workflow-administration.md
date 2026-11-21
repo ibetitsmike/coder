@@ -33,8 +33,9 @@ In **Settings** under Agents, the **Workflows** page lists your personal workflo
 At the limit of 100, the create button stays but is inert and explains the limit.
 Selecting a workflow's name opens a read-only view of its script, args schema, and phases.
 
-The editor protects against overwriting a newer version.
-It records the workflow ID it loaded, and the save is rejected when the stored workflow has another ID.
+The editor protects its save against a deleted or replaced workflow.
+It records the ID of the workflow it loaded, and the save is rejected when the stored workflow has another ID.
+An edit made in another browser after this one loaded is not caught, because the row keeps its ID.
 The editor then blocks the save and asks you to copy your changes, then close and reopen it.
 The save answers status 409 when the name holds a workflow the editor didn't load, and status 404 when the name holds nothing you can see, so a name you can't read never proves to exist.
 
