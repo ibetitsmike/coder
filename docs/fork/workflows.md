@@ -130,7 +130,6 @@ The message says to call `run_workflow` again with the same script, script path,
 
 A saved workflow is a workflow a user stored with a name, so chats can run it by name.
 A user saves and edits workflows in Coder, and an agent only reads them: no chat tool saves one.
-Saving a workflow from the run card of a run is not built yet.
 For saving and editing, refer to [Saved workflow administration](./workflow-administration.md).
 
 A workflow belongs to one organization and holds one tier:
@@ -146,6 +145,18 @@ A saved workflow holds `description`, `script`, an optional `args_schema`, and a
 The server checks the script as a workflow script and the args schema as JSON Schema, so an invalid script or schema is refused.
 An organization has 100 saved workflows at most, and one user has 100 personal workflows in an organization at most.
 For the field limits, the editor, and the sharing, refer to [Saved workflow administration](./workflow-administration.md).
+
+### Save a workflow from a run
+
+A completed run offers a **Save workflow** button in both places the run shows: the run card in the conversation, and the run detail of the Workflows panel.
+The button opens a dialog that prefills the name from the run title, slugged to the saved workflow name rules, and takes a description.
+The dialog shows the run's script as read-only text, because the saved workflow runs that script.
+
+**Save as** offers Personal and Organization.
+The choice needs the `canCreateOrganizationSkill` authorization answer: while it loads, the submit button waits and the tier choice shows a loader, and when the answer is no or the check fails, the tier choice goes and only Personal stays.
+
+After a save succeeds, the button becomes a **Saved \<name\>** link that opens the workflow list of the tier you saved into, in its settings page.
+The link carries the organization, so the list selects the organization the chat belongs to.
 
 ### Run a saved workflow
 
@@ -210,8 +221,3 @@ These endpoints need the experiment.
 The run list takes `limit`, at most 100 with a default of 50, and an `after` cursor of `<created_at>/<run ID>` for the next page.
 A list item keeps a preview of the script of 200&nbsp;bytes instead of the script.
 A `PATCH`, a `DELETE`, and a share `POST` of a workflow take `expect_id` as a query parameter: the write goes through only when the stored workflow still has that ID, otherwise it answers 409.
-
-## Not built yet
-
-The run card has no **Save workflow** action, and no chat tool saves a workflow.
-That action is planned in ibetitsmike/coder#326, which is still open.
