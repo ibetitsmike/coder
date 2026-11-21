@@ -156,8 +156,13 @@ const workflowArgsSummary = (schema: ForkSavedWorkflowSchema): string => {
 		return "";
 	}
 	const requiredNames = new Set(required);
+	// A property name can contain a comma or a newline, so each name is
+	// quoted to keep one summary entry per argument.
 	return names
-		.map((name) => (requiredNames.has(name) ? `${name} (required)` : name))
+		.map((name) => {
+			const quoted = JSON.stringify(name);
+			return requiredNames.has(name) ? `${quoted} (required)` : quoted;
+		})
 		.join(", ");
 };
 

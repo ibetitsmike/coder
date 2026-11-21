@@ -382,7 +382,7 @@ describe("ForkAgentMentionPlugin", () => {
 			}),
 		);
 		expect(inputRef.current?.getValue()).toBe(
-			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}), with args: files (required). `,
+			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}), with args: "files" (required). `,
 		);
 		expect(getUserWorkflows).toHaveBeenCalledWith(MockDefaultOrganization.id);
 		expect(getOrganizationWorkflows).toHaveBeenCalledWith(
@@ -390,7 +390,7 @@ describe("ForkAgentMentionPlugin", () => {
 		);
 	});
 
-	it("shows a workflow without an args schema as taking no args", async () => {
+	it("omits the args summary for a workflow without an args schema", async () => {
 		const { getUserWorkflows, inputRef } = renderComposer({
 			experiments: ["fork-workflows"],
 		});
@@ -434,7 +434,7 @@ describe("ForkAgentMentionPlugin", () => {
 		// the name, so the composer holds the personal workflow's prompt, not
 		// the org workflow's.
 		expect(inputRef.current?.getValue()).toBe(
-			`Run the ${MockForkOrganizationSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkOrganizationSavedWorkflowMetadata.name}), with args: files (required). `,
+			`Run the ${MockForkOrganizationSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkOrganizationSavedWorkflowMetadata.name}), with args: "files" (required). `,
 		);
 	});
 
@@ -492,7 +492,7 @@ describe("ForkAgentMentionPlugin", () => {
 			}),
 		);
 		expect(inputRef.current?.getValue()).toBe(
-			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}), with args: topic (required). `,
+			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}), with args: "topic" (required). `,
 		);
 	});
 
@@ -517,7 +517,7 @@ describe("ForkAgentMentionPlugin", () => {
 			}),
 		);
 		expect(inputRef.current?.getValue()).toBe(
-			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}), with args: note, topic (required). `,
+			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}), with args: "note", "topic" (required). `,
 		);
 	});
 
