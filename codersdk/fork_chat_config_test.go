@@ -58,3 +58,26 @@ func TestForkChatSubagentCapacityOptions(t *testing.T) {
 		})
 	}
 }
+
+func TestForkChatAPNsOptions(t *testing.T) {
+	t.Parallel()
+
+	var values codersdk.DeploymentValues
+	opts := values.Options()
+	require.NoError(t, opts.SetDefaults())
+	require.Equal(t, codersdk.DefaultChatAPNsTopic, values.AI.Chat.Fork.APNsTopic.Value())
+	require.False(t, values.AI.Chat.Fork.APNsConfigured())
+	require.NoError(t, values.Validate())
+
+	// Validate covers YAML, which sets values without per-option validators.
+	require.NoError(t, opts.ByFlag("chat-apns-key-file").Value.Set("/keys/AuthKey.p8"))
+	require.ErrorContains(t, values.Validate(), "must be set together")
+	require.NoError(t, opts.ByFlag("chat-apns-key-id").Value.Set("ABC123DEFG"))
+	require.ErrorContains(t, values.Validate(), "must be set together")
+	require.NoError(t, opts.ByFlag("chat-apns-team-id").Value.Set("TEAM123456"))
+	require.NoError(t, values.Validate())
+	require.True(t, values.AI.Chat.Fork.APNsConfigured())
+
+	require.NoError(t, opts.ByFlag("chat-apns-topic").Value.Set(""))
+	require.ErrorContains(t, values.Validate(), "--chat-apns-topic must not be empty")
+}
