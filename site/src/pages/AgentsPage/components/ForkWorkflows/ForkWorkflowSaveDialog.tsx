@@ -3,7 +3,8 @@
 // workflow the chat can run again with run_workflow.
 
 import type React from "react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
+import { ErrorAlert } from "#/components/Alert/ErrorAlert";
 import { Button } from "#/components/Button/Button";
 import {
 	Dialog,
@@ -14,6 +15,7 @@ import {
 	DialogTitle,
 } from "#/components/Dialog/Dialog";
 import { Label } from "#/components/Label/Label";
+import { Loader } from "#/components/Loader/Loader";
 import { RadioGroup, RadioGroupItem } from "#/components/RadioGroup/RadioGroup";
 import { Spinner } from "#/components/Spinner/Spinner";
 import {
@@ -34,12 +36,24 @@ type ForkWorkflowSaveDialogProps = {
 	title: string;
 	/** The run's script, saved as the workflow body. */
 	script: string;
-	/** Whether the viewer may create organization workflows. */
-	canCreateOrganization: boolean;
+	/**
+	 * Whether the viewer may create organization workflows. Undefined while
+	 * the authorization check is still loading, which holds the submit
+	 * button so a pending answer cannot silently save as Personal.
+	 */
+	canCreateOrganization: boolean | undefined;
+	/** The authorization check's error, shown in place of the tier choice. */
+	canCreateOrganizationError: unknown;
 	isSubmitting: boolean;
 	submitError?: SkillErrorDisplay;
 	onSubmit: (tier: "user" | "organization", values: SaveValues) => void;
 	onClose: () => void;
+	/**
+	 * Receives the dialog's close-focus event, after the dialog has already
+	 * redirected it to the saved link. Callers can use it to move focus
+	 * somewhere else instead.
+	 */
+	onCloseAutoFocus?: (event: Event) => void;
 };
 
 /** The fields the save dialog collects beyond the tier. */
@@ -66,10 +80,12 @@ export const ForkWorkflowSaveDialog: React.FC<ForkWorkflowSaveDialogProps> = ({
 	title,
 	script,
 	canCreateOrganization,
+	canCreateOrganizationError,
 	isSubmitting,
 	submitError,
 	onSubmit,
 	onClose,
+	onCloseAutoFocus,
 }) => {
 	const [tier, setTier] = useState<"user" | "organization">("user");
 	const [values, setValues] = useState<SaveValues>({
@@ -77,19 +93,21 @@ export const ForkWorkflowSaveDialog: React.FC<ForkWorkflowSaveDialogProps> = ({
 		description: "",
 	});
 	// The form values mirror the editor's shape so the shared validation
-	// applies; script and schema are fixed by the run and stay out.
-	const formValues = useMemo<SavedWorkflowFormValues>(
-		() => ({
-			name: values.name,
-			description: values.description,
-			script,
-			argsSchema: "",
-			phases: "",
-		}),
-		[values.name, values.description, script],
-	);
+	// applies; script and schema are fixed by the run and stay out. React
+	// Compiler memoizes this subtree, so the object is built on each render.
+	const formValues: SavedWorkflowFormValues = {
+		name: values.name,
+		description: values.description,
+		script,
+		argsSchema: "",
+		phases: "",
+	};
 	const errors = savedWorkflowFormErrors(formValues);
-	const canSubmit = !isSubmitting && Object.keys(errors).length === 0;
+	// A pending organization answer blocks the submit: an organization admin
+	// would otherwise create the workflow in the personal tier by default.
+	const isPermissionPending = canCreateOrganization === undefined;
+	const canSubmit =
+		!isSubmitting && !isPermissionPending && Object.keys(errors).length === 0;
 
 	const saveAsLabelId = "save-workflow-tier-label";
 
@@ -102,7 +120,15 @@ export const ForkWorkflowSaveDialog: React.FC<ForkWorkflowSaveDialogProps> = ({
 				}
 			}}
 		>
-			<DialogContent className="max-w-2xl">
+			<DialogContent
+				className="max-w-2xl"
+				onCloseAutoFocus={(event) => {
+					// The Save button unmounts once the save succeeds, so focus
+					// moves to the link that replaces it instead of being lost.
+					event.preventDefault();
+					onCloseAutoFocus?.(event);
+				}}
+			>
 				<form
 					className="flex flex-col gap-4"
 					onSubmit={(event) => {
@@ -147,42 +173,50 @@ export const ForkWorkflowSaveDialog: React.FC<ForkWorkflowSaveDialogProps> = ({
 						minRows={6}
 						mono
 					/>
-					{canCreateOrganization && (
+					{canCreateOrganizationError !== undefined &&
+						canCreateOrganizationError !== null && (
+							<ErrorAlert error={canCreateOrganizationError} />
+						)}
+					{canCreateOrganization !== false && (
 						<div className="flex flex-col gap-2">
 							<Label id={saveAsLabelId}>Save as</Label>
-							<RadioGroup
-								value={tier}
-								aria-labelledby={saveAsLabelId}
-								onValueChange={(value) =>
-									setTier(value as "user" | "organization")
-								}
-								disabled={isSubmitting}
-							>
-								<div className="flex items-center gap-2">
-									<RadioGroupItem
-										id="save-workflow-tier-personal"
-										value="user"
-									/>
-									<Label
-										htmlFor="save-workflow-tier-personal"
-										className="font-normal cursor-pointer"
-									>
-										Personal
-									</Label>
-								</div>
-								<div className="flex items-center gap-2">
-									<RadioGroupItem
-										id="save-workflow-tier-organization"
-										value="organization"
-									/>
-									<Label
-										htmlFor="save-workflow-tier-organization"
-										className="font-normal cursor-pointer"
-									>
-										Organization
-									</Label>
-								</div>
-							</RadioGroup>
+							{isPermissionPending ? (
+								<Loader size="sm" label="Checking organization permission" />
+							) : (
+								<RadioGroup
+									value={tier}
+									aria-labelledby={saveAsLabelId}
+									onValueChange={(value) =>
+										setTier(value as "user" | "organization")
+									}
+									disabled={isSubmitting}
+								>
+									<div className="flex items-center gap-2">
+										<RadioGroupItem
+											id="save-workflow-tier-personal"
+											value="user"
+										/>
+										<Label
+											htmlFor="save-workflow-tier-personal"
+											className="font-normal cursor-pointer"
+										>
+											Personal
+										</Label>
+									</div>
+									<div className="flex items-center gap-2">
+										<RadioGroupItem
+											id="save-workflow-tier-organization"
+											value="organization"
+										/>
+										<Label
+											htmlFor="save-workflow-tier-organization"
+											className="font-normal cursor-pointer"
+										>
+											Organization
+										</Label>
+									</div>
+								</RadioGroup>
+							)}
 						</div>
 					)}
 					<DialogFooter>

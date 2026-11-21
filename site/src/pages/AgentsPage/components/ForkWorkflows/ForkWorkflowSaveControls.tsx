@@ -18,9 +18,10 @@ export const ForkWorkflowSaveButton: React.FC<{
 export const ForkWorkflowSavedLink: React.FC<{
 	name: string;
 	href: string;
-}> = ({ name, href }) => (
+	ref?: React.Ref<HTMLAnchorElement>;
+}> = ({ name, href, ref }) => (
 	<Button variant="outline" size="sm" asChild>
-		<a href={href}>
+		<a href={href} ref={ref}>
 			<BookmarkCheckIcon />
 			Saved {name}
 		</a>

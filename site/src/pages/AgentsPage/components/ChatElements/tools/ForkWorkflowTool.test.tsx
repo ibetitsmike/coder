@@ -18,6 +18,7 @@ import {
 	MockEntitlements,
 	mockApiError,
 } from "#/testHelpers/entities";
+import { MockForkSavedWorkflow } from "#/testHelpers/forkSavedWorkflows";
 import {
 	MockChatWorkflowRunDetail,
 	MockForkWorkflowChatId,
@@ -459,18 +460,15 @@ describe("ForkWorkflowTool", () => {
 		const create = vi
 			.spyOn(forkSavedWorkflowsApi, "createUserSavedWorkflow")
 			.mockResolvedValue({
-				...MockChatWorkflowRunDetail,
+				...MockForkSavedWorkflow,
 				id: "saved-workflow-new",
 				name: "review-changed-files",
-				description: "",
+				organization_id: MockChat.organization_id,
 				user_id: "me",
 				created_by: "me",
-				organization_id: MockChat.organization_id,
+				description: "",
 				args_schema: undefined,
 				phases: [],
-				script: MockForkWorkflowScript,
-				created_at: "2026-11-21T00:00:00Z",
-				updated_at: "2026-11-21T00:00:00Z",
 			});
 		renderWorkflowTool(
 			"run_workflow",
@@ -498,12 +496,66 @@ describe("ForkWorkflowTool", () => {
 			MockChat.organization_id,
 			expect.objectContaining({
 				name: "review-changed-files",
-				script: MockForkWorkflowScript,
+				// The request builder trims the trailing newline the run stored.
+				script: MockForkWorkflowScript.trimEnd(),
 			}),
 		);
 		expect(
 			await screen.findByRole("link", { name: /Saved review-changed-files/ }),
 		).toHaveAttribute("href", "/agents/settings/workflows");
+		// Focus moves to the link that replaced the Save button.
+		expect(
+			screen.getByRole("link", { name: /Saved review-changed-files/ }),
+		).toHaveFocus();
+	});
+
+	it("trims the name before creating the workflow from the card", async () => {
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
+		seedCreatePermission(queryClient, true);
+		vi.spyOn(forkWorkflowsApi, "getChatWorkflowRun").mockResolvedValue(
+			MockChatWorkflowRunDetail,
+		);
+		const create = vi
+			.spyOn(forkSavedWorkflowsApi, "createUserSavedWorkflow")
+			.mockResolvedValue({
+				...MockForkSavedWorkflow,
+				id: "saved-workflow-new",
+				name: "review-changed-files",
+				organization_id: MockChat.organization_id,
+				user_id: "me",
+				created_by: "me",
+				description: "",
+				args_schema: undefined,
+				phases: [],
+			});
+		renderWorkflowTool(
+			"run_workflow",
+			MockForkWorkflowStartedResult,
+			queryClient,
+		);
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /workflow completed/i }),
+		);
+		await user.click(
+			await screen.findByRole("button", { name: "Save workflow" }),
+		);
+		const dialog = screen.getByRole("dialog", { name: "Save workflow" });
+		const nameField = within(dialog).getByLabelText("Name");
+		await user.clear(nameField);
+		// Whitespace around an otherwise valid name validates, so the
+		// request must send the trimmed value the validation accepted.
+		await user.type(nameField, "  review-changed-files  ");
+		await user.click(
+			within(dialog).getByRole("button", { name: "Save workflow" }),
+		);
+
+		await waitFor(() => expect(create).toHaveBeenCalledOnce());
+		expect(create).toHaveBeenCalledWith(
+			MockChat.organization_id,
+			expect.objectContaining({ name: "review-changed-files" }),
+		);
 	});
 
 	it("shows a server validation error from the save dialog", async () => {

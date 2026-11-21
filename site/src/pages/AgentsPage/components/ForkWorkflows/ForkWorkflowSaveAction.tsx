@@ -3,7 +3,7 @@
 // other controls and turns into a link to the saved workflow once saved.
 
 import type React from "react";
-import { useContext } from "react";
+import { useContext, useRef } from "react";
 import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
 import { useForkExperiment } from "../ChatElements/tools/forkToolUtils";
 import {
@@ -60,8 +60,10 @@ type ForkWorkflowSaveActionInnerProps = {
 const ForkWorkflowSaveActionInner: React.FC<
 	ForkWorkflowSaveActionInnerProps
 > = ({ title, script, organizationId, organizations }) => {
+	const savedLinkRef = useRef<HTMLAnchorElement>(null);
 	const { saved, openSave, dialog } = useForkWorkflowSave({
 		organizationId,
+		savedLinkRef,
 	});
 	const organizationName = useForkSavedWorkflowOrganizationName(
 		organizationId,
@@ -72,8 +74,12 @@ const ForkWorkflowSaveActionInner: React.FC<
 			<>
 				{dialog}
 				<ForkWorkflowSavedLink
-					name={saved}
-					href={savedWorkflowSettingsPath("user", organizationName ?? "")}
+					ref={savedLinkRef}
+					name={saved.name}
+					href={savedWorkflowSettingsPath(
+						saved.tier,
+						saved.tier === "organization" ? (organizationName ?? "") : "",
+					)}
 				/>
 			</>
 		);

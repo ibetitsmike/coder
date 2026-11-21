@@ -1,23 +1,15 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import {
-	expect,
-	fn,
-	screen,
-	spyOn,
-	userEvent,
-	waitFor,
-	within,
-} from "storybook/test";
+import { fn, screen, spyOn, userEvent, within } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
 import { API } from "#/api/api";
 import { getAuthorizationKey } from "#/api/queries/authCheck";
 import { chatEntityKey } from "#/api/queries/chats";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import { MockChat } from "#/testHelpers/chatEntities";
+import { MockForkSavedWorkflow } from "#/testHelpers/forkSavedWorkflows";
 import {
 	MockChatWorkflowRunDetail,
 	MockForkWorkflowNow,
-	MockForkWorkflowScript,
 } from "#/testHelpers/forkWorkflows";
 import { withDashboardProvider } from "#/testHelpers/storybook";
 import { ForkWorkflowRunDetailView } from "./ForkWorkflowRunDetail";
@@ -226,18 +218,15 @@ export const CompletedSaved: Story = {
 	beforeEach: () => {
 		spyOn(API.getAxiosInstance(), "post").mockResolvedValue({
 			data: {
-				...MockChatWorkflowRunDetail,
+				...MockForkSavedWorkflow,
 				id: "saved-workflow-new",
 				name: "review-changed-files",
-				description: "",
+				organization_id: MockChat.organization_id,
 				user_id: "me",
 				created_by: "me",
-				organization_id: MockChat.organization_id,
+				description: "",
 				args_schema: undefined,
 				phases: [],
-				script: MockForkWorkflowScript,
-				created_at: "2026-11-21T00:00:00Z",
-				updated_at: "2026-11-21T00:00:00Z",
 			},
 		});
 	},
@@ -251,11 +240,9 @@ export const CompletedSaved: Story = {
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: "Save workflow" }),
 		);
-		await waitFor(() =>
-			expect(
-				canvas.getByRole("link", { name: /Saved review-changed-files/ }),
-			).toHaveAttribute("href", "/agents/settings/workflows"),
-		);
+		// Awaiting the link sets the screenshot state; the behavior
+		// assertions live in ForkWorkflowRunDetail.test.tsx.
+		await screen.findByRole("link", { name: /Saved review-changed-files/ });
 	},
 };
 

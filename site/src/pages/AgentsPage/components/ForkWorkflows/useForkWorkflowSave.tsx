@@ -9,6 +9,7 @@ import { getErrorDetail, getErrorMessage } from "#/api/errors";
 import { checkAuthorization } from "#/api/queries/authCheck";
 import { createSavedWorkflow } from "#/api/queries/forkSavedWorkflows";
 import type { SkillErrorDisplay } from "#/pages/AgentsPage/components/SkillEditor";
+import { buildCreateSavedWorkflowRequest } from "#/pages/AISettingsPage/ForkWorkflowsPage/savedWorkflowForm";
 import { ForkWorkflowSaveDialog } from "./ForkWorkflowSaveDialog";
 
 /** Where a saved workflow lands after the save dialog submits. */
@@ -24,8 +25,8 @@ type SaveTarget = {
 type ForkWorkflowSaveState = {
 	/** The run the Save action would save, when a dialog is open. */
 	saveTarget: SaveTarget | undefined;
-	/** The name of the workflow the last save created. */
-	saved: string | undefined;
+	/** The name and tier of the workflow the last save created. */
+	saved: { name: string; tier: SaveTier; organizationId: string } | undefined;
 	openSave: (target: SaveTarget) => void;
 	/** The dialog element, rendered by the page that owns the action. */
 	dialog: React.ReactNode;
@@ -34,8 +35,15 @@ type ForkWorkflowSaveState = {
 type SaveDialogProps = {
 	target: SaveTarget;
 	organizationId: string;
-	canCreateOrganization: boolean;
-	onSaved: (name: string) => void;
+	/**
+	 * Whether the viewer may create organization workflows. Undefined while
+	 * the authorization check is still loading; the dialog then holds the
+	 * Personal submission until the answer arrives.
+	 */
+	canCreateOrganization: boolean | undefined;
+	canCreateOrganizationError: unknown;
+	savedLinkRef: React.RefObject<HTMLAnchorElement | null>;
+	onSaved: (name: string, tier: SaveTier) => void;
 	onClose: () => void;
 };
 
@@ -43,6 +51,8 @@ const SaveDialog: React.FC<SaveDialogProps> = ({
 	target,
 	organizationId,
 	canCreateOrganization,
+	canCreateOrganizationError,
+	savedLinkRef,
 	onSaved,
 	onClose,
 }) => {
@@ -60,15 +70,19 @@ const SaveDialog: React.FC<SaveDialogProps> = ({
 		create.mutate(
 			{
 				scope: { tier, organizationId },
-				req: {
+				// The request builder trims the fields, so the request matches
+				// what the shared validation accepted.
+				req: buildCreateSavedWorkflowRequest({
 					name: values.name,
-					description: values.description.trim(),
+					description: values.description,
 					script: target.script,
-				},
+					argsSchema: "",
+					phases: "",
+				}),
 			},
 			{
 				onSuccess: (workflow) => {
-					onSaved(workflow.name);
+					onSaved(workflow.name, tier);
 				},
 				onError: (error) => {
 					setSubmitError({
@@ -84,8 +98,18 @@ const SaveDialog: React.FC<SaveDialogProps> = ({
 			title={target.title}
 			script={target.script}
 			canCreateOrganization={canCreateOrganization}
+			canCreateOrganizationError={canCreateOrganizationError}
 			isSubmitting={isSubmitting}
 			submitError={submitError}
+			// The link only exists after a save, so the dialog redirects the
+			// close focus to it when it does and lets the default stand when
+			// it does not.
+			onCloseAutoFocus={(event) => {
+				if (savedLinkRef.current) {
+					event.preventDefault();
+					savedLinkRef.current.focus();
+				}
+			}}
 			onSubmit={submit}
 			onClose={onClose}
 		/>
@@ -98,10 +122,12 @@ const SaveDialog: React.FC<SaveDialogProps> = ({
  */
 export const useForkWorkflowSave = (options: {
 	organizationId: string;
+	/** Receives focus when the dialog closes after a successful save. */
+	savedLinkRef: React.RefObject<HTMLAnchorElement | null>;
 }): ForkWorkflowSaveState => {
-	const { organizationId } = options;
+	const { organizationId, savedLinkRef } = options;
 	const [saveTarget, setSaveTarget] = useState<SaveTarget | undefined>();
-	const [saved, setSaved] = useState<string | undefined>();
+	const [saved, setSaved] = useState<ForkWorkflowSaveState["saved"]>(undefined);
 	const orgPermissionQuery = useQuery({
 		...checkAuthorization<{ canCreateOrganizationSkill: boolean }>({
 			checks: {
@@ -117,15 +143,21 @@ export const useForkWorkflowSave = (options: {
 		enabled: Boolean(saveTarget),
 	});
 	const canCreateOrganization =
-		orgPermissionQuery.data?.canCreateOrganizationSkill === true;
+		orgPermissionQuery.data?.canCreateOrganizationSkill === true
+			? true
+			: orgPermissionQuery.data
+				? false
+				: undefined;
 	const close = () => setSaveTarget(undefined);
 	const dialog = saveTarget ? (
 		<SaveDialog
 			target={saveTarget}
 			organizationId={organizationId}
 			canCreateOrganization={canCreateOrganization}
-			onSaved={(name) => {
-				setSaved(name);
+			canCreateOrganizationError={orgPermissionQuery.error}
+			savedLinkRef={savedLinkRef}
+			onSaved={(name, tier) => {
+				setSaved({ name, tier, organizationId });
 				close();
 			}}
 			onClose={close}
