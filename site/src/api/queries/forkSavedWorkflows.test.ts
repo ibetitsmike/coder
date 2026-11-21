@@ -68,10 +68,22 @@ const MockForkSavedWorkflowCreatedBeforeRecreate: ForkSavedWorkflow = {
 	updated_at: "2030-01-01T00:00:00.000450Z",
 };
 
+const MockForkSavedWorkflowShared: ForkSavedWorkflow = {
+	...MockForkSavedWorkflowCreated,
+	id: "saved-workflow-shared",
+	user_id: undefined,
+};
+
 const metadataOf = ({
 	script: _script,
 	...metadata
 }: ForkSavedWorkflow): ForkSavedWorkflowMetadata => metadata;
+
+const MockForkSavedWorkflowOtherMetadata: ForkSavedWorkflowMetadata = {
+	...metadataOf(MockForkSavedWorkflowCreated),
+	id: "saved-workflow-other",
+	name: "other-workflow",
+};
 
 const mockCreateRequest = {
 	name,
@@ -415,14 +427,9 @@ describe("shareSavedWorkflow", () => {
 		queryClient.setQueryData(organizationListKey, [
 			MockForkOrganizationSavedWorkflowMetadata,
 		]);
-		const shared: ForkSavedWorkflow = {
-			...MockForkSavedWorkflowCreated,
-			id: "saved-workflow-shared",
-			user_id: undefined,
-		};
 		const share = vi
 			.spyOn(forkSavedWorkflowsApi, "shareUserSavedWorkflow")
-			.mockResolvedValue(shared);
+			.mockResolvedValue(MockForkSavedWorkflowShared);
 
 		await new MutationObserver(
 			queryClient,
@@ -440,12 +447,12 @@ describe("shareSavedWorkflow", () => {
 		expect(queryClient.getQueryData(detailKey)).toBeUndefined();
 		// The response stays listed if the organization refetch fails.
 		expect(queryClient.getQueryData(organizationListKey)).toEqual([
-			metadataOf(shared),
+			metadataOf(MockForkSavedWorkflowShared),
 			MockForkOrganizationSavedWorkflowMetadata,
 		]);
 		expect(
 			queryClient.getQueryData(savedWorkflowKey(organizationScope, name)),
-		).toEqual(shared);
+		).toEqual(MockForkSavedWorkflowShared);
 		expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
 			queryKey: listKey,
 		});
@@ -490,14 +497,9 @@ describe("shareSavedWorkflow", () => {
 	it("drops the personal row when the workflow to share is gone", async () => {
 		const queryClient = createQueryClient();
 		const listKey = savedWorkflowsKey(scope);
-		const other = {
-			...metadataOf(MockForkSavedWorkflowCreated),
-			id: "saved-workflow-other",
-			name: "other-workflow",
-		};
 		queryClient.setQueryData(listKey, [
 			metadataOf(MockForkSavedWorkflowCreated),
-			other,
+			MockForkSavedWorkflowOtherMetadata,
 		]);
 		vi.spyOn(forkSavedWorkflowsApi, "shareUserSavedWorkflow").mockRejectedValue(
 			mockApiError({ message: "Resource not found", status: 404 }),
@@ -513,7 +515,9 @@ describe("shareSavedWorkflow", () => {
 			),
 		).rejects.toBeTruthy();
 
-		expect(queryClient.getQueryData(listKey)).toEqual([other]);
+		expect(queryClient.getQueryData(listKey)).toEqual([
+			MockForkSavedWorkflowOtherMetadata,
+		]);
 	});
 });
 

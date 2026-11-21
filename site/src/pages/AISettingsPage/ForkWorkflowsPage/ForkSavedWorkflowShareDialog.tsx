@@ -8,7 +8,9 @@ import { ConfirmDialog } from "#/components/Dialog/ConfirmDialog/ConfirmDialog";
 
 /**
  * The open share confirmation. While isSharing, onClose should keep the
- * dialog open, because a failure is reported only as error in this dialog.
+ * dialog open, because a failure the caller keeps open is shown only as
+ * error in this dialog. The caller may close it on a failure it reports
+ * elsewhere, such as a 404 for a workflow that is gone.
  */
 export type ForkSavedWorkflowShareState = {
 	workflow: ForkSavedWorkflowMetadata;
