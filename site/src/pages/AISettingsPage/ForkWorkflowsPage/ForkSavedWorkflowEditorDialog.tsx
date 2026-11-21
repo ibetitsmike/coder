@@ -259,6 +259,13 @@ type SavedWorkflowNameFieldProps = {
 	onChange: (name: string) => void;
 };
 
+/**
+ * The name field shared by the create, edit, and run save dialogs. It
+ * renders the label, the input, and the naming rules as help text, and
+ * shows `error` instead of the help text when the caller's validation
+ * rejects the current value. The caller owns the validation; the field
+ * only displays its message.
+ */
 export const SavedWorkflowNameField: React.FC<SavedWorkflowNameFieldProps> = ({
 	value,
 	error,

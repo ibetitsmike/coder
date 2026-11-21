@@ -74,9 +74,9 @@ export const nameFromTitle = (title: string): string =>
 		.replace(/-+$/g, "");
 
 /**
- * The dialog starts from these values. The card passes an empty title so the
- * name starts empty and the submit stays disabled until the user types a
- * valid one; the panel prefills it from the run's title.
+ * The dialog starts from these values. Both the card and the panel pass
+ * the run's title, so the name starts as its slug and the submit stays
+ * disabled until the user types a valid one.
  */
 export const ForkWorkflowSaveDialog: React.FC<ForkWorkflowSaveDialogProps> = ({
 	title,
@@ -173,7 +173,10 @@ export const ForkWorkflowSaveDialog: React.FC<ForkWorkflowSaveDialogProps> = ({
 						canCreateOrganizationError !== null && (
 							<ErrorAlert error={canCreateOrganizationError} />
 						)}
-					{canCreateOrganization !== false && (
+					{/* A denied or failed check settles as personal-only: the
+					    tier choice goes, so a stale selection cannot send a
+					    create the API would refuse. */}
+					{!canCreateOrganizationError && canCreateOrganization !== false && (
 						<div className="flex flex-col gap-2">
 							<Label id={saveAsLabelId}>Save as</Label>
 							{isPermissionPending ? (

@@ -185,11 +185,3 @@ export const savedWorkflowSettingsPath = (
 	// Personal workflows are organization scoped too, so the personal link
 	// carries the organization as well and the settings page selects it.
 	`/${tier === "user" ? "agents" : "ai"}/settings/workflows?org=${encodeURIComponent(organizationName)}`;
-
-/** The organization name of a chat, from the dashboard's organization list. */
-export const useForkSavedWorkflowOrganizationName = (
-	organizationId: string | undefined,
-	organizations: readonly { id: string; name: string }[],
-): string | undefined =>
-	organizations.find((organization) => organization.id === organizationId)
-		?.name;

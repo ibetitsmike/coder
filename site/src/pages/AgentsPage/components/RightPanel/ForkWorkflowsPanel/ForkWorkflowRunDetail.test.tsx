@@ -349,6 +349,8 @@ describe("ForkWorkflowRunDetail", () => {
 		// the personal tier, which needs no organization permission, stays
 		// usable instead of waiting on a check that already failed.
 		await within(dialog).findByText("check failed");
+		// A failed check settles the tier like a denied one: personal only.
+		expect(within(dialog).queryByLabelText("Organization")).toBeNull();
 		const submit = within(dialog).getByRole("button", {
 			name: "Save workflow",
 		});
@@ -403,10 +405,7 @@ describe("ForkWorkflowRunDetail", () => {
 		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
 		seedCreatePermission(queryClient, false);
 		const create = vi
-			.spyOn(
-				forkSavedWorkflowsApi,
-				"createUserSavedWorkflow",
-			)
+			.spyOn(forkSavedWorkflowsApi, "createUserSavedWorkflow")
 			.mockRejectedValue(new Error("must not be called"));
 		renderDetail(MockChatWorkflowRunDetail, { queryClient });
 		const user = userEvent.setup();

@@ -525,6 +525,63 @@ export const CompletedSaveDialogPersonalOnly: Story = {
 	},
 };
 
+/**
+ * The save dialog while the organization permission check is still loading:
+ * the tier choice shows a loader and the submit waits for the answer.
+ */
+export const CompletedSaveDialogPermissionPending: Story = {
+	args: {
+		name: "run_workflow",
+		args: mockRunWorkflowArgs,
+		result: MockForkWorkflowStartedResult,
+	},
+	parameters: {
+		queries: [chatQuery, canUpdateChatQuery(true)],
+		reactRouter: liveCardReactRouter,
+	},
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "get").mockResolvedValue({
+			data: MockChatWorkflowRunDetail,
+		});
+		// The permission check never answers, so the pending state stays.
+		spyOn(API, "checkAuthorization").mockReturnValue(new Promise(() => {}));
+	},
+	play: async (context) => {
+		await clickSave(context);
+		await screen.findByRole("status", {
+			name: "Checking organization permission",
+		});
+	},
+};
+
+/**
+ * The save dialog when the organization permission check fails: the error
+ * shows in place of the tier choice and Personal stays usable.
+ */
+export const CompletedSaveDialogPermissionFailed: Story = {
+	args: {
+		name: "run_workflow",
+		args: mockRunWorkflowArgs,
+		result: MockForkWorkflowStartedResult,
+	},
+	parameters: {
+		queries: [chatQuery, canUpdateChatQuery(true)],
+		reactRouter: liveCardReactRouter,
+	},
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "get").mockResolvedValue({
+			data: MockChatWorkflowRunDetail,
+		});
+		spyOn(API, "checkAuthorization").mockRejectedValue(
+			new Error("check failed") as never,
+		);
+	},
+	play: async (context) => {
+		await clickSave(context);
+		await screen.findByText("check failed");
+	},
+};
+
 /** A completed live card after the run's script was saved. */
 export const CompletedSaved: Story = {
 	args: {

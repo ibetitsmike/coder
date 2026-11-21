@@ -232,6 +232,49 @@ export const CompletedSaveDialogPersonalOnly: Story = {
 	},
 };
 
+/**
+ * The save dialog while the organization permission check is still loading:
+ * the tier choice shows a loader and the submit waits for the answer.
+ */
+export const CompletedSaveDialogPermissionPending: Story = {
+	parameters: {
+		queries: baseQueries,
+	},
+	beforeEach: () => {
+		// The permission check never answers, so the pending state stays.
+		spyOn(API, "checkAuthorization").mockReturnValue(new Promise(() => {}));
+	},
+	play: async ({ canvas }) => {
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Save workflow" }),
+		);
+		await screen.findByRole("status", {
+			name: "Checking organization permission",
+		});
+	},
+};
+
+/**
+ * The save dialog when the organization permission check fails: the error
+ * shows in place of the tier choice and Personal stays usable.
+ */
+export const CompletedSaveDialogPermissionFailed: Story = {
+	parameters: {
+		queries: baseQueries,
+	},
+	beforeEach: () => {
+		spyOn(API, "checkAuthorization").mockRejectedValue(
+			new Error("check failed") as never,
+		);
+	},
+	play: async ({ canvas }) => {
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Save workflow" }),
+		);
+		await screen.findByText("check failed");
+	},
+};
+
 /** A completed run after the run's script was saved. */
 export const CompletedSaved: Story = {
 	parameters: {

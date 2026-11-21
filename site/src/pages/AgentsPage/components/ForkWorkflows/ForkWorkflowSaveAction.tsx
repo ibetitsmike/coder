@@ -12,7 +12,6 @@ import {
 } from "./ForkWorkflowSaveControls";
 import {
 	savedWorkflowSettingsPath,
-	useForkSavedWorkflowOrganizationName,
 	useForkWorkflowSave,
 } from "./useForkWorkflowSave";
 
@@ -65,10 +64,9 @@ const ForkWorkflowSaveActionInner: React.FC<
 		organizationId,
 		savedLinkRef,
 	});
-	const organizationName = useForkSavedWorkflowOrganizationName(
-		organizationId,
-		organizations,
-	);
+	const organizationName = organizations.find(
+		(organization) => organization.id === organizationId,
+	)?.name;
 	if (saved) {
 		return (
 			<>
@@ -76,10 +74,7 @@ const ForkWorkflowSaveActionInner: React.FC<
 				<ForkWorkflowSavedLink
 					ref={savedLinkRef}
 					name={saved.name}
-					href={savedWorkflowSettingsPath(
-						saved.tier,
-						organizationName ?? "",
-					)}
+					href={savedWorkflowSettingsPath(saved.tier, organizationName ?? "")}
 				/>
 			</>
 		);

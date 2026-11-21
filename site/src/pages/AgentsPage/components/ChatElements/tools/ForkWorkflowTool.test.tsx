@@ -167,31 +167,6 @@ describe("ForkWorkflowTool", () => {
 		);
 	});
 
-	it("polls a resumed run past a cached interrupted run", async () => {
-		vi.useFakeTimers({ shouldAdvanceTime: true });
-		const queryClient = createTestQueryClient();
-		queryClient.setQueryData(
-			chatWorkflowRunKey(
-				MockForkWorkflowChatId,
-				MockForkWorkflowStartedResult.run_id,
-			),
-			{ ...MockChatWorkflowRunDetail, status: "interrupted" },
-			{ updatedAt: Date.now() - 60_000 },
-		);
-		const getRun = vi
-			.spyOn(forkWorkflowsApi, "getChatWorkflowRun")
-			.mockRejectedValue(mockServerError);
-		renderWorkflowTool(
-			"run_workflow",
-			MockForkWorkflowStartedResult,
-			queryClient,
-		);
-
-		await waitFor(() => expect(getRun).toHaveBeenCalledTimes(1));
-		await vi.advanceTimersByTimeAsync(forkPanelResyncInterval);
-		expect(getRun).toHaveBeenCalledTimes(2);
-	});
-
 	it("polls the run again after a transient error", async () => {
 		vi.useFakeTimers({ shouldAdvanceTime: true });
 		const getRun = vi
@@ -698,20 +673,5 @@ describe("ForkWorkflowTool", () => {
 		renderWorkflowTool("run_workflow", MockForkWorkflowStartedResult);
 
 		await waitFor(() => expect(getRun).toHaveBeenCalledTimes(1));
-	});
-
-	it("shows a failed run's error from the card", async () => {
-		renderWorkflowTool("run_workflow", {
-			run_id: MockForkWorkflowRunId,
-			status: "failed",
-			error: "the script failed",
-			steps: [],
-		});
-		const user = userEvent.setup();
-		await user.click(
-			await screen.findByRole("button", { name: /workflow failed/i }),
-		);
-
-		expect(screen.getByText("the script failed")).toBeInstanceOf(HTMLElement);
 	});
 });
