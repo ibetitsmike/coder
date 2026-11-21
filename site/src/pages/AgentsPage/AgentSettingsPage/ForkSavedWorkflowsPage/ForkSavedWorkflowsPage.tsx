@@ -3,7 +3,10 @@
 // organization here and edit the ones they shared.
 
 import { Navigate, useSearchParams } from "react-router";
-import { OrganizationField } from "#/components/OrganizationAutocomplete/OrganizationAutocomplete";
+import {
+	OrganizationAutocomplete,
+	OrganizationField,
+} from "#/components/OrganizationAutocomplete/OrganizationAutocomplete";
 import { useAuthenticated } from "#/hooks/useAuthenticated";
 import {
 	getMemberOrganizations,
@@ -44,10 +47,39 @@ const ForkSavedWorkflowsPage: React.FC = () => {
 	if (!organization) {
 		if (requestedOrgName) {
 			return (
-				<SectionHeader
-					label="Workflows"
-					description={`You are not a member of an organization named ${requestedOrgName}, so its workflows are not available here. Pick one of your organizations above the list instead.`}
-				/>
+				<div className="flex flex-col gap-10">
+					{memberOrganizations.length > 0 && (
+						<div className="flex justify-end">
+							<OrganizationAutocomplete
+								ariaLabel="Organization Select an organization"
+								value={null}
+								options={memberOrganizations}
+								triggerClassName="w-full sm:w-60"
+								optionsTabbable
+								onChange={(org) => {
+									if (org) {
+										setSearchParams(
+											(prev) => {
+												const next = new URLSearchParams(prev);
+												next.set(orgSearchParam, org.name);
+												return next;
+											},
+											{ replace: true },
+										);
+									}
+								}}
+							/>
+						</div>
+					)}
+					<SectionHeader
+						label="Workflows"
+						description={`You are not a member of an organization named ${requestedOrgName}, so its workflows are not available here.${
+							memberOrganizations.length > 0
+								? " Pick one of your organizations instead."
+								: ""
+						}`}
+					/>
+				</div>
 			);
 		}
 		return (

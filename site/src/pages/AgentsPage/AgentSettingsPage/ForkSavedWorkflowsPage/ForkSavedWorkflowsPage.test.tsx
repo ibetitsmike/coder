@@ -310,13 +310,14 @@ describe("ForkSavedWorkflowsPage", () => {
 	});
 
 	it("renders an unavailable state for an organization the URL names that the member is not in", async () => {
+		const user = userEvent.setup();
 		const { listUser, listOrganization } = renderPage({
 			// MockOrganization3 exists but the member does not belong to it.
 			route: `/agents/settings/workflows?org=${MockOrganization3.name}`,
 		});
 
 		await screen.findByText(
-			`You are not a member of an organization named ${MockOrganization3.name}, so its workflows are not available here. Pick one of your organizations above the list instead.`,
+			`You are not a member of an organization named ${MockOrganization3.name}, so its workflows are not available here. Pick one of your organizations instead.`,
 		);
 		// No table and no create control of the default organization is
 		// reachable while the URL names an organization the member is not in.
@@ -324,6 +325,27 @@ describe("ForkSavedWorkflowsPage", () => {
 		expect(screen.queryByRole("button", { name: "New workflow" })).toBeNull();
 		expect(listUser).not.toHaveBeenCalled();
 		expect(listOrganization).not.toHaveBeenCalled();
+
+		// The picker is the way out: choosing a member organization leads
+		// to that organization's workflows view.
+		await user.click(
+			screen.getByRole("combobox", {
+				name: /Organization Select an organization/,
+			}),
+		);
+		await user.click(
+			screen.getByRole("option", {
+				name: new RegExp(`${MockDefaultOrganization.display_name}$`),
+			}),
+		);
+		await screen.findByRole("table", { name: "Personal workflows" });
+		expect(listUser).toHaveBeenCalledWith(MockDefaultOrganization.id);
+		expect(listOrganization).toHaveBeenCalledWith(MockDefaultOrganization.id);
+		// The create button lives in the table's header, outside the
+		// table element itself, so look next to the table instead.
+		const create = screen.getAllByRole("button", { name: "New workflow" });
+		expect(create).toHaveLength(1);
+		expect(create[0]).toBeEnabled();
 	});
 
 	it("offers only the member's organizations in the picker", async () => {
