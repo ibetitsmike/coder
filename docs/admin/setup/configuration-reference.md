@@ -606,6 +606,45 @@ If not provided, the system certificate pool is used.
 
 Configure the background chat processing daemon.
 
+### APNs key file
+
+Path of the APNs auth key (.p8) that signs the chat pushes sent to the iOS app when the fork-apns-push experiment is enabled.
+Empty turns APNs off.
+Needs --chat-apns-key-id and --chat-apns-team-id.
+
+- Type: `string`
+- Environment variable: `CODER_CHAT_APNS_KEY_FILE`
+- CLI flag: [`--chat-apns-key-file`](../../reference/cli/server/index.md#--chat-apns-key-file)
+- YAML key: `chat.apnsKeyFile`
+
+### APNs key ID
+
+The 10-character ID of the APNs auth key in --chat-apns-key-file.
+
+- Type: `string`
+- Environment variable: `CODER_CHAT_APNS_KEY_ID`
+- CLI flag: [`--chat-apns-key-id`](../../reference/cli/server/index.md#--chat-apns-key-id)
+- YAML key: `chat.apnsKeyID`
+
+### APNs team ID
+
+The Apple Developer team ID that owns the APNs auth key in --chat-apns-key-file.
+
+- Type: `string`
+- Environment variable: `CODER_CHAT_APNS_TEAM_ID`
+- CLI flag: [`--chat-apns-team-id`](../../reference/cli/server/index.md#--chat-apns-team-id)
+- YAML key: `chat.apnsTeamID`
+
+### APNs topic
+
+The bundle ID of the iOS app that receives the chat pushes.
+
+- Type: `string`
+- Environment variable: `CODER_CHAT_APNS_TOPIC`
+- CLI flag: [`--chat-apns-topic`](../../reference/cli/server/index.md#--chat-apns-topic)
+- YAML key: `chat.apnsTopic`
+- Default value: `com.coder.ios`
+
 ### Debug logging enabled
 
 Force chat debug logging on for every chat, bypassing the runtime admin and user opt-in settings.

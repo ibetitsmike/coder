@@ -220,6 +220,10 @@ curl -X GET http://coder-server:8080/api/v2/deployment/config \
         "acquire_batch_size": 0,
         "debug_logging_enabled": true,
         "fork": {
+          "apns_key_file": "string",
+          "apns_key_id": "string",
+          "apns_team_id": "string",
+          "apns_topic": "string",
           "max_concurrent_subagents": 0,
           "max_concurrent_subagents_per_family": 0,
           "max_live_subagents_per_family": 0,

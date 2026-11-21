@@ -2289,6 +2289,22 @@ export interface ChatACPTranscriptMessage {
 	readonly content: readonly ChatMessagePart[];
 }
 
+// From codersdk/fork_push_devices.go
+/**
+ * ChatAPNsDeviceRequest names one device of the caller.
+ */
+export interface ChatAPNsDeviceRequest {
+	readonly device_token: string;
+}
+
+// From codersdk/fork_push_devices.go
+export type ChatAPNsEnvironment = "production" | "sandbox";
+
+export const ChatAPNsEnvironments: ChatAPNsEnvironment[] = [
+	"production",
+	"sandbox",
+];
+
 // From codersdk/chats.go
 /**
  * ChatAttachment is a file part of a chat message, returned by
@@ -5821,6 +5837,12 @@ export interface DebugProfileOptions {
 	readonly Profiles: readonly string[];
 }
 
+// From codersdk/fork_chat_config.go
+/**
+ * DefaultChatAPNsTopic is the bundle ID of Coder for iOS.
+ */
+export const DefaultChatAPNsTopic = "com.coder.ios";
+
 // From codersdk/chats.go
 /**
  * DefaultChatAutoArchiveDays is the default auto-archive window, in
@@ -6312,6 +6334,7 @@ export type Experiment =
 	| "chat-virtual-desktop"
 	| "enable-ai-workspace-debug"
 	| "example"
+	| "fork-apns-push"
 	| "fork-agent-definitions"
 	| "fork-chat-todos"
 	| "fork-chat-wakeups"
@@ -6408,6 +6431,7 @@ export const Experiments: Experiment[] = [
 	"chat-virtual-desktop",
 	"enable-ai-workspace-debug",
 	"example",
+	"fork-apns-push",
 	"fork-agent-definitions",
 	"fork-chat-todos",
 	"fork-chat-wakeups",
@@ -6840,6 +6864,24 @@ export interface ForkChatConfig {
 	 * message_agent resumes a finished one. 0 means no limit.
 	 */
 	readonly max_live_subagents_per_family: number;
+	/**
+	 * APNsKeyFile is the path of the APNs auth key (.p8) that signs the
+	 * pushes of the fork-apns-push experiment. Empty turns APNs off. The
+	 * key itself never appears in the deployment config.
+	 */
+	readonly apns_key_file: string;
+	/**
+	 * APNsKeyID is the 10-character ID of the APNs auth key.
+	 */
+	readonly apns_key_id: string;
+	/**
+	 * APNsTeamID is the Apple Developer team ID that owns the key.
+	 */
+	readonly apns_team_id: string;
+	/**
+	 * APNsTopic is the bundle ID of the app that receives the pushes.
+	 */
+	readonly apns_topic: string;
 }
 
 // From codersdk/fork_chat_family.go
@@ -10653,6 +10695,37 @@ export type RegionTypes = Region | WorkspaceProxy;
 // From codersdk/workspaceproxy.go
 export interface RegionsResponse<R extends RegionTypes> {
 	readonly regions: readonly R[];
+}
+
+// From codersdk/fork_push_devices.go
+/**
+ * RegisterChatAPNsDeviceRequest registers an iOS device for the chat pushes
+ * of the caller, or updates its choices.
+ */
+export interface RegisterChatAPNsDeviceRequest {
+	/**
+	 * DeviceToken is the APNs device token in hex.
+	 */
+	readonly device_token: string;
+	readonly environment: ChatAPNsEnvironment;
+	/**
+	 * FinishedTurns pushes when a root chat finishes a turn.
+	 */
+	readonly finished_turns: boolean;
+	/**
+	 * Questions pushes when a root chat asks a question. A turn that ends
+	 * with a question looks like a finished turn to the server, so it is
+	 * pushed when either flag is set.
+	 */
+	readonly questions: boolean;
+	/**
+	 * AgentErrors pushes when a root chat's turn fails.
+	 */
+	readonly agent_errors: boolean;
+	/**
+	 * Sound plays the app's chime with each push.
+	 */
+	readonly sound: boolean;
 }
 
 // From codersdk/replicas.go
