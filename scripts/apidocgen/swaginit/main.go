@@ -40,4 +40,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("swag init failed: %v", err)
 	}
+
+	// Fork hook: canonicalize the enum order swag randomized while
+	// collecting constants across files (fork_enumorder for details).
+	if err := canonicalizeApidoc(outputDir); err != nil {
+		log.Fatalf("enum order canonicalization failed: %v", err)
+	}
 }
