@@ -130,6 +130,9 @@ func TestDeploymentValues_HighlyConfigurable(t *testing.T) {
 		"Notifications: Email Auth: Password": {
 			yaml: true,
 		},
+		"Setup Token": {
+			yaml: true,
+		},
 	}
 
 	set := (&codersdk.DeploymentValues{}).Options()
