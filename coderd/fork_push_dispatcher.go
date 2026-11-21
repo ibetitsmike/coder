@@ -35,18 +35,20 @@ const forkAPNsSendTimeout = 10 * time.Second
 
 // forkChatPushDispatcher returns the push dispatcher for chatd: inner itself
 // unless the fork-apns-push experiment is on and the APNs key is set. A key
-// that does not load stops the server from starting.
+// that does not load turns APNs off with an error log rather than stopping
+// the server, so a bad key path never takes the deployment down.
 func (api *API) forkChatPushDispatcher(inner webpush.Dispatcher) webpush.Dispatcher {
 	fork := api.DeploymentValues.AI.Chat.Fork
 	if !api.Experiments.Enabled(codersdk.ExperimentForkAPNsPush) || !fork.APNsConfigured() {
 		return inner
 	}
-	if inner == nil {
-		inner = &webpush.NoopWebpusher{}
-	}
 	client, err := newForkAPNsClient(fork.APNsKeyFile.Value(), fork.APNsKeyID.Value(), fork.APNsTeamID.Value(), fork.APNsTopic.Value(), quartz.NewReal())
 	if err != nil {
-		panic(err)
+		api.Logger.Error(api.ctx, "APNs push is off: the APNs key does not load", slog.F("key_file", fork.APNsKeyFile.Value()), slog.Error(err))
+		return inner
+	}
+	if inner == nil {
+		inner = &webpush.NoopWebpusher{}
 	}
 	api.forkPush = newForkPushDispatcher(inner, client, api.Database, api.Logger.Named("apns"), api.AccessURL.String())
 	return api.forkPush
