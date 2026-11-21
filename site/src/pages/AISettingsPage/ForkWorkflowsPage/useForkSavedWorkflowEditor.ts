@@ -228,11 +228,43 @@ export const useForkSavedWorkflowEditor = (scope: SavedWorkflowScope) => {
 					return;
 				}
 				saveMutation.mutate(
-					{ scope, name, req: buildUpdateSavedWorkflowRequest(formValues) },
+					{
+						scope,
+						name,
+						req: buildUpdateSavedWorkflowRequest(formValues),
+						// The revision the editor loaded: the write goes through
+						// only when the stored workflow still has this id. A
+						// mismatch answers 409 when a workflow the caller may
+						// write holds the name, and 404 when the name holds
+						// nothing or a row the caller may not see.
+						id: loadedFrom?.id,
+					},
 					{
 						onSuccess: () => {
 							closeEditorTarget(editorTarget);
 							toast.success("Workflow saved.");
+						},
+						// A 409 means the name now holds a workflow the editor did
+						// not load, and a 404 means it holds nothing the editor may
+						// write, the same outcomes the list and detail refetches
+						// already report as isChanged. Tell the user and refresh
+						// what the editor seeds from without overwriting anything.
+						onError: (error) => {
+							if (
+								isAxiosError(error) &&
+								(error.response?.status === 409 ||
+									error.response?.status === 404)
+							) {
+								// The mutation's own invalidation already refetches
+								// the list and detail queries, so the editor seeds
+								// from what the name holds now. A scope change or
+								// another editor may have replaced this one while the
+								// request was pending, so the message cannot promise
+								// where the draft survives.
+								toast.info(
+									`${name} changed or was deleted after you opened it, so the save was rejected. Copy your unsaved changes from the editor if it is still open.`,
+								);
+							}
 						},
 					},
 				);
