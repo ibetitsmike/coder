@@ -9,6 +9,7 @@ import {
 import {
 	MockForkOrganizationSavedWorkflowMetadata,
 	MockForkSavedWorkflowMetadata,
+	MockForkSharedSavedWorkflowMetadata,
 } from "#/testHelpers/forkSavedWorkflows";
 import {
 	withAuthProvider,
@@ -56,6 +57,30 @@ export const Listed: Story = {
 					organizationId: MockDefaultOrganization.id,
 				}),
 				data: [MockForkOrganizationSavedWorkflowMetadata],
+			},
+		],
+	},
+};
+
+export const SharedByMe: Story = {
+	parameters: {
+		queries: [
+			{
+				key: savedWorkflowsKey({
+					tier: "user",
+					organizationId: MockDefaultOrganization.id,
+				}),
+				data: [],
+			},
+			{
+				key: savedWorkflowsKey({
+					tier: "organization",
+					organizationId: MockDefaultOrganization.id,
+				}),
+				data: [
+					MockForkOrganizationSavedWorkflowMetadata,
+					MockForkSharedSavedWorkflowMetadata,
+				],
 			},
 		],
 	},

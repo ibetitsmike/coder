@@ -4,15 +4,18 @@ import { describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkSavedWorkflowsApi from "#/api/forkSavedWorkflows";
 import type { Experiment } from "#/api/typesGenerated";
+import { toast } from "#/components/Toaster/toast";
 import {
 	MockDefaultOrganization,
 	MockOrganization2,
 	MockOrganization3,
 	MockUserMember,
+	mockApiError,
 } from "#/testHelpers/entities";
 import {
 	MockForkOrganizationSavedWorkflowMetadata,
 	MockForkSavedWorkflowMetadata,
+	MockForkSharedSavedWorkflowMetadata,
 } from "#/testHelpers/forkSavedWorkflows";
 import { MockForkWorkflowScript } from "#/testHelpers/forkWorkflows";
 import { renderWithAuth } from "#/testHelpers/renderHelpers";
@@ -48,6 +51,23 @@ const renderPage = ({
 		extraRoutes: [{ path: "/agents/settings", element: <div /> }],
 	});
 	return { listUser, listOrganization, router };
+};
+
+const openShareDialog = async (user: ReturnType<typeof userEvent.setup>) => {
+	const personal = await screen.findByRole("table", {
+		name: "Personal workflows",
+	});
+	await user.click(
+		await within(personal).findByRole("button", {
+			name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
+		}),
+	);
+	await user.click(
+		await screen.findByRole("menuitem", { name: "Share with organization…" }),
+	);
+	return screen.findByRole("dialog", {
+		name: `Share ${MockForkSavedWorkflowMetadata.name} with the organization?`,
+	});
 };
 
 describe("ForkSavedWorkflowsPage", () => {
@@ -115,6 +135,121 @@ describe("ForkSavedWorkflowsPage", () => {
 		expect(getOrganization).toHaveBeenCalledWith(
 			MockDefaultOrganization.id,
 			MockForkOrganizationSavedWorkflowMetadata.name,
+		);
+	});
+
+	it("shares a personal workflow with the organization", async () => {
+		const user = userEvent.setup();
+		const success = vi.spyOn(toast, "success");
+		const { listUser, listOrganization } = renderPage();
+		const share = vi
+			.spyOn(forkSavedWorkflowsApi, "shareUserSavedWorkflow")
+			.mockImplementation(async () => {
+				listUser.mockResolvedValue([]);
+				listOrganization.mockResolvedValue([
+					MockForkOrganizationSavedWorkflowMetadata,
+					MockForkSharedSavedWorkflowMetadata,
+				]);
+				return {
+					...MockForkSharedSavedWorkflowMetadata,
+					script: MockForkWorkflowScript,
+				};
+			});
+
+		const dialog = await openShareDialog(user);
+		const userCalls = listUser.mock.calls.length;
+		const organizationCalls = listOrganization.mock.calls.length;
+		await user.click(within(dialog).getByRole("button", { name: "Share" }));
+
+		await waitFor(() =>
+			expect(success).toHaveBeenCalledWith(
+				`${MockForkSavedWorkflowMetadata.name} is now an organization workflow.`,
+			),
+		);
+		expect(share).toHaveBeenCalledWith(
+			MockDefaultOrganization.id,
+			MockForkSavedWorkflowMetadata.name,
+			{ expect_id: MockForkSavedWorkflowMetadata.id },
+		);
+		await waitFor(() =>
+			expect(listUser.mock.calls.length).toBeGreaterThan(userCalls),
+		);
+		await waitFor(() =>
+			expect(listOrganization.mock.calls.length).toBeGreaterThan(
+				organizationCalls,
+			),
+		);
+	});
+
+	it("lets the member retry a share the server rejected", async () => {
+		const user = userEvent.setup();
+		const success = vi.spyOn(toast, "success");
+		renderPage();
+		const share = vi
+			.spyOn(forkSavedWorkflowsApi, "shareUserSavedWorkflow")
+			.mockRejectedValueOnce(
+				mockApiError({
+					message: "The organization already has a workflow with this name.",
+					status: 409,
+				}),
+			)
+			.mockResolvedValueOnce({
+				...MockForkSharedSavedWorkflowMetadata,
+				script: MockForkWorkflowScript,
+			});
+
+		const dialog = await openShareDialog(user);
+		const confirm = within(dialog).getByRole("button", { name: "Share" });
+		await user.click(confirm);
+		await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+		expect(success).not.toHaveBeenCalled();
+
+		// The button ignores clicks until the rejected request settles.
+		await waitFor(async () => {
+			await user.click(confirm);
+			expect(share).toHaveBeenCalledTimes(2);
+		});
+		await waitFor(() =>
+			expect(success).toHaveBeenCalledWith(
+				`${MockForkSavedWorkflowMetadata.name} is now an organization workflow.`,
+			),
+		);
+		expect(share).toHaveBeenCalledTimes(2);
+	});
+
+	it("tells the member when the workflow to share is already gone", async () => {
+		const user = userEvent.setup();
+		const info = vi.spyOn(toast, "info");
+		const success = vi.spyOn(toast, "success");
+		const { listUser } = renderPage();
+		const share = vi
+			.spyOn(forkSavedWorkflowsApi, "shareUserSavedWorkflow")
+			.mockRejectedValue(
+				mockApiError({ message: "Resource not found", status: 404 }),
+			);
+
+		const dialog = await openShareDialog(user);
+		const userCalls = listUser.mock.calls.length;
+		// The refetch never settles, so only the mutation can drop the row.
+		listUser.mockReturnValue(new Promise(() => {}));
+		await user.click(within(dialog).getByRole("button", { name: "Share" }));
+
+		await waitFor(() =>
+			expect(info).toHaveBeenCalledWith(
+				`${MockForkSavedWorkflowMetadata.name} is no longer available to share, so nothing was shared.`,
+			),
+		);
+		expect(share).toHaveBeenCalledTimes(1);
+		expect(success).not.toHaveBeenCalled();
+		await waitFor(() =>
+			expect(listUser.mock.calls.length).toBeGreaterThan(userCalls),
+		);
+		// The row left before the dialog closed, so focus went to the
+		// table's fallback, not to the removed row's menu.
+		await waitFor(() =>
+			expect(
+				screen.getAllByRole("button", { name: "New workflow" })[0],
+			).toHaveFocus(),
 		);
 	});
 

@@ -5310,6 +5310,72 @@
 				}
 			}
 		},
+		"/api/v2/chats/fork/organizations/{organization}/members/{user}/workflows/{workflow}/share": {
+			"post": {
+				"produces": ["application/json"],
+				"tags": ["Chats"],
+				"summary": "Share a user saved workflow with the organization",
+				"operationId": "share-a-user-saved-workflow-with-the-organization",
+				"parameters": [
+					{
+						"type": "string",
+						"description": "Organization ID or name",
+						"name": "organization",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"description": "User ID, username, or me",
+						"name": "user",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"description": "Workflow name",
+						"name": "workflow",
+						"in": "path",
+						"required": true
+					},
+					{
+						"type": "string",
+						"format": "uuid",
+						"description": "Expected workflow ID, as a UUID",
+						"name": "expect_id",
+						"in": "query"
+					}
+				],
+				"responses": {
+					"201": {
+						"description": "Created",
+						"schema": {
+							"$ref": "#/definitions/codersdk.ForkSavedWorkflow"
+						}
+					},
+					"400": {
+						"description": "Bad Request",
+						"schema": {
+							"$ref": "#/definitions/codersdk.Response"
+						}
+					},
+					"409": {
+						"description": "Conflict",
+						"schema": {
+							"$ref": "#/definitions/codersdk.Response"
+						}
+					}
+				},
+				"security": [
+					{
+						"CoderSessionToken": []
+					}
+				],
+				"x-apidocgen": {
+					"skip": true
+				}
+			}
+		},
 		"/api/v2/chats/fork/organizations/{organization}/plugin-pack-sources": {
 			"get": {
 				"produces": ["application/json"],

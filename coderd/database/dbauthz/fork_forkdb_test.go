@@ -1089,6 +1089,18 @@ func TestForkQuerier(t *testing.T) {
 				rbac.ResourceUserSkill.WithOwner(wf.UserID.UUID.String()), policy.ActionDelete,
 			).Returns(wf)
 		},
+		"ShareUserSavedWorkflowByName": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+			wf := organizationSavedWorkflow(uuid.New(), "triage")
+			owner := uuid.New()
+			arg := forkdb.ShareUserSavedWorkflowByNameParams{OrganizationID: wf.OrganizationID, UserID: owner, Name: wf.Name}
+			fdb.EXPECT().ShareUserSavedWorkflowByName(gomock.Any(), arg).Return(wf, nil).AnyTimes()
+			check.Args(arg).Asserts(
+				rbac.ResourceOrganization.WithID(wf.OrganizationID).InOrg(wf.OrganizationID), policy.ActionRead,
+				rbac.ResourceUserSkill.WithOwner(owner.String()), policy.ActionDelete,
+				rbac.ResourceOrganization.WithID(wf.OrganizationID).InOrg(wf.OrganizationID), policy.ActionRead,
+				rbac.ResourceUserSkill.WithOwner(owner.String()), policy.ActionRead,
+			).Returns(wf)
+		},
 		"InsertOrganizationSavedWorkflow": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
 			wf := organizationSavedWorkflow(uuid.New(), "triage")
 			arg := forkdb.InsertOrganizationSavedWorkflowParams{OrganizationID: wf.OrganizationID, CreatedBy: uuid.New(), Name: wf.Name, Script: wf.Script, GroupAcl: wf.GroupAcl, UserAcl: wf.UserAcl}

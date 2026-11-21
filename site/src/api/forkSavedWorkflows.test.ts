@@ -2,17 +2,19 @@
 // saved workflow writes, for the personal and the organization routes.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as forkSavedWorkflowsModule from "./forkSavedWorkflows";
 import {
 	deleteOrganizationSavedWorkflow,
 	deleteUserSavedWorkflow,
+	shareUserSavedWorkflow,
 	updateOrganizationSavedWorkflow,
 	updateUserSavedWorkflow,
 } from "./forkSavedWorkflows";
-import type * as forkSavedWorkflowsModule from "./forkSavedWorkflows";
 
 const axiosSpies = vi.hoisted(() => ({
 	patch: vi.fn().mockResolvedValue({ data: {} }),
 	delete: vi.fn().mockResolvedValue({ data: {} }),
+	post: vi.fn().mockResolvedValue({ data: {} }),
 }));
 
 vi.mock("./api", async (importOriginal) => ({
@@ -42,6 +44,7 @@ describe("conditional saved workflow writes", () => {
 	beforeEach(() => {
 		axiosSpies.patch.mockClear();
 		axiosSpies.delete.mockClear();
+		axiosSpies.post.mockClear();
 	});
 
 	it.each(families)(
@@ -84,5 +87,17 @@ describe("conditional saved workflow writes", () => {
 		).rejects.toThrow("expect_id must be a UUID.");
 		expect(axiosSpies.patch).not.toHaveBeenCalled();
 		expect(axiosSpies.delete).not.toHaveBeenCalled();
+	});
+
+	it("sends expect_id on the share URL and rejects an empty one", async () => {
+		const id = "8b5d2f5e-3a49-4f57-9c1a-6f5a7d3b2e10";
+		await shareUserSavedWorkflow("org-1", "deploy", { expect_id: id });
+		expect(axiosSpies.post.mock.calls[0][0]).toContain(
+			`/api/v2/chats/fork/organizations/org-1/members/me/workflows/deploy/share?expect_id=${id}`,
+		);
+		await expect(
+			shareUserSavedWorkflow("org-1", "deploy", { expect_id: "" }),
+		).rejects.toThrow("expect_id must be a UUID.");
+		expect(axiosSpies.post).toHaveBeenCalledTimes(1);
 	});
 });

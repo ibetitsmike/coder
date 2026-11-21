@@ -2173,6 +2173,21 @@ func (mr *MockStoreMockRecorder) SetWorkflowRunLogs(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetWorkflowRunLogs", reflect.TypeOf((*MockStore)(nil).SetWorkflowRunLogs), ctx, arg)
 }
 
+// ShareUserSavedWorkflowByName mocks base method.
+func (m *MockStore) ShareUserSavedWorkflowByName(ctx context.Context, arg forkdb.ShareUserSavedWorkflowByNameParams) (forkdb.SavedWorkflow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ShareUserSavedWorkflowByName", ctx, arg)
+	ret0, _ := ret[0].(forkdb.SavedWorkflow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ShareUserSavedWorkflowByName indicates an expected call of ShareUserSavedWorkflowByName.
+func (mr *MockStoreMockRecorder) ShareUserSavedWorkflowByName(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ShareUserSavedWorkflowByName", reflect.TypeOf((*MockStore)(nil).ShareUserSavedWorkflowByName), ctx, arg)
+}
+
 // SumChatCostMicrosSince mocks base method.
 func (m *MockStore) SumChatCostMicrosSince(ctx context.Context, arg forkdb.SumChatCostMicrosSinceParams) (int64, error) {
 	m.ctrl.T.Helper()

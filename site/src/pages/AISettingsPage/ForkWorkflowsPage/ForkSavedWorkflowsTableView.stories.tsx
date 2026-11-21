@@ -2,8 +2,10 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn, screen, userEvent } from "storybook/test";
 import { mockApiError } from "#/testHelpers/entities";
 import {
+	MockForkOrganizationSavedWorkflowMetadata,
 	MockForkSavedWorkflow,
 	MockForkSavedWorkflowMetadata,
+	MockForkSharedSavedWorkflowMetadata,
 } from "#/testHelpers/forkSavedWorkflows";
 import { ForkSavedWorkflowsTableView } from "./ForkSavedWorkflowsTableView";
 
@@ -52,6 +54,66 @@ export const UpdateOnlyMenuOpen: Story = {
 
 export const ReadOnly: Story = {
 	args: { access: { create: false, update: false, delete: false } },
+};
+
+export const ShareMenuOpen: Story = {
+	args: { onShare: fn() },
+	play: RowMenuOpen.play,
+};
+
+/** Only the row the user shared offers a menu. */
+export const RowAccess: Story = {
+	args: {
+		title: "Organization workflows",
+		workflows: [
+			MockForkSharedSavedWorkflowMetadata,
+			MockForkOrganizationSavedWorkflowMetadata,
+		],
+		access: { create: false, update: false, delete: false },
+		rowAccess: (workflow) =>
+			workflow.id === MockForkSharedSavedWorkflowMetadata.id
+				? { create: false, update: true, delete: true }
+				: { create: false, update: false, delete: false },
+	},
+};
+
+export const ShareConfirm: Story = {
+	args: {
+		shareState: {
+			workflow: MockForkSavedWorkflowMetadata,
+			error: undefined,
+			isSharing: false,
+			onConfirm: fn(),
+			onClose: fn(),
+		},
+	},
+};
+
+export const SharePending: Story = {
+	args: {
+		shareState: {
+			workflow: MockForkSavedWorkflowMetadata,
+			error: undefined,
+			isSharing: true,
+			onConfirm: fn(),
+			onClose: fn(),
+		},
+	},
+};
+
+export const ShareError: Story = {
+	args: {
+		shareState: {
+			workflow: MockForkSavedWorkflowMetadata,
+			error: mockApiError({
+				message: "The organization already has a workflow with this name.",
+				status: 409,
+			}),
+			isSharing: false,
+			onConfirm: fn(),
+			onClose: fn(),
+		},
+	},
 };
 
 export const Empty: Story = {

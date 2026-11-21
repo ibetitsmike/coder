@@ -401,6 +401,61 @@ func (q *Queries) ListUserSavedWorkflowMetadata(ctx context.Context, arg ListUse
 	return items, nil
 }
 
+const shareUserSavedWorkflowByName = `-- name: ShareUserSavedWorkflowByName :one
+WITH moved AS (
+    DELETE FROM saved_workflows
+    WHERE organization_id = $1::uuid AND user_id = $2::uuid AND name = $3::text
+      AND ($4::uuid IS NULL OR id = $4::uuid)
+    RETURNING id, organization_id, user_id, created_by, name, description, script, args_schema, phases, group_acl, user_acl, created_at, updated_at
+)
+INSERT INTO saved_workflows (organization_id, created_by, name, description, script, args_schema, phases, group_acl, user_acl)
+SELECT
+    organization_id, user_id, name, description, script, args_schema, phases,
+    jsonb_build_object(organization_id::text, jsonb_build_object('permissions', jsonb_build_array('read'))),
+    jsonb_build_object(user_id::text, jsonb_build_object('permissions', jsonb_build_array('read', 'update', 'delete')))
+FROM moved
+RETURNING id, organization_id, user_id, created_by, name, description, script, args_schema, phases, group_acl, user_acl, created_at, updated_at
+`
+
+type ShareUserSavedWorkflowByNameParams struct {
+	OrganizationID uuid.UUID     `db:"organization_id" json:"organization_id"`
+	UserID         uuid.UUID     `db:"user_id" json:"user_id"`
+	Name           string        `db:"name" json:"name"`
+	ExpectID       uuid.NullUUID `db:"expect_id" json:"expect_id"`
+}
+
+// Moves a personal workflow to the organization tier under the same name in
+// one statement, so a failed insert, such as a taken name or a full
+// organization, keeps the personal row. The owner keeps read, update and
+// delete through a user grant, and every member reads it through the
+// Everyone group, whose id is the organization's. Set ExpectID to move only
+// when the personal row still has that id.
+func (q *Queries) ShareUserSavedWorkflowByName(ctx context.Context, arg ShareUserSavedWorkflowByNameParams) (SavedWorkflow, error) {
+	row := q.db.QueryRowContext(ctx, shareUserSavedWorkflowByName,
+		arg.OrganizationID,
+		arg.UserID,
+		arg.Name,
+		arg.ExpectID,
+	)
+	var i SavedWorkflow
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizationID,
+		&i.UserID,
+		&i.CreatedBy,
+		&i.Name,
+		&i.Description,
+		&i.Script,
+		&i.ArgsSchema,
+		pq.Array(&i.Phases),
+		&i.GroupAcl,
+		&i.UserAcl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateOrganizationSavedWorkflowACLByName = `-- name: UpdateOrganizationSavedWorkflowACLByName :one
 UPDATE saved_workflows
 SET
