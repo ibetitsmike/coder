@@ -433,11 +433,9 @@ describe("shareSavedWorkflow", () => {
 			id: MockForkSavedWorkflowCreated.id,
 		});
 
-		expect(share).toHaveBeenCalledWith(
-			scope.organizationId,
-			name,
-			MockForkSavedWorkflowCreated.id,
-		);
+		expect(share).toHaveBeenCalledWith(scope.organizationId, name, {
+			expect_id: MockForkSavedWorkflowCreated.id,
+		});
 		expect(queryClient.getQueryData(listKey)).toEqual([]);
 		expect(queryClient.getQueryData(detailKey)).toBeUndefined();
 		// The response stays listed if the organization refetch fails.

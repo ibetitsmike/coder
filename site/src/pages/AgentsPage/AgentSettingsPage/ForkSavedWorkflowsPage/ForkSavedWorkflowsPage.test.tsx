@@ -169,7 +169,7 @@ describe("ForkSavedWorkflowsPage", () => {
 		expect(share).toHaveBeenCalledWith(
 			MockDefaultOrganization.id,
 			MockForkSavedWorkflowMetadata.name,
-			MockForkSavedWorkflowMetadata.id,
+			{ expect_id: MockForkSavedWorkflowMetadata.id },
 		);
 		await waitFor(() =>
 			expect(listUser.mock.calls.length).toBeGreaterThan(userCalls),

@@ -116,20 +116,18 @@ export const deleteUserSavedWorkflow = async (
 /**
  * Moves one of the signed-in member's personal saved workflows to the
  * organization under the same name. Every member can then read it, and the
- * member keeps the right to edit and delete it. expectId rejects the move
+ * member keeps the right to edit and delete it. expect_id rejects the move
  * with 409 when the name holds another workflow.
  */
 export const shareUserSavedWorkflow = async (
 	organizationId: string,
 	name: string,
-	expectId?: string,
+	params?: ForkSavedWorkflowWriteParams,
 ): Promise<ForkSavedWorkflow> => {
 	const response = await API.getAxiosInstance().post<ForkSavedWorkflow>(
 		getURLWithSearchParams(
 			`${userSavedWorkflowPath(organizationId, name)}/share`,
-			{
-				expect_id: expectId,
-			},
+			savedWorkflowWriteSearchParams(params),
 		),
 	);
 	return response.data;

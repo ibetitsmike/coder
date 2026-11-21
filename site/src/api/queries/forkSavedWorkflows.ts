@@ -323,7 +323,7 @@ type ShareSavedWorkflowArgs = {
 export const shareSavedWorkflow = (queryClient: QueryClient) =>
 	mutationOptions({
 		mutationFn: ({ organizationId, name, id }: ShareSavedWorkflowArgs) =>
-			shareUserSavedWorkflow(organizationId, name, id),
+			shareUserSavedWorkflow(organizationId, name, { expect_id: id }),
 		onSuccess: (workflow, { organizationId, name, id }) => {
 			cacheCreatedSavedWorkflow(
 				queryClient,
