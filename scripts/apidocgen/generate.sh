@@ -26,7 +26,7 @@ pushd "${PROJECT_ROOT}"
 # Use our custom wrapper instead of "go tool swag init" to enable
 # Strict mode, which turns duplicate-route warnings into hard errors.
 # The upstream swag CLI does not expose a --strict flag.
-go run "${APIDOCGEN_DIR}/swaginit/main.go"
+go run "${APIDOCGEN_DIR}/swaginit"
 popd
 
 pushd "${APIDOCGEN_DIR}"

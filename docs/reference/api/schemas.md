@@ -2522,7 +2522,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
         "resources": [
           {
             "error": "string",
-            "kind": "subagent",
+            "kind": "instruction_file",
             "size_bytes": 0,
             "skill_description": "string",
             "skill_name": "string",
@@ -2669,7 +2669,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     "resources": [
       {
         "error": "string",
-        "kind": "subagent",
+        "kind": "instruction_file",
         "size_bytes": 0,
         "skill_description": "string",
         "skill_name": "string",
@@ -3136,7 +3136,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "resources": [
     {
       "error": "string",
-      "kind": "subagent",
+      "kind": "instruction_file",
       "size_bytes": 0,
       "skill_description": "string",
       "skill_name": "string",
@@ -3170,7 +3170,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ```json
 {
   "error": "string",
-  "kind": "subagent",
+  "kind": "instruction_file",
   "size_bytes": 0,
   "skill_description": "string",
   "skill_name": "string",
@@ -3207,7 +3207,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ## codersdk.ChatContextResourceKind
 
 ```json
-"subagent"
+"instruction_file"
 ```
 
 ### Properties
@@ -6544,7 +6544,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
       "resources": [
         {
           "error": "string",
-          "kind": "subagent",
+          "kind": "instruction_file",
           "size_bytes": 0,
           "skill_description": "string",
           "skill_name": "string",
@@ -6690,7 +6690,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
     "root_chat_id": "2898031c-fdce-4e3e-8c53-4481dd42fcd7",
     "workflow_run_id": "5e5ef678-2347-491b-a579-798b0d4ed952"
   },
-  "kind": "fork_change",
+  "kind": "status_change",
   "tool_calls": [
     {
       "args": "string",
@@ -6714,7 +6714,7 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 ## codersdk.ChatWatchEventKind
 
 ```json
-"fork_change"
+"status_change"
 ```
 
 ### Properties

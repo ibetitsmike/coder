@@ -26329,20 +26329,20 @@ const docTemplate = `{
         "codersdk.ChatContextResourceKind": {
             "type": "string",
             "enum": [
-                "subagent",
                 "instruction_file",
                 "skill",
                 "mcp_config",
                 "mcp_server",
-                "acp_harness"
+                "acp_harness",
+                "subagent"
             ],
             "x-enum-varnames": [
-                "ChatContextResourceKindSubagent",
                 "ChatContextResourceKindInstructionFile",
                 "ChatContextResourceKindSkill",
                 "ChatContextResourceKindMCPConfig",
                 "ChatContextResourceKindMCPServer",
-                "ChatContextResourceKindACPHarness"
+                "ChatContextResourceKindACPHarness",
+                "ChatContextResourceKindSubagent"
             ]
         },
         "codersdk.ChatContextResourceStatus": {
@@ -28730,7 +28730,6 @@ const docTemplate = `{
         "codersdk.ChatWatchEventKind": {
             "type": "string",
             "enum": [
-                "fork_change",
                 "status_change",
                 "summary_change",
                 "chat_summary_change",
@@ -28740,10 +28739,10 @@ const docTemplate = `{
                 "diff_status_change",
                 "action_required",
                 "context_dirty",
-                "project_change"
+                "project_change",
+                "fork_change"
             ],
             "x-enum-varnames": [
-                "ChatWatchEventKindForkChange",
                 "ChatWatchEventKindStatusChange",
                 "ChatWatchEventKindSummaryChange",
                 "ChatWatchEventKindChatSummaryChange",
@@ -28753,7 +28752,8 @@ const docTemplate = `{
                 "ChatWatchEventKindDiffStatusChange",
                 "ChatWatchEventKindActionRequired",
                 "ChatWatchEventKindContextDirty",
-                "ChatWatchEventKindProjectChange"
+                "ChatWatchEventKindProjectChange",
+                "ChatWatchEventKindForkChange"
             ]
         },
         "codersdk.ChatWatchForkChange": {
