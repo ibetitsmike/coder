@@ -56,5 +56,12 @@ export const useForkAgentTypePicker = ({
 		error: query.data === undefined ? query.error : undefined,
 		onRetry: () => void query.refetch(),
 	};
-	return { isEnabled, agentType, selectorProps };
+	return {
+		isEnabled,
+		agentType,
+		// The types the deployment reports, so callers can resolve a picked
+		// name to its base type; undefined while the list loads.
+		agentTypes: query.data,
+		selectorProps,
+	};
 };

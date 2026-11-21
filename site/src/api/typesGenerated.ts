@@ -5054,7 +5054,7 @@ export interface CreateForkSavedWorkflowRequest {
 	 * Script is Starlark that defines main(args), as a run_workflow script.
 	 */
 	readonly script: string;
-	readonly args_schema?: Record<string, string>;
+	readonly args_schema?: unknown;
 	readonly phases?: readonly string[];
 }
 
@@ -7077,7 +7077,7 @@ export interface ForkSavedWorkflowMetadata {
 	/**
 	 * ArgsSchema is an optional JSON Schema object for the args of a run.
 	 */
-	readonly args_schema?: Record<string, string>;
+	readonly args_schema?: unknown;
 	/**
 	 * Phases are the declared phase names of the workflow, in order.
 	 */
@@ -12641,7 +12641,7 @@ export interface UpdateForkPluginPackRequest {
 export interface UpdateForkSavedWorkflowRequest {
 	readonly description?: string;
 	readonly script?: string;
-	readonly args_schema?: Record<string, string>;
+	readonly args_schema?: unknown;
 	readonly phases?: string[];
 }
 

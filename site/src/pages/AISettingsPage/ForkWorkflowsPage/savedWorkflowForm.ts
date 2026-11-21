@@ -1,8 +1,11 @@
 // This file is fork code: form values and validation for the saved workflow
 // editor (fork-workflows experiment).
 
-import type { UpdateSavedWorkflowRequest } from "#/api/forkSavedWorkflows";
-import type { CreateForkSavedWorkflowRequest } from "#/api/typesGenerated";
+import type { ForkSavedWorkflowSchema } from "#/api/forkSavedWorkflowSchema";
+import type {
+	CreateSavedWorkflowRequest,
+	UpdateSavedWorkflowRequest,
+} from "#/api/forkSavedWorkflows";
 import { getSkillContentSizeBytes } from "#/pages/AgentsPage/utils/skills";
 
 // The backend limits, from coderd/fork_saved_workflows.go, except the
@@ -62,7 +65,7 @@ const toArgsSchemaObject = (argsSchema: string) => {
 	}
 	const parsed: unknown = JSON.parse(argsSchema);
 	return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-		? (parsed as Record<string, string>)
+		? (parsed as ForkSavedWorkflowSchema)
 		: undefined;
 };
 
@@ -196,7 +199,7 @@ export const savedWorkflowFormErrors = (
  */
 export const buildCreateSavedWorkflowRequest = (
 	values: SavedWorkflowFormValues,
-): CreateForkSavedWorkflowRequest => {
+): CreateSavedWorkflowRequest => {
 	const argsSchema = toArgsSchemaObject(values.argsSchema);
 	const phases = parseSavedWorkflowPhases(values.phases);
 	return {

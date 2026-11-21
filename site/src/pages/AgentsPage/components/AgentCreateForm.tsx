@@ -63,6 +63,28 @@ import { ChatProjectDialog } from "./ChatsSidebar/dialogs/ChatProjectDialog";
 import { getModelSelectorHelp } from "./ModelSelectorHelp";
 import { useForkAgentTypePicker } from "./useForkAgentTypePicker";
 
+/**
+ * Whether the picked agent type starts the chat in explore mode: the
+ * built-in type by its name, or a custom definition by the base type the
+ * catalog reports. Known built-ins resolve by name even while the catalog
+ * reloads, so a model or project change does not flicker the gate; a name
+ * the list does not know means true, so a chat the menu cannot yet resolve
+ * stays gated and the list only ever confirms types.
+ */
+export const forkIsExploreAgentType = (
+	types: readonly TypesGen.ForkAgentType[] | undefined,
+	picked: string | undefined,
+) =>
+	picked !== undefined &&
+	picked !== "general" &&
+	picked !== "computer_use" &&
+	(types === undefined ||
+		types.some(
+			(type) =>
+				type.name === picked &&
+				(type.base_type === "explore" || type.name === "explore"),
+		));
+
 /** @internal Exported for testing. */
 export const emptyInputStorageKey = "agents.empty-input";
 /** @internal Exported for testing. */
@@ -775,6 +797,14 @@ const AgentCreateFormContent: React.FC<AgentCreateFormProps> = ({
 		workspaceId: effectiveWorkspaceId ?? undefined,
 		modelConfigId: submittedModel,
 	});
+	// The picker reports undefined types while its list loads or after an
+	// error, which keeps the gate on; the submit path resolves the same way
+	// and falls back to the general agent only when the picker drops the
+	// type itself.
+	const isExploreAgentType = forkIsExploreAgentType(
+		forkAgentType.agentTypes,
+		forkAgentType.agentType,
+	);
 	const handleSend = async (
 		message: string,
 		fileIDs?: string[],
@@ -1061,6 +1091,7 @@ const AgentCreateFormContent: React.FC<AgentCreateFormProps> = ({
 					highlightKey={highlightKey}
 					onSend={handleSendWithAttachments}
 					inputRef={chatInputRef}
+					isExploreAgentType={isExploreAgentType}
 					placeholder="Ask Coder to build, fix bugs, or explore your project..."
 					isDisabled={
 						isSubmitPending ||
