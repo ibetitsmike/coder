@@ -56,6 +56,23 @@ const mockWorkflowMentions = [
 		description: MockForkOrganizationSavedWorkflowMetadata.description,
 		argsSummary: "",
 	},
+	// A summary long enough to overflow its row, so the two-line clamp of
+	// the args text stays visible in the story screenshots.
+	{
+		name: "archive-workspace",
+		tier: "org",
+		description: "Archives a workspace and its latest build.",
+		argsSummary: [
+			'"template_id" (required)',
+			'"owner" (required)',
+			'"schedule" (required)',
+			'"retain_days"',
+			'"cleanup_versions"',
+			'"notify_email"',
+			'"dry_run"',
+			'"include_dormant"',
+		].join(", "),
+	},
 ] as const satisfies readonly WorkflowMention[];
 
 export const AgentsAndWorkflows: Story = {
