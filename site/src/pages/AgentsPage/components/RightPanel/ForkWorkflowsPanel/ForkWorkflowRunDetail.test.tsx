@@ -13,6 +13,7 @@ import { MockChat } from "#/testHelpers/chatEntities";
 import {
 	MockAppearanceConfig,
 	MockBuildInfo,
+	MockChatOrganization,
 	MockDefaultOrganization,
 	MockEntitlements,
 } from "#/testHelpers/entities";
@@ -65,9 +66,12 @@ const renderDetail = (
 		canUpdateChat?: boolean;
 		archived?: boolean;
 		planMode?: boolean;
+		/** Replaces the client renderDetail would create, so a test can
+		    seed query data the view reads. */
+		queryClient?: QueryClient;
 	} = {},
 ) => {
-	const queryClient = createTestQueryClient();
+	const queryClient = options.queryClient ?? createTestQueryClient();
 	seedChatWriteAccess(queryClient, run.chat_id, options.canUpdateChat ?? true, {
 		archived: options.archived,
 		planMode: options.planMode,
@@ -80,7 +84,7 @@ const renderDetail = (
 					experiments: ["fork-workflows"],
 					appearance: MockAppearanceConfig,
 					buildInfo: MockBuildInfo,
-					organizations: [MockDefaultOrganization],
+					organizations: [MockDefaultOrganization, MockChatOrganization],
 					showOrganizations: false,
 					canViewOrganizationSettings: false,
 				}}
@@ -259,7 +263,10 @@ describe("ForkWorkflowRunDetail", () => {
 		);
 		expect(
 			await screen.findByRole("link", { name: /Saved review-changed-files/ }),
-		).toHaveAttribute("href", "/agents/settings/workflows");
+		).toHaveAttribute(
+			"href",
+			`/agents/settings/workflows?org=${MockChatOrganization.name}`,
+		);
 		// Focus moves to the link that replaced the Save button.
 		expect(
 			screen.getByRole("link", { name: /Saved review-changed-files/ }),
@@ -312,6 +319,45 @@ describe("ForkWorkflowRunDetail", () => {
 		authorizationSpy.mockRestore();
 	});
 
+	it("keeps Personal usable when the organization permission check fails", async () => {
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
+		const authorizationSpy = vi
+			.spyOn(API, "checkAuthorization")
+			.mockRejectedValue(new Error("check failed") as never);
+		const create = vi
+			.spyOn(forkSavedWorkflowsApi, "createUserSavedWorkflow")
+			.mockResolvedValue({
+				...MockForkSavedWorkflow,
+				id: "saved-workflow-new",
+				name: "review-changed-files",
+				organization_id: MockChat.organization_id,
+				user_id: "me",
+				created_by: "me",
+				description: "",
+				args_schema: undefined,
+				phases: [],
+			});
+		renderDetail(MockChatWorkflowRunDetail);
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Save workflow" }),
+		);
+		const dialog = screen.getByRole("dialog", { name: "Save workflow" });
+		// The failed check shows its error in place of the tier choice, and
+		// the personal tier, which needs no organization permission, stays
+		// usable instead of waiting on a check that already failed.
+		await within(dialog).findByText("check failed");
+		const submit = within(dialog).getByRole("button", {
+			name: "Save workflow",
+		});
+		expect(submit).toBeEnabled();
+		await user.click(submit);
+		await waitFor(() => expect(create).toHaveBeenCalledOnce());
+		authorizationSpy.mockRestore();
+	});
+
 	it("trims the name before creating the workflow", async () => {
 		const queryClient = createTestQueryClient();
 		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
@@ -352,16 +398,31 @@ describe("ForkWorkflowRunDetail", () => {
 		);
 	});
 
-	it("hides the save action without organization skill create permission", async () => {
+	it("shows only the personal tier without organization skill create permission", async () => {
 		const queryClient = createTestQueryClient();
 		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
 		seedCreatePermission(queryClient, false);
-		vi.spyOn(
-			forkSavedWorkflowsApi,
-			"createUserSavedWorkflow",
-		).mockRejectedValue(new Error("must not be called"));
-		renderDetail(MockChatWorkflowRunDetail);
+		const create = vi
+			.spyOn(
+				forkSavedWorkflowsApi,
+				"createUserSavedWorkflow",
+			)
+			.mockRejectedValue(new Error("must not be called"));
+		renderDetail(MockChatWorkflowRunDetail, { queryClient });
+		const user = userEvent.setup();
 
-		await screen.findByRole("button", { name: "Save workflow" });
+		await user.click(
+			await screen.findByRole("button", { name: "Save workflow" }),
+		);
+		const dialog = screen.getByRole("dialog", { name: "Save workflow" });
+		// The seeded denial reaches the view, so the whole tier choice is
+		// gone and the dialog saves straight into the personal tier.
+		expect(within(dialog).queryByLabelText("Organization")).toBeNull();
+		const submit = within(dialog).getByRole("button", {
+			name: "Save workflow",
+		});
+		expect(submit).toBeEnabled();
+		await user.click(submit);
+		await waitFor(() => expect(create).toHaveBeenCalledOnce());
 	});
 });

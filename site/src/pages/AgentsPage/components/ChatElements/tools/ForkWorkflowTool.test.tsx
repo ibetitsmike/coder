@@ -14,6 +14,7 @@ import { MockChat } from "#/testHelpers/chatEntities";
 import {
 	MockAppearanceConfig,
 	MockBuildInfo,
+	MockChatOrganization,
 	MockDefaultOrganization,
 	MockEntitlements,
 	mockApiError,
@@ -71,7 +72,7 @@ const renderWorkflowTool = (
 					experiments: ["fork-workflows"],
 					appearance: MockAppearanceConfig,
 					buildInfo: MockBuildInfo,
-					organizations: [MockDefaultOrganization],
+					organizations: [MockDefaultOrganization, MockChatOrganization],
 					showOrganizations: false,
 					canViewOrganizationSettings: false,
 				}}
@@ -502,7 +503,10 @@ describe("ForkWorkflowTool", () => {
 		);
 		expect(
 			await screen.findByRole("link", { name: /Saved review-changed-files/ }),
-		).toHaveAttribute("href", "/agents/settings/workflows");
+		).toHaveAttribute(
+			"href",
+			`/agents/settings/workflows?org=${MockChatOrganization.name}`,
+		);
 		// Focus moves to the link that replaced the Save button.
 		expect(
 			screen.getByRole("link", { name: /Saved review-changed-files/ }),

@@ -78,7 +78,7 @@ const ForkWorkflowSaveActionInner: React.FC<
 					name={saved.name}
 					href={savedWorkflowSettingsPath(
 						saved.tier,
-						saved.tier === "organization" ? (organizationName ?? "") : "",
+						organizationName ?? "",
 					)}
 				/>
 			</>

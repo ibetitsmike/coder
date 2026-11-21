@@ -42,6 +42,11 @@ type SaveDialogProps = {
 	 */
 	canCreateOrganization: boolean | undefined;
 	canCreateOrganizationError: unknown;
+	/**
+	 * Whether the authorization check is still loading, as opposed to
+	 * failed: only a pending answer holds the Personal submission.
+	 */
+	isPermissionPending: boolean;
 	savedLinkRef: React.RefObject<HTMLAnchorElement | null>;
 	onSaved: (name: string, tier: SaveTier) => void;
 	onClose: () => void;
@@ -52,6 +57,7 @@ const SaveDialog: React.FC<SaveDialogProps> = ({
 	organizationId,
 	canCreateOrganization,
 	canCreateOrganizationError,
+	isPermissionPending,
 	savedLinkRef,
 	onSaved,
 	onClose,
@@ -99,11 +105,13 @@ const SaveDialog: React.FC<SaveDialogProps> = ({
 			script={target.script}
 			canCreateOrganization={canCreateOrganization}
 			canCreateOrganizationError={canCreateOrganizationError}
+			isPermissionPending={isPermissionPending}
 			isSubmitting={isSubmitting}
 			submitError={submitError}
-			// The link only exists after a save, so the dialog redirects the
-			// close focus to it when it does and lets the default stand when
-			// it does not.
+			// The link only exists after a save, so closing without one
+			// keeps the dialog's default focus move. Closing after one
+			// redirects focus to the link instead of the dead Save button's
+			// position.
 			onCloseAutoFocus={(event) => {
 				if (savedLinkRef.current) {
 					event.preventDefault();
@@ -142,6 +150,8 @@ export const useForkWorkflowSave = (options: {
 		}),
 		enabled: Boolean(saveTarget),
 	});
+	const isPermissionPending =
+		orgPermissionQuery.isPending && !orgPermissionQuery.isError;
 	const canCreateOrganization =
 		orgPermissionQuery.data?.canCreateOrganizationSkill === true
 			? true
@@ -155,6 +165,7 @@ export const useForkWorkflowSave = (options: {
 			organizationId={organizationId}
 			canCreateOrganization={canCreateOrganization}
 			canCreateOrganizationError={orgPermissionQuery.error}
+			isPermissionPending={isPermissionPending}
 			savedLinkRef={savedLinkRef}
 			onSaved={(name, tier) => {
 				setSaved({ name, tier, organizationId });
@@ -171,9 +182,9 @@ export const savedWorkflowSettingsPath = (
 	tier: SaveTier,
 	organizationName: string,
 ): string =>
-	tier === "user"
-		? "/agents/settings/workflows"
-		: `/ai/settings/workflows?org=${encodeURIComponent(organizationName)}`;
+	// Personal workflows are organization scoped too, so the personal link
+	// carries the organization as well and the settings page selects it.
+	`/${tier === "user" ? "agents" : "ai"}/settings/workflows?org=${encodeURIComponent(organizationName)}`;
 
 /** The organization name of a chat, from the dashboard's organization list. */
 export const useForkSavedWorkflowOrganizationName = (

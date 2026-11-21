@@ -161,14 +161,17 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 						{run.status === "interrupted" && isResumeAvailable && (
 							<ForkWorkflowResumeButton runId={run.id} chatId={run.chat_id} />
 						)}
-						{run.status === "completed" && (
-							<ForkWorkflowSaveAction
-								title={run.title}
-								script={run.script}
-								organizationId={organizationId}
-							/>
-						)}
 					</>
+				)}
+				{/* Saving creates a new workflow and does not update the chat,
+				    so it stays available when the update check is pending,
+				    failed or denies, including on archived chats. */}
+				{run.status === "completed" && (
+					<ForkWorkflowSaveAction
+						title={run.title}
+						script={run.script}
+						organizationId={organizationId}
+					/>
 				)}
 			</div>
 			<div className="mt-1 text-xs text-content-secondary">

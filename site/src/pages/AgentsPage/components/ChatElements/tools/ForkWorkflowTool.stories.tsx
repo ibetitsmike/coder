@@ -6,6 +6,10 @@ import { getAuthorizationKey } from "#/api/queries/authCheck";
 import { chatEntityKey } from "#/api/queries/chats";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import { MockChat } from "#/testHelpers/chatEntities";
+import {
+	MockChatOrganization,
+	MockDefaultOrganization,
+} from "#/testHelpers/entities";
 import { MockForkSavedWorkflow } from "#/testHelpers/forkSavedWorkflows";
 import {
 	MockChatWorkflowRunDetail,
@@ -40,6 +44,7 @@ const meta: Meta<typeof Tool> = {
 	parameters: {
 		experiments: ["fork-workflows"],
 		reactRouter: reactRouterParameters({ routing: { path: "/" } }),
+		organizations: [MockDefaultOrganization, MockChatOrganization],
 	},
 	decorators: [
 		(Story) => (
@@ -231,21 +236,6 @@ const canUpdateChatQuery = (canUpdateChat: boolean) => ({
 		},
 	}),
 	data: { canUpdateChat },
-});
-
-const canCreateOrganizationSkillQuery = (canCreate: boolean) => ({
-	key: getAuthorizationKey({
-		checks: {
-			canCreateOrganizationSkill: {
-				object: {
-					resource_type: "organization_skill",
-					organization_id: MockChat.organization_id,
-				},
-				action: "create",
-			},
-		},
-	}),
-	data: { canCreateOrganizationSkill: canCreate },
 });
 
 const mockSavedWorkflow = {
@@ -457,7 +447,20 @@ export const CompletedSaveDialog: Story = {
 		queries: [
 			chatQuery,
 			canUpdateChatQuery(true),
-			canCreateOrganizationSkillQuery(true),
+			{
+				key: getAuthorizationKey({
+					checks: {
+						canCreateOrganizationSkill: {
+							object: {
+								resource_type: "organization_skill",
+								organization_id: MockChat.organization_id,
+							},
+							action: "create",
+						},
+					},
+				}),
+				data: { canCreateOrganizationSkill: true },
+			},
 		],
 		reactRouter: liveCardReactRouter,
 	},
@@ -490,7 +493,20 @@ export const CompletedSaveDialogPersonalOnly: Story = {
 		queries: [
 			chatQuery,
 			canUpdateChatQuery(true),
-			canCreateOrganizationSkillQuery(false),
+			{
+				key: getAuthorizationKey({
+					checks: {
+						canCreateOrganizationSkill: {
+							object: {
+								resource_type: "organization_skill",
+								organization_id: MockChat.organization_id,
+							},
+							action: "create",
+						},
+					},
+				}),
+				data: { canCreateOrganizationSkill: false },
+			},
 		],
 		reactRouter: liveCardReactRouter,
 	},
@@ -520,7 +536,20 @@ export const CompletedSaved: Story = {
 		queries: [
 			chatQuery,
 			canUpdateChatQuery(true),
-			canCreateOrganizationSkillQuery(true),
+			{
+				key: getAuthorizationKey({
+					checks: {
+						canCreateOrganizationSkill: {
+							object: {
+								resource_type: "organization_skill",
+								organization_id: MockChat.organization_id,
+							},
+							action: "create",
+						},
+					},
+				}),
+				data: { canCreateOrganizationSkill: true },
+			},
 		],
 		reactRouter: liveCardReactRouter,
 	},

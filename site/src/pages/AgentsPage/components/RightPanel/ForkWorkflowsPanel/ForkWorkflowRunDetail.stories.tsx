@@ -6,6 +6,10 @@ import { getAuthorizationKey } from "#/api/queries/authCheck";
 import { chatEntityKey } from "#/api/queries/chats";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import { MockChat } from "#/testHelpers/chatEntities";
+import {
+	MockChatOrganization,
+	MockDefaultOrganization,
+} from "#/testHelpers/entities";
 import { MockForkSavedWorkflow } from "#/testHelpers/forkSavedWorkflows";
 import {
 	MockChatWorkflowRunDetail,
@@ -130,21 +134,6 @@ const baseQueries = [
 	},
 ];
 
-const canCreateOrganizationSkillQuery = (canCreate: boolean) => ({
-	key: getAuthorizationKey({
-		checks: {
-			canCreateOrganizationSkill: {
-				object: {
-					resource_type: "organization_skill",
-					organization_id: MockChat.organization_id,
-				},
-				action: "create",
-			},
-		},
-	}),
-	data: { canCreateOrganizationSkill: canCreate },
-});
-
 const meta: Meta<typeof ForkWorkflowRunDetailView> = {
 	title: "pages/AgentsPage/RightPanel/ForkWorkflowRunDetail",
 	component: ForkWorkflowRunDetailView,
@@ -156,6 +145,7 @@ const meta: Meta<typeof ForkWorkflowRunDetailView> = {
 		// mock call, and its log line calls Date.now, so the spy recurses.
 		actions: { disable: true },
 		queries: baseQueries,
+		organizations: [MockDefaultOrganization, MockChatOrganization],
 	},
 	beforeEach: () => {
 		// Named "spy" so Storybook's actions addon skips logging it: its log
@@ -184,7 +174,23 @@ export const Completed: Story = {};
 /** A completed run whose Save button opened the save dialog. */
 export const CompletedSaveDialog: Story = {
 	parameters: {
-		queries: [...baseQueries, canCreateOrganizationSkillQuery(true)],
+		queries: [
+			...baseQueries,
+			{
+				key: getAuthorizationKey({
+					checks: {
+						canCreateOrganizationSkill: {
+							object: {
+								resource_type: "organization_skill",
+								organization_id: MockChat.organization_id,
+							},
+							action: "create",
+						},
+					},
+				}),
+				data: { canCreateOrganizationSkill: true },
+			},
+		],
 	},
 	play: async ({ canvas }) => {
 		await userEvent.click(
@@ -200,7 +206,23 @@ export const CompletedSaveDialog: Story = {
  */
 export const CompletedSaveDialogPersonalOnly: Story = {
 	parameters: {
-		queries: [...baseQueries, canCreateOrganizationSkillQuery(false)],
+		queries: [
+			...baseQueries,
+			{
+				key: getAuthorizationKey({
+					checks: {
+						canCreateOrganizationSkill: {
+							object: {
+								resource_type: "organization_skill",
+								organization_id: MockChat.organization_id,
+							},
+							action: "create",
+						},
+					},
+				}),
+				data: { canCreateOrganizationSkill: false },
+			},
+		],
 	},
 	play: async ({ canvas }) => {
 		await userEvent.click(
@@ -213,7 +235,23 @@ export const CompletedSaveDialogPersonalOnly: Story = {
 /** A completed run after the run's script was saved. */
 export const CompletedSaved: Story = {
 	parameters: {
-		queries: [...baseQueries, canCreateOrganizationSkillQuery(true)],
+		queries: [
+			...baseQueries,
+			{
+				key: getAuthorizationKey({
+					checks: {
+						canCreateOrganizationSkill: {
+							object: {
+								resource_type: "organization_skill",
+								organization_id: MockChat.organization_id,
+							},
+							action: "create",
+						},
+					},
+				}),
+				data: { canCreateOrganizationSkill: true },
+			},
+		],
 	},
 	beforeEach: () => {
 		spyOn(API.getAxiosInstance(), "post").mockResolvedValue({

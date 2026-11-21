@@ -3,7 +3,7 @@
 // organization here and edit the ones they shared.
 
 import { useState } from "react";
-import { Navigate } from "react-router";
+import { Navigate, useSearchParams } from "react-router";
 import { OrganizationField } from "#/components/OrganizationAutocomplete/OrganizationAutocomplete";
 import { useAuthenticated } from "#/hooks/useAuthenticated";
 import {
@@ -11,6 +11,7 @@ import {
 	useDashboard,
 } from "#/modules/dashboard/useDashboard";
 import { ForkSavedWorkflowsTable } from "#/pages/AISettingsPage/ForkWorkflowsPage/ForkSavedWorkflowsTable";
+import { orgSearchParam } from "#/pages/AISettingsPage/MCPServersPage/organizationParam";
 import { SectionHeader } from "../../components/SectionHeader";
 import { readOnlySkillAccess, type SkillAccess } from "../../utils/skills";
 
@@ -26,6 +27,7 @@ const ForkSavedWorkflowsPage: React.FC = () => {
 	const { user } = useAuthenticated();
 	const { experiments, organizations } = useDashboard();
 	const memberOrganizations = getMemberOrganizations(organizations, user);
+	const [searchParams, setSearchParams] = useSearchParams();
 	const [selectedOrganizationId, setSelectedOrganizationId] =
 		useState<string>();
 
@@ -35,6 +37,9 @@ const ForkSavedWorkflowsPage: React.FC = () => {
 
 	const organization =
 		memberOrganizations.find((org) => org.id === selectedOrganizationId) ??
+		memberOrganizations.find(
+			(org) => org.name === searchParams.get(orgSearchParam),
+		) ??
 		memberOrganizations.find((org) => org.is_default) ??
 		memberOrganizations.at(0);
 	if (!organization) {
@@ -57,7 +62,17 @@ const ForkSavedWorkflowsPage: React.FC = () => {
 						className="w-full sm:w-60"
 						organizations={memberOrganizations}
 						organization={organization}
-						onChange={(org) => setSelectedOrganizationId(org.id)}
+						onChange={(org) => {
+							setSelectedOrganizationId(org.id);
+							setSearchParams(
+								(prev) => {
+									const next = new URLSearchParams(prev);
+									next.set(orgSearchParam, org.name);
+									return next;
+								},
+								{ replace: true },
+							);
+						}}
 						showLabel={false}
 					/>
 				</div>

@@ -24,9 +24,11 @@ import ForkSavedWorkflowsPage from "./ForkSavedWorkflowsPage";
 const renderPage = ({
 	experiments = ["fork-workflows"],
 	organizationIds = [MockOrganization2.id, MockDefaultOrganization.id],
+	route = "/agents/settings/workflows",
 }: {
 	experiments?: Experiment[];
 	organizationIds?: string[];
+	route?: string;
 } = {}) => {
 	vi.spyOn(API, "getExperiments").mockResolvedValue(experiments);
 	vi.spyOn(API, "getAuthenticatedUser").mockResolvedValue({
@@ -47,7 +49,7 @@ const renderPage = ({
 		.mockResolvedValue([MockForkOrganizationSavedWorkflowMetadata]);
 	const { router } = renderWithAuth(<ForkSavedWorkflowsPage />, {
 		path: "/agents/settings/workflows",
-		route: "/agents/settings/workflows",
+		route,
 		extraRoutes: [{ path: "/agents/settings", element: <div /> }],
 	});
 	return { listUser, listOrganization, router };
@@ -251,6 +253,16 @@ describe("ForkSavedWorkflowsPage", () => {
 				screen.getAllByRole("button", { name: "New workflow" })[0],
 			).toHaveFocus(),
 		);
+	});
+
+	it("selects the organization the URL names before the default one", async () => {
+		const { listUser, listOrganization } = renderPage({
+			route: `/agents/settings/workflows?org=${MockOrganization2.name}`,
+		});
+
+		await screen.findByRole("table", { name: "Personal workflows" });
+		expect(listUser).toHaveBeenCalledWith(MockOrganization2.id);
+		expect(listOrganization).toHaveBeenCalledWith(MockOrganization2.id);
 	});
 
 	it("offers only the member's organizations in the picker", async () => {

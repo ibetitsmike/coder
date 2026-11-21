@@ -44,14 +44,16 @@ type ForkWorkflowSaveDialogProps = {
 	canCreateOrganization: boolean | undefined;
 	/** The authorization check's error, shown in place of the tier choice. */
 	canCreateOrganizationError: unknown;
+	/** Whether the authorization check is still loading, as opposed to failed. */
+	isPermissionPending: boolean;
 	isSubmitting: boolean;
 	submitError?: SkillErrorDisplay;
 	onSubmit: (tier: "user" | "organization", values: SaveValues) => void;
 	onClose: () => void;
 	/**
-	 * Receives the dialog's close-focus event, after the dialog has already
-	 * redirected it to the saved link. Callers can use it to move focus
-	 * somewhere else instead.
+	 * Receives the dialog's close-focus event before the
+	 * default focus move. Callers redirect focus themselves and
+	 * prevent the default only when they do.
 	 */
 	onCloseAutoFocus?: (event: Event) => void;
 };
@@ -81,6 +83,7 @@ export const ForkWorkflowSaveDialog: React.FC<ForkWorkflowSaveDialogProps> = ({
 	script,
 	canCreateOrganization,
 	canCreateOrganizationError,
+	isPermissionPending,
 	isSubmitting,
 	submitError,
 	onSubmit,
@@ -104,8 +107,9 @@ export const ForkWorkflowSaveDialog: React.FC<ForkWorkflowSaveDialogProps> = ({
 	};
 	const errors = savedWorkflowFormErrors(formValues);
 	// A pending organization answer blocks the submit: an organization admin
-	// would otherwise create the workflow in the personal tier by default.
-	const isPermissionPending = canCreateOrganization === undefined;
+	// would otherwise create the workflow in the personal tier by default. A
+	// failed check does not hold the Personal tier, which needs no
+	// organization-create permission; its error shows instead of the choice.
 	const canSubmit =
 		!isSubmitting && !isPermissionPending && Object.keys(errors).length === 0;
 
@@ -120,15 +124,7 @@ export const ForkWorkflowSaveDialog: React.FC<ForkWorkflowSaveDialogProps> = ({
 				}
 			}}
 		>
-			<DialogContent
-				className="max-w-2xl"
-				onCloseAutoFocus={(event) => {
-					// The Save button unmounts once the save succeeds, so focus
-					// moves to the link that replaces it instead of being lost.
-					event.preventDefault();
-					onCloseAutoFocus?.(event);
-				}}
-			>
+			<DialogContent className="max-w-2xl" onCloseAutoFocus={onCloseAutoFocus}>
 				<form
 					className="flex flex-col gap-4"
 					onSubmit={(event) => {
