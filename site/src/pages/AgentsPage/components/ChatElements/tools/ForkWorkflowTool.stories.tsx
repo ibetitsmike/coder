@@ -1,5 +1,12 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { spyOn, userEvent, within } from "storybook/test";
+import {
+	expect,
+	screen,
+	spyOn,
+	userEvent,
+	waitFor,
+	within,
+} from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
 import { API } from "#/api/api";
 import { getAuthorizationKey } from "#/api/queries/authCheck";
@@ -192,6 +199,10 @@ export const StartedThenCompleted: Story = {
 		spyOn(API.getAxiosInstance(), "get").mockResolvedValue({
 			data: MockChatWorkflowRunDetail,
 		});
+		spyOn(API, "checkAuthorization").mockResolvedValue({
+			canUpdateChat: true,
+			canCreateOrganizationSkill: true,
+		});
 	},
 	play: async (context) => {
 		await within(context.canvasElement).findByRole("button", {
@@ -227,6 +238,36 @@ const canUpdateChatQuery = (canUpdateChat: boolean) => ({
 	}),
 	data: { canUpdateChat },
 });
+
+const canCreateOrganizationSkillQuery = (canCreate: boolean) => ({
+	key: getAuthorizationKey({
+		checks: {
+			canCreateOrganizationSkill: {
+				object: {
+					resource_type: "organization_skill",
+					organization_id: MockChat.organization_id,
+				},
+				action: "create",
+			},
+		},
+	}),
+	data: { canCreateOrganizationSkill: canCreate },
+});
+
+const mockSavedWorkflow = {
+	...MockChatWorkflowRunDetail,
+	id: "saved-workflow-new",
+	name: "review-changed-files",
+	description: "",
+	user_id: "me",
+	created_by: "me",
+	organization_id: MockChat.organization_id,
+	args_schema: undefined,
+	phases: [],
+	script: MockForkWorkflowScript,
+	created_at: "2026-11-21T00:00:00Z",
+	updated_at: "2026-11-21T00:00:00Z",
+};
 
 const liveCardReactRouter = reactRouterParameters({
 	location: { pathParams: { agentId: MockForkWorkflowChatId } },
@@ -403,4 +444,121 @@ export const StartFailed: Story = {
 		isError: true,
 	},
 	play: expand,
+};
+
+/** A completed live card whose Save button opens the save dialog. */
+const clickSave: Story["play"] = async (context) => {
+	await expand(context);
+	await userEvent.click(
+		await within(context.canvasElement).findByRole("button", {
+			name: "Save workflow",
+		}),
+	);
+};
+
+export const CompletedSaveDialog: Story = {
+	args: {
+		name: "run_workflow",
+		args: mockRunWorkflowArgs,
+		result: MockForkWorkflowStartedResult,
+	},
+	parameters: {
+		queries: [
+			chatQuery,
+			canUpdateChatQuery(true),
+			canCreateOrganizationSkillQuery(true),
+		],
+		reactRouter: liveCardReactRouter,
+	},
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "get").mockResolvedValue({
+			data: MockChatWorkflowRunDetail,
+		});
+		spyOn(API, "checkAuthorization").mockResolvedValue({
+			canUpdateChat: true,
+			canCreateOrganizationSkill: true,
+		});
+	},
+	play: async (context) => {
+		await clickSave(context);
+		await screen.findByRole("dialog", { name: "Save workflow" });
+	},
+};
+
+/**
+ * The save dialog of a viewer who may not create organization workflows: the
+ * tier choice is gone and only Personal remains.
+ */
+export const CompletedSaveDialogPersonalOnly: Story = {
+	args: {
+		name: "run_workflow",
+		args: mockRunWorkflowArgs,
+		result: MockForkWorkflowStartedResult,
+	},
+	parameters: {
+		queries: [
+			chatQuery,
+			canUpdateChatQuery(true),
+			canCreateOrganizationSkillQuery(false),
+		],
+		reactRouter: liveCardReactRouter,
+	},
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "get").mockResolvedValue({
+			data: MockChatWorkflowRunDetail,
+		});
+		spyOn(API, "checkAuthorization").mockResolvedValue({
+			canUpdateChat: true,
+			canCreateOrganizationSkill: true,
+		});
+	},
+	play: async (context) => {
+		await clickSave(context);
+		await screen.findByRole("dialog", { name: "Save workflow" });
+	},
+};
+
+/** A completed live card after the run's script was saved. */
+export const CompletedSaved: Story = {
+	args: {
+		name: "run_workflow",
+		args: mockRunWorkflowArgs,
+		result: MockForkWorkflowStartedResult,
+	},
+	parameters: {
+		queries: [
+			chatQuery,
+			canUpdateChatQuery(true),
+			canCreateOrganizationSkillQuery(true),
+		],
+		reactRouter: liveCardReactRouter,
+	},
+	beforeEach: () => {
+		spyOn(API.getAxiosInstance(), "get").mockResolvedValue({
+			data: MockChatWorkflowRunDetail,
+		});
+		spyOn(API.getAxiosInstance(), "post").mockResolvedValue({
+			data: mockSavedWorkflow,
+		});
+		spyOn(API, "checkAuthorization").mockResolvedValue({
+			canUpdateChat: true,
+			canCreateOrganizationSkill: true,
+		});
+	},
+	play: async (context) => {
+		await clickSave(context);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Save workflow",
+		});
+		await userEvent.click(
+			within(dialog).getByRole("button", { name: "Save workflow" }),
+		);
+		await waitFor(() =>
+			expect(
+				within(context.canvasElement).getByRole("link", {
+					name: /Saved review-changed-files/,
+				}),
+			).toHaveAttribute("href", "/agents/settings/workflows"),
+		);
+	},
 };

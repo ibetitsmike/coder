@@ -15,6 +15,7 @@ import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import { ForkWorkflowLongText } from "../../ForkWorkflows/ForkWorkflowLongText";
 import { ForkWorkflowPhaseRail } from "../../ForkWorkflows/ForkWorkflowPhaseRail";
 import { ForkWorkflowResumeButton } from "../../ForkWorkflows/ForkWorkflowResumeButton";
+import { ForkWorkflowSaveAction } from "../../ForkWorkflows/ForkWorkflowSaveAction";
 import { ForkWorkflowStatusBadge } from "../../ForkWorkflows/ForkWorkflowStatusBadge";
 import { ForkWorkflowSteps } from "../../ForkWorkflows/ForkWorkflowSteps";
 import { ForkWorkflowStopButton } from "../../ForkWorkflows/ForkWorkflowStopButton";
@@ -292,6 +293,13 @@ const ForkWorkflowRunControls: React.FC<{
 			<ForkWorkflowStopButton run={run} fallbackFocusRef={fallbackFocusRef} />
 			{run.status === "interrupted" && isResumeAvailable && (
 				<ForkWorkflowResumeButton runId={run.id} chatId={chatId} />
+			)}
+			{run.status === "completed" && (
+				<ForkWorkflowSaveAction
+					title={run.title}
+					script={run.script}
+					organizationId={chatQuery.data?.organization_id}
+				/>
 			)}
 		</div>
 	);

@@ -1,12 +1,24 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClientProvider } from "react-query";
+import { type QueryClient, QueryClientProvider } from "react-query";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
+import * as forkSavedWorkflowsApi from "#/api/forkSavedWorkflows";
 import * as forkWorkflowsApi from "#/api/forkWorkflows";
+import { getAuthorizationKey } from "#/api/queries/authCheck";
 import type { WorkflowRunDetail } from "#/api/typesGenerated";
+import { DashboardContext } from "#/modules/dashboard/DashboardProvider";
+import { MockChat } from "#/testHelpers/chatEntities";
+import {
+	MockAppearanceConfig,
+	MockBuildInfo,
+	MockDefaultOrganization,
+	MockEntitlements,
+} from "#/testHelpers/entities";
 import {
 	MockChatWorkflowRunDetail,
+	MockForkWorkflowChatId,
+	MockForkWorkflowScript,
 	seedChatWriteAccess,
 } from "#/testHelpers/forkWorkflows";
 import {
@@ -20,6 +32,28 @@ const mockRunningRunDetail: WorkflowRunDetail = {
 	status: "running",
 	result: undefined,
 	finished_at: undefined,
+};
+
+const seedCreatePermission = (
+	queryClient: QueryClient,
+	canCreateOrganizationSkill: boolean,
+) => {
+	const key = getAuthorizationKey({
+		checks: {
+			canCreateOrganizationSkill: {
+				object: {
+					resource_type: "organization_skill",
+					organization_id: MockChat.organization_id,
+				},
+				action: "create",
+			},
+		},
+	});
+	queryClient.setQueryDefaults(key, {
+		staleTime: Number.POSITIVE_INFINITY,
+		gcTime: Number.POSITIVE_INFINITY,
+	});
+	queryClient.setQueryData(key, { canCreateOrganizationSkill });
 };
 
 // Each rerender stands in for a poll that returns the run. The chat and its
@@ -39,13 +73,25 @@ const renderDetail = (
 	});
 	const view = (current: WorkflowRunDetail) => (
 		<QueryClientProvider client={queryClient}>
-			<MemoryRouter>
-				<ForkWorkflowRunDetailView
-					run={current}
-					error={null}
-					onBack={vi.fn()}
-				/>
-			</MemoryRouter>
+			<DashboardContext.Provider
+				value={{
+					entitlements: MockEntitlements,
+					experiments: ["fork-workflows"],
+					appearance: MockAppearanceConfig,
+					buildInfo: MockBuildInfo,
+					organizations: [MockDefaultOrganization],
+					showOrganizations: false,
+					canViewOrganizationSettings: false,
+				}}
+			>
+				<MemoryRouter>
+					<ForkWorkflowRunDetailView
+						run={current}
+						error={null}
+						onBack={vi.fn()}
+					/>
+				</MemoryRouter>
+			</DashboardContext.Provider>
 		</QueryClientProvider>
 	);
 	const { rerender } = renderComponent(view(run));
@@ -168,5 +214,65 @@ describe("ForkWorkflowRunDetail", () => {
 		renderDetail(mockRunningRunDetail, { planMode: true });
 
 		await screen.findByRole("button", { name: "Stop workflow run" });
+	});
+
+	it("saves the run's script as a personal workflow from the panel", async () => {
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
+		seedCreatePermission(queryClient, true);
+		const create = vi
+			.spyOn(forkSavedWorkflowsApi, "createUserSavedWorkflow")
+			.mockResolvedValue({
+				...MockChatWorkflowRunDetail,
+				id: "saved-workflow-new",
+				name: "review-changed-files",
+				description: "",
+				user_id: "me",
+				created_by: "me",
+				organization_id: MockChat.organization_id,
+				args_schema: undefined,
+				phases: [],
+				script: MockForkWorkflowScript,
+				created_at: "2026-11-21T00:00:00Z",
+				updated_at: "2026-11-21T00:00:00Z",
+			});
+		renderDetail(MockChatWorkflowRunDetail);
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Save workflow" }),
+		);
+		const dialog = screen.getByRole("dialog", { name: "Save workflow" });
+		expect(within(dialog).getByLabelText("Name")).toHaveValue(
+			"review-changed-files",
+		);
+		await user.click(
+			within(dialog).getByRole("button", { name: "Save workflow" }),
+		);
+
+		await waitFor(() => expect(create).toHaveBeenCalledOnce());
+		expect(create).toHaveBeenCalledWith(
+			MockChat.organization_id,
+			expect.objectContaining({
+				name: "review-changed-files",
+				script: MockForkWorkflowScript,
+			}),
+		);
+		expect(
+			await screen.findByRole("link", { name: /Saved review-changed-files/ }),
+		).toHaveAttribute("href", "/agents/settings/workflows");
+	});
+
+	it("hides the save action without organization skill create permission", async () => {
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
+		seedCreatePermission(queryClient, false);
+		vi.spyOn(
+			forkSavedWorkflowsApi,
+			"createUserSavedWorkflow",
+		).mockRejectedValue(new Error("must not be called"));
+		renderDetail(MockChatWorkflowRunDetail);
+
+		await screen.findByRole("button", { name: "Save workflow" });
 	});
 });

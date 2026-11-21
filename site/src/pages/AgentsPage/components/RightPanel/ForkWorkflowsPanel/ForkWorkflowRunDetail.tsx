@@ -18,6 +18,7 @@ import { timeFrom } from "#/utils/time";
 import { ForkWorkflowLongText } from "../../ForkWorkflows/ForkWorkflowLongText";
 import { ForkWorkflowPhaseRail } from "../../ForkWorkflows/ForkWorkflowPhaseRail";
 import { ForkWorkflowResumeButton } from "../../ForkWorkflows/ForkWorkflowResumeButton";
+import { ForkWorkflowSaveAction } from "../../ForkWorkflows/ForkWorkflowSaveAction";
 import { ForkWorkflowStatusBadge } from "../../ForkWorkflows/ForkWorkflowStatusBadge";
 import { ForkWorkflowSteps } from "../../ForkWorkflows/ForkWorkflowSteps";
 import { ForkWorkflowStopButton } from "../../ForkWorkflows/ForkWorkflowStopButton";
@@ -82,6 +83,7 @@ export const ForkWorkflowRunDetailView: React.FC<
 				error={error}
 				canWriteChat={canWriteChat}
 				isResumeAvailable={isResumeAvailable}
+				organizationId={chatQuery.data?.organization_id}
 			/>
 		);
 	} else if (error) {
@@ -116,6 +118,8 @@ type ForkWorkflowRunSummaryProps = {
 	canWriteChat: boolean | undefined;
 	/** Plan mode turns omit run_workflow, so Resume cannot work. */
 	isResumeAvailable: boolean;
+	/** The chat's organization, which the save action needs. */
+	organizationId: string | undefined;
 };
 
 const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
@@ -123,6 +127,7 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 	error,
 	canWriteChat,
 	isResumeAvailable,
+	organizationId,
 }) => {
 	const isRunning = run.status === "running";
 	const now = useTime(() => Date.now(), { disabled: !isRunning });
@@ -155,6 +160,13 @@ const ForkWorkflowRunSummary: React.FC<ForkWorkflowRunSummaryProps> = ({
 						<ForkWorkflowStopButton run={run} fallbackFocusRef={headingRef} />
 						{run.status === "interrupted" && isResumeAvailable && (
 							<ForkWorkflowResumeButton runId={run.id} chatId={run.chat_id} />
+						)}
+						{run.status === "completed" && (
+							<ForkWorkflowSaveAction
+								title={run.title}
+								script={run.script}
+								organizationId={organizationId}
+							/>
 						)}
 					</>
 				)}

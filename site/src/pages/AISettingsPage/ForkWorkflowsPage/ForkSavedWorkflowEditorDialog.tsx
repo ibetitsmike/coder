@@ -207,6 +207,7 @@ const SavedWorkflowEditorForm: React.FC<SavedWorkflowEditorFormProps> = ({
 				/>
 				<SavedWorkflowTextArea
 					label="Args schema"
+					// sentence-case-expect: JSON Schema is a proper noun.
 					hint="Optional JSON Schema object for the args of a run. Clearing it removes the schema."
 					placeholder='{"type": "object"}'
 					value={values.argsSchema}
@@ -258,7 +259,7 @@ type SavedWorkflowNameFieldProps = {
 	onChange: (name: string) => void;
 };
 
-const SavedWorkflowNameField: React.FC<SavedWorkflowNameFieldProps> = ({
+export const SavedWorkflowNameField: React.FC<SavedWorkflowNameFieldProps> = ({
 	value,
 	error,
 	disabled,
