@@ -22,7 +22,6 @@ import (
 	"strconv"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/golang-jwt/jwt/v4"
 	"golang.org/x/xerrors"
@@ -135,37 +134,34 @@ type forkAPNsPush struct {
 	Sound      bool
 }
 
-// payload encodes the push, cutting the body so the payload fits APNs's
-// size limit.
+// payload encodes the push. A body too long for APNs's size limit is cut
+// to the longest prefix of whole runes that fits with an ellipsis.
 func (p forkAPNsPush) payload() ([]byte, error) {
-	body := p.Body
-	for {
-		data, err := p.encode(body)
+	data, err := p.encode(p.Body)
+	if err != nil || len(data) <= forkAPNsMaxPayload {
+		return data, err
+	}
+	// JSON escapes make the encoded length of a prefix uneven, so search
+	// the cut instead of computing it.
+	runes := []rune(p.Body)
+	lo, hi := 0, len(runes)-1
+	var fit []byte
+	for lo <= hi {
+		mid := (lo + hi) / 2
+		data, err := p.encode(string(runes[:mid]) + "…")
 		if err != nil {
 			return nil, err
 		}
-		over := len(data) - forkAPNsMaxPayload
-		if over <= 0 {
-			return data, nil
-		}
-		if body == "" {
-			return nil, xerrors.New("APNs push is too large without a body")
-		}
-		// Cut at least the excess bytes, on a rune boundary, and mark the
-		// cut. JSON escapes can make a rune longer in the payload than in
-		// the body, so the loop checks again.
-		cut := len(body) - over - len("…")
-		if cut < 0 {
-			cut = 0
-		}
-		for cut > 0 && !utf8.RuneStart(body[cut]) {
-			cut--
-		}
-		body = body[:cut] + "…"
-		if cut == 0 {
-			body = ""
+		if len(data) <= forkAPNsMaxPayload {
+			fit, lo = data, mid+1
+		} else {
+			hi = mid - 1
 		}
 	}
+	if fit == nil {
+		return nil, xerrors.New("APNs push is too large without its body")
+	}
+	return fit, nil
 }
 
 func (p forkAPNsPush) encode(body string) ([]byte, error) {
