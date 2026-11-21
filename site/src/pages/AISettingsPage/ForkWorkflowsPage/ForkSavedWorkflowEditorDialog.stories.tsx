@@ -59,6 +59,20 @@ export const SubmitError: Story = {
 	},
 };
 
+// A conditional save that lost the race: the editor keeps the draft and
+// explains that the workflow changed elsewhere.
+export const StaleSaveError: Story = {
+	args: {
+		...Edit.args,
+		submitError: {
+			message:
+				"This saved workflow changed or was deleted after you opened it.",
+			detail:
+				"Saving would overwrite the newer version. Copy your changes, then close and reopen the editor.",
+		},
+	},
+};
+
 export const Loading: Story = {
 	args: { mode: "edit", initialValues: undefined, isLoading: true },
 };

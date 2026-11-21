@@ -195,6 +195,44 @@ describe("createSavedWorkflow", () => {
 });
 
 describe("updateSavedWorkflow", () => {
+	it("sends expect_id when the caller names the revision it opened", async () => {
+		const queryClient = createQueryClient();
+		const update = vi
+			.spyOn(forkSavedWorkflowsApi, "updateUserSavedWorkflow")
+			.mockResolvedValue(MockForkSavedWorkflowCreated);
+
+		await new MutationObserver(
+			queryClient,
+			updateSavedWorkflow(queryClient),
+		).mutate({ scope, name, req: { description: "New." }, id: "wf-1" });
+
+		expect(update).toHaveBeenCalledWith(
+			scope.organizationId,
+			name,
+			{ description: "New." },
+			{ expect_id: "wf-1" },
+		);
+	});
+
+	it("writes unconditionally without an id", async () => {
+		const queryClient = createQueryClient();
+		const update = vi
+			.spyOn(forkSavedWorkflowsApi, "updateUserSavedWorkflow")
+			.mockResolvedValue(MockForkSavedWorkflowCreated);
+
+		await new MutationObserver(
+			queryClient,
+			updateSavedWorkflow(queryClient),
+		).mutate({ scope, name, req: { description: "New." } });
+
+		expect(update).toHaveBeenCalledWith(
+			scope.organizationId,
+			name,
+			{ description: "New." },
+			undefined,
+		);
+	});
+
 	it("updates the listed row and the fetched workflow", async () => {
 		const queryClient = createQueryClient();
 		const listKey = savedWorkflowsKey(scope);
@@ -254,7 +292,7 @@ describe("updateSavedWorkflow", () => {
 });
 
 describe("deleteSavedWorkflow", () => {
-	it("removes the workflow from the list and drops its detail query", async () => {
+	it("sends expect_id and removes the workflow from the list", async () => {
 		const queryClient = createQueryClient();
 		const listKey = savedWorkflowsKey(scope);
 		const detailKey = savedWorkflowKey(scope, name);
@@ -262,48 +300,32 @@ describe("deleteSavedWorkflow", () => {
 			metadataOf(MockForkSavedWorkflowCreated),
 		]);
 		queryClient.setQueryData(detailKey, MockForkSavedWorkflowCreated);
-		vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow").mockResolvedValue(
-			MockForkSavedWorkflowCreated,
-		);
-		vi.spyOn(
-			forkSavedWorkflowsApi,
-			"deleteUserSavedWorkflow",
-		).mockResolvedValue();
+		const get = vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow");
+		const remove = vi
+			.spyOn(forkSavedWorkflowsApi, "deleteUserSavedWorkflow")
+			.mockResolvedValue();
 
 		await new MutationObserver(
 			queryClient,
 			deleteSavedWorkflow(queryClient),
 		).mutate({ scope, name, id: MockForkSavedWorkflowCreated.id });
 
-		expect(forkSavedWorkflowsApi.deleteUserSavedWorkflow).toHaveBeenCalledWith(
-			scope.organizationId,
-			name,
-		);
+		expect(remove).toHaveBeenCalledWith(scope.organizationId, name, {
+			expect_id: MockForkSavedWorkflowCreated.id,
+		});
+		expect(get).not.toHaveBeenCalled();
 		expect(queryClient.getQueryData(listKey)).toEqual([]);
 		expect(queryClient.getQueryData(detailKey)).toBeUndefined();
 	});
 
-	it.each([
-		[
-			"holds a recreated workflow",
-			() => Promise.resolve(MockForkSavedWorkflowRecreated),
-		],
-		[
-			"no longer exists",
-			() =>
-				Promise.reject(mockApiError({ message: "Not found.", status: 404 })),
-		],
-	])("deletes nothing when the name %s", async (_case, get) => {
+	it("deletes nothing when the name holds another workflow", async () => {
 		const queryClient = createQueryClient();
 		const listKey = savedWorkflowsKey(scope);
 		const listed = [metadataOf(MockForkSavedWorkflowCreated)];
 		queryClient.setQueryData(listKey, listed);
-		vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow").mockImplementation(
-			get,
-		);
 		const remove = vi
 			.spyOn(forkSavedWorkflowsApi, "deleteUserSavedWorkflow")
-			.mockResolvedValue();
+			.mockRejectedValue(mockApiError({ message: "Conflict.", status: 409 }));
 
 		await expect(
 			new MutationObserver(
@@ -312,7 +334,9 @@ describe("deleteSavedWorkflow", () => {
 			).mutate({ scope, name, id: MockForkSavedWorkflowCreated.id }),
 		).rejects.toBeInstanceOf(SavedWorkflowChangedError);
 
-		expect(remove).not.toHaveBeenCalled();
+		expect(remove).toHaveBeenCalledWith(scope.organizationId, name, {
+			expect_id: MockForkSavedWorkflowCreated.id,
+		});
 		expect(queryClient.getQueryData(listKey)).toEqual(listed);
 		expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
 			queryKey: listKey,
@@ -326,9 +350,6 @@ describe("deleteSavedWorkflow", () => {
 		queryClient.setQueryData(listKey, [
 			metadataOf(MockForkSavedWorkflowCreated),
 		]);
-		vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow").mockResolvedValue(
-			MockForkSavedWorkflowCreated,
-		);
 		vi.spyOn(
 			forkSavedWorkflowsApi,
 			"deleteUserSavedWorkflow",
@@ -357,9 +378,6 @@ describe("deleteSavedWorkflow", () => {
 		const listKey = savedWorkflowsKey(scope);
 		const listed = [metadataOf(MockForkSavedWorkflowCreated)];
 		queryClient.setQueryData(listKey, listed);
-		vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow").mockResolvedValue(
-			MockForkSavedWorkflowCreated,
-		);
 		vi.spyOn(
 			forkSavedWorkflowsApi,
 			"deleteUserSavedWorkflow",

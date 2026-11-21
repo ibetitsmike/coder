@@ -279,6 +279,7 @@ it("edits a workflow and sends only the fields the form owns", async () => {
 				args_schema: MockForkSavedWorkflowMetadata.args_schema,
 				phases: ["review", "summarize"],
 			}),
+			{ expect_id: MockForkSavedWorkflow.id },
 		),
 	);
 });
@@ -328,6 +329,100 @@ it("shows a server validation error in the editor", async () => {
 	await within(dialog).findByText("Invalid saved workflow.");
 });
 
+it("keeps the draft and refetches when the server rejects the save with 409", async () => {
+	const user = userEvent.setup();
+	const info = vi.spyOn(toast, "info");
+	const list = vi
+		.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflows")
+		.mockResolvedValue([MockForkSavedWorkflowMetadata]);
+	vi.spyOn(
+		forkSavedWorkflowsApi,
+		"getOrganizationSavedWorkflows",
+	).mockResolvedValue([]);
+	const detail = vi
+		.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow")
+		.mockResolvedValue(MockForkSavedWorkflow);
+	// Another tab replaced the workflow after the editor loaded it, so the
+	// conditional save refuses with 409, and from that moment the list and
+	// detail read the replacement it stored under the same name, so the
+	// refetches the mutation triggers model the server state.
+	const replacement = {
+		...MockForkSavedWorkflowMetadata,
+		id: "saved-workflow-replacement",
+		description: "Replaced in another tab.",
+		updated_at: "2030-01-01T00:00:00Z",
+	};
+	let serverHasReplacement = false;
+	const update = vi
+		.spyOn(forkSavedWorkflowsApi, "updateUserSavedWorkflow")
+		.mockImplementation(async () => {
+			serverHasReplacement = true;
+			throw mockApiError({ message: "Conflict.", status: 409 });
+		});
+	list.mockImplementation(async () =>
+		serverHasReplacement ? [replacement] : [MockForkSavedWorkflowMetadata],
+	);
+	detail.mockImplementation(async () =>
+		serverHasReplacement
+			? { ...MockForkSavedWorkflow, ...replacement }
+			: MockForkSavedWorkflow,
+	);
+	const { queryClient } = renderPage(`?org=${MockOrganization2.name}`);
+
+	await user.click(
+		await screen.findByRole("button", {
+			name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
+		}),
+	);
+	await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+	const dialog = await screen.findByRole("dialog");
+	const description = await within(dialog).findByLabelText("Description");
+	// The form only seeds its values once the editor's own fetches have
+	// settled, so every list call after this point is the conflict refetch.
+	const listCallsBeforeSave = list.mock.calls.length;
+	await user.type(description, " even harder");
+	await user.click(
+		within(dialog).getByRole("button", { name: "Save workflow" }),
+	);
+
+	await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+	expect(update).toHaveBeenCalledWith(
+		MockOrganization2.id,
+		MockForkSavedWorkflowMetadata.name,
+		expect.anything(),
+		{ expect_id: MockForkSavedWorkflow.id },
+	);
+	// The conflict invalidates the list and detail queries, and the
+	// refetches bring the editor the state the name holds now: the cache
+	// names the replacement, and the toast explains the rejection.
+	await waitFor(() =>
+		expect(list.mock.calls.length).toBeGreaterThan(listCallsBeforeSave),
+	);
+	await waitFor(() => expect(info).toHaveBeenCalled());
+	await waitFor(() =>
+		expect(
+			queryClient
+				.getQueryData<ForkSavedWorkflowMetadata[]>(
+					savedWorkflowsKey({
+						tier: "user",
+						organizationId: MockOrganization2.id,
+					}),
+				)
+				?.some((workflow) => workflow.id === "saved-workflow-replacement"),
+		).toBe(true),
+	);
+	// The stale row blocks further saves, so a retry of the draft cannot
+	// overwrite the replacement and the user copies it out instead.
+	await user.clear(description);
+	await user.type(description, "retained");
+	await user.click(
+		within(dialog).getByRole("button", { name: "Save workflow" }),
+	);
+	// The click reaches the editor, but the stale guard stops it before the
+	// mutation: no second request, and the banner explains why.
+	expect(update).toHaveBeenCalledTimes(1);
+});
+
 it("keeps the editor open with the draft after a failed save", async () => {
 	const user = userEvent.setup();
 	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflows").mockResolvedValue([
@@ -370,6 +465,70 @@ it("keeps the editor open with the draft after a failed save", async () => {
 	);
 	await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
 	await waitFor(() => expect(dialog).not.toBeInTheDocument());
+});
+
+it("keeps the draft and refetches when the server rejects the save with 404", async () => {
+	const user = userEvent.setup();
+	const info = vi.spyOn(toast, "info");
+	const list = vi
+		.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflows")
+		.mockResolvedValue([MockForkSavedWorkflowMetadata]);
+	vi.spyOn(
+		forkSavedWorkflowsApi,
+		"getOrganizationSavedWorkflows",
+	).mockResolvedValue([]);
+	vi.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow").mockResolvedValue(
+		MockForkSavedWorkflow,
+	);
+	// Another tab deleted the workflow after the editor loaded it, so the
+	// conditional save refuses with 404, and from that moment the list no
+	// longer holds the row, so the refetches the mutation triggers model
+	// the server state.
+	let serverDeleted = false;
+	const update = vi
+		.spyOn(forkSavedWorkflowsApi, "updateUserSavedWorkflow")
+		.mockImplementation(async () => {
+			serverDeleted = true;
+			throw mockApiError({ message: "Not found.", status: 404 });
+		});
+	list.mockImplementation(async () =>
+		serverDeleted ? [] : [MockForkSavedWorkflowMetadata],
+	);
+	renderPage(`?org=${MockOrganization2.name}`);
+
+	await user.click(
+		await screen.findByRole("button", {
+			name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
+		}),
+	);
+	await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+	const dialog = await screen.findByRole("dialog");
+	const description = await within(dialog).findByLabelText("Description");
+	// The form only seeds its values once the editor's own fetches have
+	// settled, so every list call after this point is the 404 refetch.
+	const listCallsBeforeSave = list.mock.calls.length;
+	await user.type(description, " even harder");
+	await user.click(
+		within(dialog).getByRole("button", { name: "Save workflow" }),
+	);
+
+	await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+	// The 404 invalidates the list and detail queries, and the refetches
+	// bring the editor the state the name holds now: the row is gone, and
+	// the toast explains the rejection.
+	await waitFor(() =>
+		expect(list.mock.calls.length).toBeGreaterThan(listCallsBeforeSave),
+	);
+	await waitFor(() => expect(info).toHaveBeenCalled());
+	expect(description).toHaveValue(
+		`${MockForkSavedWorkflowMetadata.description} even harder`,
+	);
+	// The stale row blocks further saves, so the draft cannot overwrite
+	// anything and the user copies it out instead.
+	await user.click(
+		within(dialog).getByRole("button", { name: "Save workflow" }),
+	);
+	expect(update).toHaveBeenCalledTimes(1);
 });
 
 it("seeds the editor from a fresh fetch, not the cached workflow", async () => {
@@ -459,6 +618,7 @@ it("deletes a workflow after confirmation", async () => {
 		expect(remove).toHaveBeenCalledWith(
 			MockOrganization2.id,
 			MockForkSavedWorkflowMetadata.name,
+			{ expect_id: MockForkSavedWorkflowMetadata.id },
 		),
 	);
 });
@@ -473,13 +633,13 @@ it("deletes nothing when the name now holds another workflow", async () => {
 		forkSavedWorkflowsApi,
 		"getOrganizationSavedWorkflows",
 	).mockResolvedValue([]);
-	// Another tab deleted the workflow and created one with the same name.
-	const get = vi
-		.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflow")
-		.mockResolvedValue({ ...MockForkSavedWorkflow, id: "saved-workflow-2" });
+	// Another tab deleted the workflow and created one with the same name,
+	// so the conditional delete refuses with 409.
 	const remove = vi
 		.spyOn(forkSavedWorkflowsApi, "deleteUserSavedWorkflow")
-		.mockResolvedValue();
+		.mockRejectedValue(
+			mockApiError({ message: "Conflict.", status: 409 }),
+		);
 	renderPage(`?org=${MockOrganization2.name}`);
 
 	await user.click(
@@ -491,11 +651,11 @@ it("deletes nothing when the name now holds another workflow", async () => {
 	await user.click(await screen.findByRole("button", { name: "Delete" }));
 
 	await waitFor(() => expect(info).toHaveBeenCalled());
-	expect(get).toHaveBeenCalledWith(
+	expect(remove).toHaveBeenCalledWith(
 		MockOrganization2.id,
 		MockForkSavedWorkflowMetadata.name,
+		{ expect_id: MockForkSavedWorkflowMetadata.id },
 	);
-	expect(remove).not.toHaveBeenCalled();
 	await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 
