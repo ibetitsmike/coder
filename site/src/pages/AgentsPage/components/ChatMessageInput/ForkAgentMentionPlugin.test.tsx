@@ -389,10 +389,12 @@ describe("ForkAgentMentionPlugin", () => {
 			MockDefaultOrganization.id,
 		);
 		// The organization workflow stays offered next to the personal one,
-		// so the org result reaches the menu and its insertion carries the
-		// org name. The insertion replaced the query, so typing "@" reopens
-		// the menu.
-		await user.keyboard("@");
+		// so the org result reaches the menu. The inserted text replaced the
+		// query, so a space and an "@" reopen the menu over it.
+		await user.keyboard(" @");
+		await screen.findByRole("option", {
+			name: new RegExp(`^@${MockForkOrganizationSavedWorkflowMetadata.name}`),
+		});
 		await user.click(
 			screen.getByRole("option", {
 				name: new RegExp(`^@${MockForkOrganizationSavedWorkflowMetadata.name}`),
@@ -401,7 +403,7 @@ describe("ForkAgentMentionPlugin", () => {
 		// The first insertion stays in the composer: the org mention is
 		// appended after it.
 		expect(inputRef.current?.getValue()).toBe(
-			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}), with args: "files" (required). Run the ${MockForkOrganizationSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkOrganizationSavedWorkflowMetadata.name}): `,
+			`Run the ${MockForkSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkSavedWorkflowMetadata.name}), with args: "files" (required).  Run the ${MockForkOrganizationSavedWorkflowMetadata.name} saved workflow (run_workflow name ${MockForkOrganizationSavedWorkflowMetadata.name}): `,
 		);
 	});
 
