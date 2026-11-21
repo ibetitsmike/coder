@@ -1538,7 +1538,7 @@ coderd/apidoc/.gen: \
 	coderd/rbac/object_gen.go \
 	.swaggo \
 	scripts/apidocgen/generate.sh \
-	scripts/apidocgen/swaginit \
+	$(wildcard scripts/apidocgen/swaginit/*.go) \
 	$(wildcard scripts/apidocgen/postprocess/*) \
 	$(wildcard scripts/apidocgen/markdown-template/*) | _gen
 	tmpdir=$$(mktemp -d -p _gen) && swagtmp=$$(mktemp -d -p _gen) && \
