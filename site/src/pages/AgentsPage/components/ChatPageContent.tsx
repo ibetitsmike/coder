@@ -88,8 +88,8 @@ import {
 import { isAsyncAnswerPrompt } from "./ChatElements/tools/asyncAnswer";
 import type { SkillMetadata } from "./ChatMessageInput/SkillsTriggerMenu";
 import { ChatMessageScroller } from "./ChatMessageScroller";
-import { ForkDescendantQuestionDock } from "./ForkDescendantQuestionDock";
 import type { AttachedWorkspaceInfo } from "./ChatToolBadges";
+import { ForkDescendantQuestionDock } from "./ForkDescendantQuestionDock";
 import { ReadOnlyChatComposer } from "./ReadOnlyChatComposer";
 import { getWorkspaceOptionsWithLinkedWorkspace } from "./workspaceOptions";
 

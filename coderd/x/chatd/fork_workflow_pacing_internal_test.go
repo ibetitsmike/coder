@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/testutil"
+	"github.com/coder/quartz"
 )
 
 // advanceMockClockBy advances the mock clock by d, waiting for every timer

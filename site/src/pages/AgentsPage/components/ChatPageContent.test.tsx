@@ -42,9 +42,9 @@ import {
 	MockAsyncQuestionMessages,
 	MockAsyncQuestionResult,
 	MockAsyncQuestionResultMessage,
+	MockCollapsedStepsPreferences,
 	MockQuestionCallMessage,
 	MockQueuedQuestionAnswer,
-	MockCollapsedStepsPreferences,
 	MockWorkingMessages,
 	workingFixtureTime,
 } from "./ChatConversation/storyFixtures";
@@ -508,7 +508,7 @@ describe("ChatPageInput", () => {
 		expect(onInterrupt).toHaveBeenCalledTimes(1);
 	});
 
-it("leaves async question answers out of the prompt history", async () => {
+	it("leaves async question answers out of the prompt history", async () => {
 		const user = userEvent.setup();
 		vi.spyOn(API.experimental, "getChatPrompts").mockResolvedValue({
 			prompts: [
