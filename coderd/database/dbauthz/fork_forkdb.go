@@ -1616,9 +1616,11 @@ func (f *forkQuerier) DeleteChatAPNsDeviceByToken(ctx context.Context, deviceTok
 }
 
 // UpdateChatAPNsDeviceEnvironment names no owner, so it needs site-wide
-// update, which only the notifier has.
+// create, which only the notifier has. It checks create because
+// webpush_subscription has no update action, and an upsert also rewrites a
+// row under create.
 func (f *forkQuerier) UpdateChatAPNsDeviceEnvironment(ctx context.Context, arg forkdb.UpdateChatAPNsDeviceEnvironmentParams) error {
-	if err := f.q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceWebpushSubscription); err != nil {
+	if err := f.q.authorizeContext(ctx, policy.ActionCreate, rbac.ResourceWebpushSubscription); err != nil {
 		return err
 	}
 	return f.db.UpdateChatAPNsDeviceEnvironment(ctx, arg)

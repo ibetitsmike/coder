@@ -6698,7 +6698,6 @@
 		"/api/v2/chats/fork/push/apns/test": {
 			"post": {
 				"consumes": ["application/json"],
-				"produces": ["application/json"],
 				"tags": ["Chats"],
 				"summary": "Send a test push to an APNs device",
 				"operationId": "send-a-test-push-to-an-apns-device",

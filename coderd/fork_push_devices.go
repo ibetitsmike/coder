@@ -123,7 +123,6 @@ func (api *API) deleteForkChatAPNsDevice(rw http.ResponseWriter, r *http.Request
 // @ID send-a-test-push-to-an-apns-device
 // @Security CoderSessionToken
 // @Accept json
-// @Produce json
 // @Tags Chats
 // @Param request body codersdk.ChatAPNsDeviceRequest true "Request body"
 // @Success 204

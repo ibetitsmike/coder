@@ -556,7 +556,7 @@ func TestForkQuerier(t *testing.T) {
 		"UpdateChatAPNsDeviceEnvironment": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			arg := testutil.Fake(t, faker, forkdb.UpdateChatAPNsDeviceEnvironmentParams{})
 			fdb.EXPECT().UpdateChatAPNsDeviceEnvironment(gomock.Any(), arg).Return(nil).AnyTimes()
-			check.Args(arg).Asserts(rbac.ResourceWebpushSubscription, policy.ActionUpdate).Returns()
+			check.Args(arg).Asserts(rbac.ResourceWebpushSubscription, policy.ActionCreate).Returns()
 		},
 		"InsertPluginPack": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			pack := testutil.Fake(t, faker, forkdb.PluginPack{})
