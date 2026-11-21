@@ -426,6 +426,48 @@ describe("ForkWorkflowRunDetail", () => {
 		createOrg.mockRestore();
 	});
 
+	it("shows the checking loader while a cached denial refetches", async () => {
+		const queryClient = createTestQueryClient();
+		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);
+		// A cached denial hides the tier choice already, so the refetch
+		// must still show what holds the submit.
+		seedCreatePermission(queryClient, false, {
+			stale: true,
+		});
+		let resolveRefetch:
+			| ((value: { canCreateOrganizationSkill: boolean }) => void)
+			| undefined;
+		const authorizationSpy = vi
+			.spyOn(API, "checkAuthorization")
+			.mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						resolveRefetch = resolve;
+					}) as never,
+			);
+		renderDetail(MockChatWorkflowRunDetail, { queryClient });
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Save workflow" }),
+		);
+		const dialog = screen.getByRole("dialog", { name: "Save workflow" });
+		const submit = within(dialog).getByRole("button", {
+			name: "Save workflow",
+		});
+		// The cached denial hides the choice, and the refetch of it still
+		// shows the checking loader instead of a bare disabled submit.
+		await within(dialog).findByRole("status", {
+			name: "Checking organization permission",
+		});
+		expect(submit).toBeDisabled();
+
+		resolveRefetch?.({ canCreateOrganizationSkill: false });
+		await waitFor(() => expect(submit).toBeEnabled());
+		expect(within(dialog).queryByRole("status")).toBeNull();
+		authorizationSpy.mockRestore();
+	});
+
 	it("keeps Personal usable when the organization permission check fails", async () => {
 		const queryClient = createTestQueryClient();
 		seedChatWriteAccess(queryClient, MockForkWorkflowChatId, true);

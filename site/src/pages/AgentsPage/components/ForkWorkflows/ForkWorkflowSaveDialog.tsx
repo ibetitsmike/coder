@@ -184,12 +184,14 @@ export const ForkWorkflowSaveDialog: React.FC<ForkWorkflowSaveDialogProps> = ({
 					{/* A denied or failed check settles as personal-only: the
 					    tier choice goes, so a stale selection cannot send a
 					    create the API would refuse. */}
-					{!canCreateOrganizationError && canCreateOrganization !== false && (
-						<div className="flex flex-col gap-2">
-							<Label id={saveAsLabelId}>Save as</Label>
-							{isPermissionChecking ? (
-								<Loader size="sm" label="Checking organization permission" />
-							) : (
+					{isPermissionChecking && (
+						<Loader size="sm" label="Checking organization permission" />
+					)}
+					{!isPermissionChecking &&
+						!canCreateOrganizationError &&
+						canCreateOrganization !== false && (
+							<div className="flex flex-col gap-2">
+								<Label id={saveAsLabelId}>Save as</Label>
 								<RadioGroup
 									value={tier}
 									aria-labelledby={saveAsLabelId}
@@ -221,9 +223,8 @@ export const ForkWorkflowSaveDialog: React.FC<ForkWorkflowSaveDialogProps> = ({
 										</Label>
 									</div>
 								</RadioGroup>
-							)}
-						</div>
-					)}
+							</div>
+						)}
 					<DialogFooter>
 						<Button
 							type="button"
