@@ -3,7 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { API } from "#/api/api";
 import * as forkSavedWorkflowsApi from "#/api/forkSavedWorkflows";
-import type { Experiment } from "#/api/typesGenerated";
+import type {
+	Experiment,
+	Organization as TypesGenOrganization,
+} from "#/api/typesGenerated";
 import { toast } from "#/components/Toaster/toast";
 import {
 	MockDefaultOrganization,
@@ -24,10 +27,16 @@ import ForkSavedWorkflowsPage from "./ForkSavedWorkflowsPage";
 const renderPage = ({
 	experiments = ["fork-workflows"],
 	organizationIds = [MockOrganization2.id, MockDefaultOrganization.id],
+	organizations = [
+		MockOrganization2,
+		MockOrganization3,
+		MockDefaultOrganization,
+	],
 	route = "/agents/settings/workflows",
 }: {
 	experiments?: Experiment[];
 	organizationIds?: string[];
+	organizations?: TypesGenOrganization[];
 	route?: string;
 } = {}) => {
 	vi.spyOn(API, "getExperiments").mockResolvedValue(experiments);
@@ -36,11 +45,7 @@ const renderPage = ({
 		organization_ids: organizationIds,
 	});
 	// MockOrganization3 is not among the member's organizations.
-	vi.spyOn(API, "getOrganizations").mockResolvedValue([
-		MockOrganization2,
-		MockOrganization3,
-		MockDefaultOrganization,
-	]);
+	vi.spyOn(API, "getOrganizations").mockResolvedValue(organizations);
 	const listUser = vi
 		.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflows")
 		.mockResolvedValue([MockForkSavedWorkflowMetadata]);
@@ -331,6 +336,67 @@ describe("ForkSavedWorkflowsPage", () => {
 			expect(listUser).toHaveBeenLastCalledWith(MockDefaultOrganization.id);
 		});
 		expect(router.state.location.pathname).toBe("/agents/settings/workflows");
+	});
+
+	it("names the picker with the disambiguated label when display names collide", async () => {
+		// Two member organizations share a display_name, so the visible
+		// label disambiguates with the organization name and the picker's
+		// accessible name must carry the same disambiguation.
+		const { listUser } = renderPage({
+			organizations: [
+				MockDefaultOrganization,
+				{
+					...MockOrganization2,
+					display_name: MockDefaultOrganization.display_name,
+				},
+			],
+		});
+
+		expect(
+			await screen.findByRole("combobox", {
+				name: `Organization ${MockDefaultOrganization.display_name} (${MockDefaultOrganization.name})`,
+			}),
+		).toBeInTheDocument();
+		expect(listUser).toHaveBeenCalledWith(MockDefaultOrganization.id);
+	});
+
+	it("does not push a duplicate entry when the shown organization is reselected", async () => {
+		const user = userEvent.setup();
+		const { listUser, router } = renderPage();
+		await waitFor(() =>
+			expect(listUser).toHaveBeenCalledWith(MockDefaultOrganization.id),
+		);
+
+		await user.click(
+			await screen.findByRole("combobox", {
+				name: `Organization ${MockDefaultOrganization.display_name}`,
+			}),
+		);
+		await user.click(
+			screen.getByRole("option", {
+				name: new RegExp(`${MockOrganization2.display_name}$`),
+			}),
+		);
+		await waitFor(() =>
+			expect(listUser).toHaveBeenLastCalledWith(MockOrganization2.id),
+		);
+		const historyLength = window.history.length;
+
+		// Reselecting the shown organization changes nothing, so it must
+		// not spend a history entry that Back would land on again.
+		await user.click(
+			await screen.findByRole("combobox", {
+				name: `Organization ${MockOrganization2.display_name}`,
+			}),
+		);
+		await user.click(
+			screen.getByRole("option", {
+				name: new RegExp(`${MockOrganization2.display_name}$`),
+			}),
+		);
+		await act(async () => {});
+		expect(window.history.length).toBe(historyLength);
+		expect(router.state.location.search).toBe(`?org=${MockOrganization2.name}`);
 	});
 
 	it("renders an unavailable state for an organization the URL names that the member is not in", async () => {

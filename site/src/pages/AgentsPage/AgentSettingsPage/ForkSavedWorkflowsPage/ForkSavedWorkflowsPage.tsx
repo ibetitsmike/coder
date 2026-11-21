@@ -4,7 +4,10 @@
 
 import { useEffect, useRef } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
-import { OrganizationAutocomplete } from "#/components/OrganizationAutocomplete/OrganizationAutocomplete";
+import {
+	getOrganizationLabel,
+	OrganizationAutocomplete,
+} from "#/components/OrganizationAutocomplete/OrganizationAutocomplete";
 import { useAuthenticated } from "#/hooks/useAuthenticated";
 import {
 	getMemberOrganizations,
@@ -119,15 +122,20 @@ const ForkSavedWorkflowsPage: React.FC = () => {
 			    there keeps the trigger's focus through the state swap. */}
 			<div className="flex justify-end">
 				<OrganizationAutocomplete
-					ariaLabel={`Organization ${organization.display_name}`}
+					ariaLabel={`Organization ${getOrganizationLabel(
+						organization,
+						memberOrganizations,
+					)}`}
 					value={organization}
 					options={memberOrganizations}
 					triggerClassName="w-full sm:w-60"
 					onChange={(org) => {
 						// The picker write pushes an entry, so the
 						// member can move back and forward between
-						// the organizations they viewed.
-						if (org) {
+						// the organizations they viewed. Reselecting
+						// the shown organization pushes nothing, so
+						// Back is not spent on a duplicate entry.
+						if (org && org.id !== organization.id) {
 							void navigate({
 								search: `?${new URLSearchParams([
 									[orgSearchParam, org.name],
