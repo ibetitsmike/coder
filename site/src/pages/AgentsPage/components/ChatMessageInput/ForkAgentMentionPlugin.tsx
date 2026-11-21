@@ -1,5 +1,6 @@
-// This file is fork code: the "@" agent menu of the fork-agent-definitions
-// experiment, so ChatMessageInput.tsx, an upstream file, needs one line.
+// This file is fork code: the "@" agent and workflow menu of the
+// fork-agent-definitions and fork-workflows experiments, so
+// ChatMessageInput.tsx, an upstream file, needs one line.
 
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
@@ -15,14 +16,24 @@ import { useEffect, useEffectEvent, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQueries, useQuery } from "react-query";
 import { useParams } from "react-router";
+import type { ForkSavedWorkflowSchema } from "#/api/forkSavedWorkflowSchema";
 import { chat } from "#/api/queries/chats";
 import { agentDefinitions } from "#/api/queries/forkAgentDefinitions";
-import type { ChatContext, ChatSkillSource } from "#/api/typesGenerated";
+import { savedWorkflows } from "#/api/queries/forkSavedWorkflows";
+import type {
+	ChatContext,
+	ChatSkillSource,
+	ForkSavedWorkflowMetadata,
+} from "#/api/typesGenerated";
+import { asRecord } from "../ChatElements/runtimeTypeUtils";
 import { useForkExperiment } from "../ChatElements/tools/forkToolUtils";
 import {
 	type AgentMention,
 	AgentMentionOption,
 	ForkAgentMentionMenu,
+	type ForkMentionOption,
+	type WorkflowMention,
+	WorkflowMentionOption,
 } from "./ForkAgentMentionMenu";
 
 // The built-in types spawn_agent always offers, named and described as in
@@ -124,17 +135,123 @@ const workspaceAgents = (
 		}));
 };
 
+/**
+ * Summarizes the args a saved workflow takes for the menu row. A required
+ * name can sit outside properties, and run_workflow validates against
+ * both, so the summary unions them; required ones are marked.
+ */
+const workflowArgsSummary = (schema: ForkSavedWorkflowSchema): string => {
+	const properties = asRecord(schema.properties);
+	const required =
+		schema.required?.filter((name) => typeof name === "string") ?? [];
+	// A required name can sit outside properties, and run_workflow
+	// validates against both, so the summary unions them.
+	const names = [
+		...new Set([...(properties ? Object.keys(properties) : []), ...required]),
+	].sort();
+	// A schema can constrain args through required alone, so an empty
+	// properties object still means args exist; run_workflow validates
+	// against the whole schema and would reject an empty args object.
+	if (names.length === 0) {
+		return "";
+	}
+	const requiredNames = new Set(required);
+	// A property name can contain a comma or a newline, so each name is
+	// quoted to keep one summary entry per argument.
+	return names
+		.map((name) => {
+			const quoted = JSON.stringify(name);
+			return requiredNames.has(name) ? `${quoted} (required)` : quoted;
+		})
+		.join(", ");
+};
+
+/**
+ * Dedupes as run_workflow resolves a name: personal first, then
+ * organization ones no personal workflow hides. Both endpoints already
+ * return only readable workflows.
+ */
+const resolveWorkflowMentions = (
+	lists: readonly {
+		tier: WorkflowMention["tier"];
+		workflows: readonly ForkSavedWorkflowMetadata[] | undefined;
+	}[],
+): WorkflowMention[] => {
+	const mentions: WorkflowMention[] = [];
+	const seen = new Set<string>();
+	for (const { tier, workflows } of lists) {
+		if (!workflows) {
+			break;
+		}
+		for (const workflow of workflows) {
+			if (!seen.has(workflow.name)) {
+				seen.add(workflow.name);
+				mentions.push({
+					name: workflow.name,
+					tier,
+					description: workflow.description,
+					argsSummary: workflow.args_schema
+						? workflowArgsSummary(
+								workflow.args_schema as ForkSavedWorkflowSchema,
+							)
+						: "",
+				});
+			}
+		}
+	}
+	return mentions;
+};
+
+/** The one-line state the menu shows above its option list. */
+const menuStatus = (
+	hasAgentError: boolean,
+	hasWorkflowError: boolean,
+	isAgentsLoading: boolean,
+	isWorkflowsLoading: boolean,
+): string | undefined => {
+	if (hasAgentError && hasWorkflowError) {
+		return "Could not load some agents and workflows. Close and type @ again to retry.";
+	}
+	if (hasAgentError) {
+		return "Could not load some agents. Close and type @ again to retry.";
+	}
+	if (hasWorkflowError) {
+		return "Could not load some workflows. Close and type @ again to retry.";
+	}
+	if (isAgentsLoading && isWorkflowsLoading) {
+		return "Loading agents and workflows...";
+	}
+	if (isAgentsLoading) {
+		return "Loading agents...";
+	}
+	return isWorkflowsLoading ? "Loading workflows..." : undefined;
+};
+
 const handleSelect = (
-	option: AgentMentionOption,
+	option: ForkMentionOption,
 	textNode: TextNode | null,
 	closeMenu: () => void,
 ) => {
-	const { name } = option.agent;
-	textNode
-		?.setTextContent(
-			`Delegate to the ${name} agent (spawn_agent type ${name}): `,
-		)
-		.selectEnd();
+	if ("agent" in option) {
+		const { name } = option.agent;
+		textNode
+			?.setTextContent(
+				`Delegate to the ${name} agent (spawn_agent type ${name}): `,
+			)
+			.selectEnd();
+	} else {
+		const { name, argsSummary } = option.workflow;
+		// An empty summary only means the workflow declares no named args:
+		// a saved workflow without an args schema still accepts any args
+		// object, so the prompt must not tell the model to send none.
+		textNode
+			?.setTextContent(
+				`Run the ${name} saved workflow (run_workflow name ${name})${
+					argsSummary ? `, with args: ${argsSummary}. ` : ": "
+				}`,
+			)
+			.selectEnd();
+	}
 	closeMenu();
 };
 
@@ -143,17 +260,27 @@ type ForkAgentMentionPluginProps = {
 	projectId?: string;
 	hasWorkspace: boolean;
 	anchor: HTMLElement | null;
+	/**
+	 * Pending mode of a chat that does not exist yet: the new-chat
+	 * composer has no chat to read, so the form reports its plan mode
+	 * and explore base type directly. Undefined in an existing chat.
+	 */
+	planMode?: boolean;
+	isExploreAgentType?: boolean;
 };
 
-/** Offers agent types after "@" and inserts a delegation to the chosen one. */
+/** Offers agent types and saved workflows after "@" and inserts the choice. */
 export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 	organizationId = "",
 	projectId,
 	hasWorkspace,
 	anchor,
+	planMode = false,
+	isExploreAgentType = false,
 }) => {
 	const isEnabled = useForkExperiment("fork-agent-definitions");
 	const isNestingEnabled = useForkExperiment("fork-nested-subagents");
+	const isWorkflowsEnabled = useForkExperiment("fork-workflows");
 	const [editor] = useLexicalComposerContext();
 	const [query, setQuery] = useState<string | null>(null);
 	// Escape closes the menu but leaves the query, so Enter and the agent
@@ -168,6 +295,21 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 	// see (nestedSubagentTools in coderd/x/chatd/fork_subagents.go).
 	const canSpawn =
 		!isChildChat || (isNestingEnabled && currentChat?.agent_type === "general");
+	// Workflows run only in root chats that are not in plan mode and not
+	// explore mode: chatd omits run_workflow for all three states
+	// (forkWorkflowTools in coderd/x/chatd/fork_workflow.go), so the menu
+	// must not offer what the model has no tool to execute.
+	const isWorkflowGatedChat =
+		isChildChat ||
+		currentChat?.plan_mode === "plan" ||
+		// A new chat carries its mode in form state instead of a chat.
+		planMode ||
+		isExploreAgentType ||
+		currentChat?.agent_type === "explore";
+	const canRunWorkflows = isWorkflowsEnabled && !isWorkflowGatedChat;
+	// Agents are offered only when the experiment is on and this chat may
+	// spawn them; workflows stay available on their own experiment.
+	const canOfferAgents = isEnabled && canSpawn;
 	// A child chat has no project of its own; chatd offers it the agents of
 	// its root chat's project.
 	const rootChatId = isChildChat ? currentChat?.root_chat_id : undefined;
@@ -187,47 +329,112 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 	const storedQueries = useQueries({
 		queries: scopes.map(({ source: _, ...scope }) => ({
 			...agentDefinitions(scope),
-			enabled: isMenuShown && organizationId !== "",
+			enabled: canOfferAgents && isMenuShown && organizationId !== "",
 			staleTime: 60_000,
 		})),
 	});
 	const isRootProjectUnknown = rootChatId !== undefined && !rootChat.data;
-	const mentions = resolveAgentMentions([
-		...scopes.map(({ source }, index) => ({
-			source,
-			agents: storedQueries[index].data?.filter((agent) => agent.enabled),
+	const mentions = canOfferAgents
+		? resolveAgentMentions([
+				...scopes.map(({ source }, index) => ({
+					source,
+					agents: storedQueries[index].data?.filter((agent) => agent.enabled),
+				})),
+				...(isRootProjectUnknown
+					? [{ source: "project" as const, agents: undefined }]
+					: []),
+				{
+					source: "workspace",
+					agents: workspaceAgents(currentChat?.context, hasWorkspace),
+				},
+			])
+		: [];
+	// One ordered tier list drives the queries and the resolution, so the
+	// personal-over-organization precedence is stated once.
+	const workflowTiers = [
+		{ tier: "personal", queryTier: "user" },
+		{ tier: "org", queryTier: "organization" },
+	] as const;
+	const workflowQueries = useQueries({
+		queries: workflowTiers.map(({ queryTier }) => ({
+			...savedWorkflows({ tier: queryTier, organizationId }),
+			enabled: canRunWorkflows && isMenuShown && organizationId !== "",
+			staleTime: 60_000,
 		})),
-		...(isRootProjectUnknown
-			? [{ source: "project" as const, agents: undefined }]
-			: []),
-		{
-			source: "workspace",
-			agents: workspaceAgents(currentChat?.context, hasWorkspace),
-		},
-	]);
+	});
+	// The query cache is shared across pages, so a disabled query still
+	// returns the workflows another page fetched; gate the resolved list
+	// itself, not only the fetch.
+	const workflows = canRunWorkflows
+		? resolveWorkflowMentions(
+				workflowTiers.map(({ tier }, index) => ({
+					tier,
+					workflows: workflowQueries[index].data,
+				})),
+			)
+		: [];
 	const search = (query ?? "").toLocaleLowerCase("en-US");
 	// Only a query with a slash searches tier prefixes, so a short query
 	// doesn't match every agent of a tier.
-	const options = mentions
+	const agentOptions = mentions
 		.filter(({ name, qualifiedName }) =>
 			(search.includes("/") ? qualifiedName : name)
 				.toLocaleLowerCase("en-US")
 				.includes(search),
 		)
 		.map((mention) => new AgentMentionOption(mention));
+	// A workflow name that an agent mention already takes must not appear
+	// twice: both @name options would look the same while one delegates and
+	// the other runs a workflow. A workflow whose name a reserved built-in
+	// type takes, such as "general", can never reach run_workflow either,
+	// because chatd names those types for spawn_agent only.
+	const agentNames = new Set([
+		...mentions.map(({ name }) => name),
+		...reservedAgentTypeNames,
+	]);
+	const workflowOptions = workflows
+		.filter(
+			({ name }) =>
+				!agentNames.has(name) &&
+				name.toLocaleLowerCase("en-US").includes(search),
+		)
+		.map((workflow) => new WorkflowMentionOption(workflow));
+	const options: ForkMentionOption[] = [...agentOptions, ...workflowOptions];
+	// A disabled query still reports the cached status of a key another
+	// page fetched, so mask each status with its capability gate.
 	const unresolved = [
-		...storedQueries,
+		...(canOfferAgents ? storedQueries : []),
 		...(isRootProjectUnknown ? [rootChat] : []),
 	].filter((result) => !result.data);
 	const isLoading = unresolved.some((result) => result.isFetching);
-	const hasError = [...storedQueries, ...(rootChatId ? [rootChat] : [])].some(
-		(result) => result.isError,
-	);
+	// A failed refetch keeps the cached list, so a stale error must not
+	// block Enter while the cached options stay usable. Only an error
+	// with no data to fall back on does, matching hasWorkflowError below.
+	const hasError = [
+		...(canOfferAgents ? storedQueries : []),
+		...(rootChatId ? [rootChat] : []),
+	].some((result) => result.isError && !result.data);
+	const hasWorkflowError =
+		canRunWorkflows &&
+		// A failed refetch keeps the cached list, so a stale error must not
+		// block Enter while the cached options stay usable. Only an error
+		// with no data to fall back on does, as the loading calculation
+		// above already treats it.
+		workflowQueries.some((result) => result.isError && !result.data);
+	const isWorkflowsLoading =
+		canRunWorkflows &&
+		workflowQueries.some((result) => !result.data && result.isFetching);
+	const hasAgents = canOfferAgents || !canRunWorkflows;
 
 	// Lexical's menu lets Enter through when nothing is selectable, which
-	// would send the unfinished mention while agents load or failed to.
+	// would send the unfinished mention while agents or workflows load or
+	// failed to.
 	const handleEnter = useEffectEvent((event: KeyboardEvent | null) => {
-		if (!isMenuShown || options.length > 0 || !(isLoading || hasError)) {
+		if (
+			!isMenuShown ||
+			options.length > 0 ||
+			!(isLoading || hasError || hasWorkflowError || isWorkflowsLoading)
+		) {
 			return false;
 		}
 		event?.preventDefault();
@@ -243,12 +450,12 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 		[editor],
 	);
 
-	if (!isEnabled || !canSpawn) {
+	if ((!isEnabled || !canSpawn) && !canRunWorkflows) {
 		return null;
 	}
 
 	return (
-		<LexicalTypeaheadMenuPlugin<AgentMentionOption>
+		<LexicalTypeaheadMenuPlugin<ForkMentionOption>
 			options={options}
 			triggerFn={matchAgentMention}
 			onQueryChange={setQuery}
@@ -264,12 +471,19 @@ export const ForkAgentMentionPlugin: React.FC<ForkAgentMentionPluginProps> = ({
 						anchor={anchor}
 						options={options}
 						selectedIndex={menu.selectedIndex}
-						status={
-							hasError
-								? "Could not load some agents. Close and type @ again to retry."
-								: isLoading
-									? "Loading agents..."
-									: undefined
+						workflowStartIndex={agentOptions.length}
+						status={menuStatus(
+							hasError,
+							hasWorkflowError,
+							isLoading,
+							isWorkflowsLoading,
+						)}
+						emptyMessage={
+							hasAgents && canRunWorkflows
+								? "No agents or workflows match that query."
+								: hasAgents
+									? "No agents match that query."
+									: "No workflows match that query."
 						}
 						onSelect={menu.selectOptionAndCleanUp}
 						onHighlight={menu.setHighlightedIndex}

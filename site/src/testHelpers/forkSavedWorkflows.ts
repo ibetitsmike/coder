@@ -1,3 +1,4 @@
+import type { ForkSavedWorkflowSchema } from "#/api/forkSavedWorkflowSchema";
 import type {
 	ForkSavedWorkflow,
 	ForkSavedWorkflowMetadata,
@@ -21,9 +22,9 @@ export const MockForkSavedWorkflowMetadata: ForkSavedWorkflowMetadata = {
 	description: "Reviews a list of files for bugs with parallel agents.",
 	args_schema: {
 		type: "object",
-		required: '["files"]',
-		properties: '{"files":{"type":"array"}}',
-	},
+		properties: { files: { type: "array" } },
+		required: ["files"],
+	} as ForkSavedWorkflowSchema,
 	phases: ["review", "summarize"],
 	created_at: MOCK_TIMESTAMP,
 	updated_at: MOCK_TIMESTAMP,
@@ -43,6 +44,7 @@ export const MockForkOrganizationSavedWorkflowMetadata: ForkSavedWorkflowMetadat
 		description: "Rotates the API keys of a deployment.",
 		user_id: undefined,
 		created_by: undefined,
+		args_schema: undefined,
 		phases: [],
 	};
 

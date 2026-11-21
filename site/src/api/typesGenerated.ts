@@ -1912,6 +1912,11 @@ export interface AuthMethods {
 	readonly password: AuthMethod;
 	readonly github: GithubAuthMethod;
 	readonly oidc: OIDCAuthMethod;
+	/**
+	 * SetupTokenRequired is true when the first user can only be
+	 * created with a setup token.
+	 */
+	readonly setup_token_required?: boolean;
 }
 
 // From codersdk/authorization.go
@@ -4979,6 +4984,11 @@ export interface CreateFirstUserRequest {
 	readonly trial: boolean;
 	readonly trial_info: CreateFirstUserTrialInfo;
 	readonly onboarding_info?: CreateFirstUserOnboardingInfo;
+	/**
+	 * SetupToken is required when AuthMethods.SetupTokenRequired is
+	 * true. The server prints it at startup.
+	 */
+	readonly setup_token?: string;
 }
 
 // From codersdk/users.go
@@ -5044,7 +5054,7 @@ export interface CreateForkSavedWorkflowRequest {
 	 * Script is Starlark that defines main(args), as a run_workflow script.
 	 */
 	readonly script: string;
-	readonly args_schema?: Record<string, string>;
+	readonly args_schema?: unknown;
 	readonly phases?: readonly string[];
 }
 
@@ -6001,6 +6011,7 @@ export interface DeploymentValues {
 	readonly external_auth_github_default_provider_enable?: boolean;
 	readonly config_ssh?: SSHConfig;
 	readonly wgtunnel_host?: string;
+	readonly setup_token?: string;
 	readonly disable_owner_workspace_exec?: boolean;
 	readonly disable_workspace_sharing?: boolean;
 	readonly disable_chat_sharing?: boolean;
@@ -7066,7 +7077,7 @@ export interface ForkSavedWorkflowMetadata {
 	/**
 	 * ArgsSchema is an optional JSON Schema object for the args of a run.
 	 */
-	readonly args_schema?: Record<string, string>;
+	readonly args_schema?: unknown;
 	/**
 	 * Phases are the declared phase names of the workflow, in order.
 	 */
@@ -12630,7 +12641,7 @@ export interface UpdateForkPluginPackRequest {
 export interface UpdateForkSavedWorkflowRequest {
 	readonly description?: string;
 	readonly script?: string;
-	readonly args_schema?: Record<string, string>;
+	readonly args_schema?: unknown;
 	readonly phases?: string[];
 }
 
