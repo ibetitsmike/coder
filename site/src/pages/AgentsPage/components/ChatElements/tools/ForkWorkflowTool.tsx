@@ -76,8 +76,14 @@ export const ForkWorkflowToolRenderer: React.FC<ForkToolRendererProps> = ({
 	}
 	// A card whose run has already ended, for example when an old chat
 	// reopens, never polls: it fetches its detail once to get the chat and
-	// save data the running card gets from polling.
-	if (agentId && snapshot && snapshot.status !== "running") {
+	// save data the running card gets from polling. Only completed and
+	// interrupted runs render a control, so failed and stopped cards skip
+	// the fetch and render from the result alone.
+	if (
+		agentId &&
+		snapshot &&
+		(snapshot.status === "completed" || snapshot.status === "interrupted")
+	) {
 		return (
 			<EndedForkWorkflowTool
 				{...props}

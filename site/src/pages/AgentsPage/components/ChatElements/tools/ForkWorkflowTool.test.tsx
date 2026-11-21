@@ -24,6 +24,7 @@ import {
 	MockChatWorkflowRunDetail,
 	MockForkWorkflowChatId,
 	MockForkWorkflowCompletedResult,
+	MockForkWorkflowFailedResult,
 	MockForkWorkflowRunId,
 	MockForkWorkflowRunningResult,
 	MockForkWorkflowScript,
@@ -450,6 +451,27 @@ describe("ForkWorkflowTool", () => {
 		expect(save).toBeEnabled();
 		// The ended card loads its detail once instead of polling.
 		expect(getRun).toHaveBeenCalledTimes(1);
+	});
+
+	it("skips the detail fetch for a failed run loaded from history", async () => {
+		// Failed runs offer no Save, Stop or Resume, so the card renders
+		// from the result alone and must not request the run's detail.
+		const queryClient = createTestQueryClient();
+		const getRun = vi
+			.spyOn(forkWorkflowsApi, "getChatWorkflowRun")
+			.mockResolvedValue(MockChatWorkflowRunDetail);
+		renderWorkflowTool(
+			"await_workflow",
+			MockForkWorkflowFailedResult,
+			queryClient,
+		);
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /workflow failed/i }),
+		);
+
+		expect(screen.getByText(/^Run /)).toBeInTheDocument();
+		expect(getRun).not.toHaveBeenCalled();
 	});
 
 	it("saves the run's script as a personal workflow from the card", async () => {
