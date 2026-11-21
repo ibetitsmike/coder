@@ -24,8 +24,10 @@ export type WorkflowMention = {
 	tier: "personal" | "org";
 	description: string;
 	/**
-	 * The run_workflow args to fill in, required ones marked. Empty when the
-	 * workflow takes no args.
+	 * The named run_workflow args available to summarize, required ones
+	 * marked. Empty when the schema names no args, which also covers a
+	 * missing schema: the backend then accepts any args object, so empty
+	 * must not be read as an arg-free contract.
 	 */
 	argsSummary: string;
 };
