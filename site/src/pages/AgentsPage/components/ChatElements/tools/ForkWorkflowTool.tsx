@@ -15,6 +15,7 @@ import type { WorkflowRunDetail } from "#/api/typesGenerated";
 import { ForkWorkflowLongText } from "../../ForkWorkflows/ForkWorkflowLongText";
 import { ForkWorkflowPhaseRail } from "../../ForkWorkflows/ForkWorkflowPhaseRail";
 import { ForkWorkflowResumeButton } from "../../ForkWorkflows/ForkWorkflowResumeButton";
+import { ForkWorkflowSaveAction } from "../../ForkWorkflows/ForkWorkflowSaveAction";
 import { ForkWorkflowStatusBadge } from "../../ForkWorkflows/ForkWorkflowStatusBadge";
 import { ForkWorkflowSteps } from "../../ForkWorkflows/ForkWorkflowSteps";
 import { ForkWorkflowStopButton } from "../../ForkWorkflows/ForkWorkflowStopButton";
@@ -284,14 +285,28 @@ const ForkWorkflowRunControls: React.FC<{
 		detail.status === snapshot.status
 			? detail
 			: undefined;
-	if (!chatId || !run || canWriteChat !== true) {
+	if (!chatId || !run) {
 		return null;
 	}
 	return (
 		<div className="flex items-center gap-1.5">
-			<ForkWorkflowStopButton run={run} fallbackFocusRef={fallbackFocusRef} />
-			{run.status === "interrupted" && isResumeAvailable && (
-				<ForkWorkflowResumeButton runId={run.id} chatId={chatId} />
+			{canWriteChat === true && (
+				<ForkWorkflowStopButton run={run} fallbackFocusRef={fallbackFocusRef} />
+			)}
+			{run.status === "interrupted" &&
+				canWriteChat === true &&
+				isResumeAvailable && (
+					<ForkWorkflowResumeButton runId={run.id} chatId={chatId} />
+				)}
+			{/* Saving creates a new workflow and does not update the chat, so
+			    it stays available when the update check is pending, failed or
+			    denies, including on archived chats. */}
+			{run.status === "completed" && (
+				<ForkWorkflowSaveAction
+					title={run.title}
+					script={run.script}
+					organizationId={chatQuery.data?.organization_id}
+				/>
 			)}
 		</div>
 	);
