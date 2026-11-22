@@ -296,8 +296,6 @@ describe("ForkWorkflowRunDetail", () => {
 		let resolvePermission:
 			| ((value: { canCreateOrganizationSkill: boolean }) => void)
 			| undefined;
-		// The spy survives the afterEach, which only clears call state, so the
-		// test restores it before it ends and the next test sees real checks.
 		const authorizationSpy = vi
 			.spyOn(API, "checkAuthorization")
 			.mockImplementation(
@@ -313,26 +311,29 @@ describe("ForkWorkflowRunDetail", () => {
 		renderDetail(MockChatWorkflowRunDetail);
 		const user = userEvent.setup();
 
-		await user.click(
-			await screen.findByRole("button", { name: "Save workflow" }),
-		);
-		const dialog = screen.getByRole("dialog", { name: "Save workflow" });
-		await within(dialog).findByLabelText("Name");
-		const submit = within(dialog).getByRole("button", {
-			name: "Save workflow",
-		});
-		// The pending answer blocks the save, so a pending query cannot
-		// silently land in the personal tier.
-		expect(submit).toBeDisabled();
-		await user.click(submit);
-		expect(
-			forkSavedWorkflowsApi.createUserSavedWorkflow,
-		).not.toHaveBeenCalled();
+		try {
+			await user.click(
+				await screen.findByRole("button", { name: "Save workflow" }),
+			);
+			const dialog = screen.getByRole("dialog", { name: "Save workflow" });
+			await within(dialog).findByLabelText("Name");
+			const submit = within(dialog).getByRole("button", {
+				name: "Save workflow",
+			});
+			// The pending answer blocks the save, so a pending query cannot
+			// silently land in the personal tier.
+			expect(submit).toBeDisabled();
+			await user.click(submit);
+			expect(
+				forkSavedWorkflowsApi.createUserSavedWorkflow,
+			).not.toHaveBeenCalled();
 
-		resolvePermission?.({ canCreateOrganizationSkill: true });
-		await within(dialog).findByLabelText("Organization");
-		expect(submit).toBeEnabled();
-		authorizationSpy.mockRestore();
+			resolvePermission?.({ canCreateOrganizationSkill: true });
+			await within(dialog).findByLabelText("Organization");
+			expect(submit).toBeEnabled();
+		} finally {
+			authorizationSpy.mockRestore();
+		}
 	});
 
 	it("holds the submit while a cached permission answer refetches", async () => {
@@ -348,8 +349,6 @@ describe("ForkWorkflowRunDetail", () => {
 		const refetchDeferreds: Array<
 			(value: { canCreateOrganizationSkill: boolean }) => void
 		> = [];
-		// The spy survives the afterEach, which only clears call state, so the
-		// test restores it before it ends and the next test sees real checks.
 		const authorizationSpy = vi
 			.spyOn(API, "checkAuthorization")
 			.mockImplementation(
@@ -367,63 +366,61 @@ describe("ForkWorkflowRunDetail", () => {
 		renderDetail(MockChatWorkflowRunDetail, { queryClient });
 		const user = userEvent.setup();
 
-		await user.click(
-			await screen.findByRole("button", { name: "Save workflow" }),
-		);
-		const dialog = screen.getByRole("dialog", { name: "Save workflow" });
-		const nameField = await within(dialog).findByLabelText("Name");
-		const submit = within(dialog).getByRole("button", {
-			name: "Save workflow",
-		});
-		// The seeded grant renders the choice, but its in-flight refetch
-		// replaces it with the loader and holds the submit, so a revoked
-		// grant cannot take a submission made from the cached answer.
-		await within(dialog).findByRole("status", {
-			name: "Checking organization permission",
-		});
-		expect(submit).toBeDisabled();
-		await user.click(submit);
-		expect(create).not.toHaveBeenCalled();
-		expect(createOrg).not.toHaveBeenCalled();
+		try {
+			await user.click(
+				await screen.findByRole("button", { name: "Save workflow" }),
+			);
+			const dialog = screen.getByRole("dialog", { name: "Save workflow" });
+			const nameField = await within(dialog).findByLabelText("Name");
+			const submit = within(dialog).getByRole("button", {
+				name: "Save workflow",
+			});
+			// The in-flight refetch of the cached grant holds the submit, so a
+			// grant revoked during the refetch cannot take a submission made
+			// from the cached answer.
+			await within(dialog).findByRole("status", {
+				name: "Checking organization permission",
+			});
+			expect(submit).toBeDisabled();
+			await user.click(submit);
+			expect(create).not.toHaveBeenCalled();
+			expect(createOrg).not.toHaveBeenCalled();
 
-		// The refetch confirms the grant, so the choice and submit return.
-		refetchDeferreds[0]?.({ canCreateOrganizationSkill: true });
-		const organizationRadio = await within(dialog).findByRole("radio", {
-			name: "Organization",
-		});
-		expect(submit).toBeEnabled();
+			refetchDeferreds[0]?.({ canCreateOrganizationSkill: true });
+			const organizationRadio = await within(dialog).findByRole("radio", {
+				name: "Organization",
+			});
+			expect(submit).toBeEnabled();
 
-		// Select Organization, then invalidate the grant: the refetch runs
-		// while the selection survives, and this fresh answer denies it.
-		await user.click(organizationRadio);
-		expect(organizationRadio).toBeChecked();
-		queryClient.invalidateQueries({ queryKey: createPermissionKey });
-		await within(dialog).findByRole("status", {
-			name: "Checking organization permission",
-		});
-		// The submit holds again while the fresh answer is in flight, so a
-		// click here sends nothing even though the cached grant still shows.
-		await user.click(submit);
-		expect(create).not.toHaveBeenCalled();
-		expect(createOrg).not.toHaveBeenCalled();
-		refetchDeferreds[1]?.({ canCreateOrganizationSkill: false });
-		// The fresh denial hides the choice again, and the stale selection
-		// must not survive as the submitted tier.
-		await waitFor(() =>
-			expect(
-				within(dialog).queryByRole("radio", { name: "Organization" }),
-			).toBeNull(),
-		);
-		await user.clear(nameField);
-		await user.type(nameField, "review-changed-files");
-		await user.click(submit);
-		await waitFor(() => expect(create).toHaveBeenCalledOnce());
-		expect(createOrg).not.toHaveBeenCalled();
-		// The spies survive the afterEach, which only clears call state, so
-		// restore all three and the next test sees real requests.
-		authorizationSpy.mockRestore();
-		create.mockRestore();
-		createOrg.mockRestore();
+			// Invalidate the grant after selecting Organization: the refetch
+			// runs while the selection survives, and this fresh answer denies it.
+			await user.click(organizationRadio);
+			expect(organizationRadio).toBeChecked();
+			queryClient.invalidateQueries({ queryKey: createPermissionKey });
+			await within(dialog).findByRole("status", {
+				name: "Checking organization permission",
+			});
+			await user.click(submit);
+			expect(create).not.toHaveBeenCalled();
+			expect(createOrg).not.toHaveBeenCalled();
+			refetchDeferreds[1]?.({ canCreateOrganizationSkill: false });
+			// The stale selection must not survive the denial as the
+			// submitted tier.
+			await waitFor(() =>
+				expect(
+					within(dialog).queryByRole("radio", { name: "Organization" }),
+				).toBeNull(),
+			);
+			await user.clear(nameField);
+			await user.type(nameField, "review-changed-files");
+			await user.click(submit);
+			await waitFor(() => expect(create).toHaveBeenCalledOnce());
+			expect(createOrg).not.toHaveBeenCalled();
+		} finally {
+			authorizationSpy.mockRestore();
+			create.mockRestore();
+			createOrg.mockRestore();
+		}
 	});
 
 	it("shows the checking loader while a cached denial refetches", async () => {
@@ -445,27 +442,56 @@ describe("ForkWorkflowRunDetail", () => {
 						resolveRefetch = resolve;
 					}) as never,
 			);
+		const create = vi
+			.spyOn(forkSavedWorkflowsApi, "createUserSavedWorkflow")
+			.mockResolvedValue({
+				...MockForkSavedWorkflow,
+				id: "saved-workflow-new",
+				name: "review-changed-files",
+				organization_id: MockChat.organization_id,
+				user_id: "me",
+				created_by: "me",
+				description: "",
+				args_schema: undefined,
+				phases: [],
+			});
+		const createOrg = vi
+			.spyOn(forkSavedWorkflowsApi, "createOrganizationSavedWorkflow")
+			.mockRejectedValue(new Error("must not be called"));
 		renderDetail(MockChatWorkflowRunDetail, { queryClient });
 		const user = userEvent.setup();
 
-		await user.click(
-			await screen.findByRole("button", { name: "Save workflow" }),
-		);
-		const dialog = screen.getByRole("dialog", { name: "Save workflow" });
-		const submit = within(dialog).getByRole("button", {
-			name: "Save workflow",
-		});
-		// The cached denial hides the choice, and the refetch of it still
-		// shows the checking loader instead of a bare disabled submit.
-		await within(dialog).findByRole("status", {
-			name: "Checking organization permission",
-		});
-		expect(submit).toBeDisabled();
+		try {
+			await user.click(
+				await screen.findByRole("button", { name: "Save workflow" }),
+			);
+			const dialog = screen.getByRole("dialog", { name: "Save workflow" });
+			const submit = within(dialog).getByRole("button", {
+				name: "Save workflow",
+			});
+			await within(dialog).findByRole("status", {
+				name: "Checking organization permission",
+			});
+			expect(submit).toBeDisabled();
+			// The loader alone is not the point: a submission made from the
+			// cached denial must not reach either create API.
+			await user.click(submit);
+			expect(create).not.toHaveBeenCalled();
+			expect(createOrg).not.toHaveBeenCalled();
 
-		resolveRefetch?.({ canCreateOrganizationSkill: false });
-		await waitFor(() => expect(submit).toBeEnabled());
-		expect(within(dialog).queryByRole("status")).toBeNull();
-		authorizationSpy.mockRestore();
+			resolveRefetch?.({ canCreateOrganizationSkill: false });
+			await waitFor(() => expect(submit).toBeEnabled());
+			expect(within(dialog).queryByRole("status")).toBeNull();
+			// After the fresh denial settles, saving still goes to the
+			// personal tier only.
+			await user.click(submit);
+			await waitFor(() => expect(create).toHaveBeenCalledOnce());
+			expect(createOrg).not.toHaveBeenCalled();
+		} finally {
+			authorizationSpy.mockRestore();
+			create.mockRestore();
+			createOrg.mockRestore();
+		}
 	});
 
 	it("keeps Personal usable when the organization permission check fails", async () => {
@@ -490,23 +516,27 @@ describe("ForkWorkflowRunDetail", () => {
 		renderDetail(MockChatWorkflowRunDetail);
 		const user = userEvent.setup();
 
-		await user.click(
-			await screen.findByRole("button", { name: "Save workflow" }),
-		);
-		const dialog = screen.getByRole("dialog", { name: "Save workflow" });
-		// The failed check shows its error in place of the tier choice, and
-		// the personal tier, which needs no organization permission, stays
-		// usable instead of waiting on a check that already failed.
-		await within(dialog).findByText("check failed");
-		// A failed check settles the tier like a denied one: personal only.
-		expect(within(dialog).queryByLabelText("Organization")).toBeNull();
-		const submit = within(dialog).getByRole("button", {
-			name: "Save workflow",
-		});
-		expect(submit).toBeEnabled();
-		await user.click(submit);
-		await waitFor(() => expect(create).toHaveBeenCalledOnce());
-		authorizationSpy.mockRestore();
+		try {
+			await user.click(
+				await screen.findByRole("button", { name: "Save workflow" }),
+			);
+			const dialog = screen.getByRole("dialog", { name: "Save workflow" });
+			// The failed check shows its error in place of the tier choice, and
+			// the personal tier, which needs no organization permission, stays
+			// usable instead of waiting on a check that already failed.
+			await within(dialog).findByText("check failed");
+			// A failed check settles the tier like a denied one: personal only.
+			expect(within(dialog).queryByLabelText("Organization")).toBeNull();
+			const submit = within(dialog).getByRole("button", {
+				name: "Save workflow",
+			});
+			expect(submit).toBeEnabled();
+			await user.click(submit);
+			await waitFor(() => expect(create).toHaveBeenCalledOnce());
+		} finally {
+			authorizationSpy.mockRestore();
+			create.mockRestore();
+		}
 	});
 
 	it("trims the name before creating the workflow", async () => {
