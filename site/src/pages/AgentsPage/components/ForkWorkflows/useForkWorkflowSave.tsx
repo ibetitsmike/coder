@@ -7,13 +7,14 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { getErrorDetail, getErrorMessage } from "#/api/errors";
 import { checkAuthorization } from "#/api/queries/authCheck";
+import type { SavedWorkflowScope } from "#/api/queries/forkSavedWorkflows";
 import { createSavedWorkflow } from "#/api/queries/forkSavedWorkflows";
 import type { SkillErrorDisplay } from "#/pages/AgentsPage/components/SkillEditor";
 import { buildCreateSavedWorkflowRequest } from "#/pages/AISettingsPage/ForkWorkflowsPage/savedWorkflowForm";
 import { ForkWorkflowSaveDialog } from "./ForkWorkflowSaveDialog";
 
 /** Where a saved workflow lands after the save dialog submits. */
-type SaveTier = "user" | "organization";
+export type SaveTier = SavedWorkflowScope["tier"];
 
 type SaveTarget = {
 	/** The run title, which the panel's dialog prefills the name from. */
@@ -23,10 +24,8 @@ type SaveTarget = {
 };
 
 type ForkWorkflowSaveState = {
-	/** The run the Save action would save, when a dialog is open. */
-	saveTarget: SaveTarget | undefined;
 	/** The name and tier of the workflow the last save created. */
-	saved: { name: string; tier: SaveTier; organizationId: string } | undefined;
+	saved: { name: string; tier: SaveTier } | undefined;
 	openSave: (target: SaveTarget) => void;
 	/** The dialog element, rendered by the page that owns the action. */
 	dialog: React.ReactNode;
@@ -43,10 +42,11 @@ type SaveDialogProps = {
 	canCreateOrganization: boolean | undefined;
 	canCreateOrganizationError: unknown;
 	/**
-	 * Whether the authorization check is still loading, as opposed to
-	 * failed: only a pending answer holds the Personal submission.
+	 * Whether the authorization check is in flight, as opposed to failed:
+	 * only an in-flight answer holds the Personal submission. Covers a
+	 * refetch of a cached answer, not just the first load.
 	 */
-	isPermissionPending: boolean;
+	isPermissionChecking: boolean;
 	savedLinkRef: React.RefObject<HTMLAnchorElement | null>;
 	onSaved: (name: string, tier: SaveTier) => void;
 	onClose: () => void;
@@ -57,7 +57,7 @@ const SaveDialog: React.FC<SaveDialogProps> = ({
 	organizationId,
 	canCreateOrganization,
 	canCreateOrganizationError,
-	isPermissionPending,
+	isPermissionChecking,
 	savedLinkRef,
 	onSaved,
 	onClose,
@@ -105,7 +105,7 @@ const SaveDialog: React.FC<SaveDialogProps> = ({
 			script={target.script}
 			canCreateOrganization={canCreateOrganization}
 			canCreateOrganizationError={canCreateOrganizationError}
-			isPermissionPending={isPermissionPending}
+			isPermissionChecking={isPermissionChecking}
 			isSubmitting={isSubmitting}
 			submitError={submitError}
 			// The link only exists after a save, so closing without one
@@ -150,8 +150,10 @@ export const useForkWorkflowSave = (options: {
 		}),
 		enabled: Boolean(saveTarget),
 	});
-	const isPermissionPending =
-		orgPermissionQuery.isPending && !orgPermissionQuery.isError;
+	// An in-flight check is as unresolved as a first load: the grant it
+	// re-checks may have been revoked while the cached answer looked fresh.
+	// isFetching covers both, including a refetch of a cached answer.
+	const isPermissionChecking = orgPermissionQuery.isFetching;
 	const canCreateOrganization =
 		orgPermissionQuery.data?.canCreateOrganizationSkill === true
 			? true
@@ -165,16 +167,16 @@ export const useForkWorkflowSave = (options: {
 			organizationId={organizationId}
 			canCreateOrganization={canCreateOrganization}
 			canCreateOrganizationError={orgPermissionQuery.error}
-			isPermissionPending={isPermissionPending}
+			isPermissionChecking={isPermissionChecking}
 			savedLinkRef={savedLinkRef}
 			onSaved={(name, tier) => {
-				setSaved({ name, tier, organizationId });
+				setSaved({ name, tier });
 				close();
 			}}
 			onClose={close}
 		/>
 	) : undefined;
-	return { saveTarget, saved, openSave: setSaveTarget, dialog };
+	return { saved, openSave: setSaveTarget, dialog };
 };
 
 /** The settings page a saved workflow list lives on, by tier. */
