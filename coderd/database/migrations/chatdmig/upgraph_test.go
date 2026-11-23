@@ -27,7 +27,7 @@ func TestUpGraphLockTimeout(t *testing.T) {
 	// From 634, 635 runs in core and 636 runs as a routed node.
 	g := earlySplitGraph(t, deployedVersion)
 	_, db := createDB(t, admin)
-	require.NoError(t, migrations.UpWithFS(db, upstreamUpTo(t, deployedVersion)))
+	require.NoError(t, migrations.Up(db, migrations.WithFS(upstreamUpTo(t, deployedVersion))))
 	giveUp := migrations.WithLockPolicy(chatdmig.LockPolicy{
 		Timeout:  100 * time.Millisecond,
 		Attempts: 2,
@@ -62,7 +62,7 @@ func TestUpGraphLockTimeout(t *testing.T) {
 	}))
 	done := make(chan error, 1)
 	go func() {
-		done <- migrations.UpGraph(db, g, migrations.WithLogger(logger), migrations.WithLockPolicy(chatdmig.LockPolicy{
+		done <- migrations.UpGraph(db, g, migrations.WithChatdLogger(logger), migrations.WithLockPolicy(chatdmig.LockPolicy{
 			Timeout:  200 * time.Millisecond,
 			Attempts: 200,
 			Backoff:  func(int) time.Duration { return 50 * time.Millisecond },
