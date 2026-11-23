@@ -1,6 +1,7 @@
 import type * as TypesGen from "#/api/typesGenerated";
 import { getAttachmentHref } from "../../utils/chatAttachments";
 import { asRecord } from "../ChatElements/runtimeTypeUtils";
+import { parseFamilyMessage } from "../ChatElements/tools/forkFamilyMessage";
 import { shouldRenderTool } from "../ChatElements/tools/toolVisibility";
 import { parseAsyncAnswerContent } from "./messageParsing";
 import type {
@@ -194,7 +195,14 @@ export const deriveMessageDisplayState = ({
 
 	const { hasThinkingOnlyContent, endsWithResponseBlock } =
 		getRenderableContentState(parsed);
+	// A family message copy is the sender's body, without the envelope that
+	// message_family_chat wrapped around it. The bubble already shows the body
+	// through ForkFamilyMessageHeader.
+	const familyMessage = isUser
+		? parseFamilyMessage(parsed.markdown)
+		: undefined;
 	const copyText =
+		familyMessage?.body ??
 		(isUser ? parseAsyncAnswerContent(message.content)?.body : undefined) ??
 		parsed.markdown;
 

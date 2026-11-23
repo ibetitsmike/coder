@@ -86,6 +86,7 @@ import {
 	buildACPSessionDescriptors,
 } from "./ChatElements/tools/ACPContext";
 import { isAsyncAnswerPrompt } from "./ChatElements/tools/asyncAnswer";
+import { parseFamilyMessage } from "./ChatElements/tools/forkFamilyMessage";
 import type { SkillMetadata } from "./ChatMessageInput/SkillsTriggerMenu";
 import { ChatMessageScroller } from "./ChatMessageScroller";
 import type { AttachedWorkspaceInfo } from "./ChatToolBadges";
@@ -503,11 +504,16 @@ export const ChatPageInput: React.FC<ChatPageInputProps> = ({
 	const messages = useChatMessages(store);
 	// Source the composer's prompt-history cycle from the dedicated /prompts endpoint.
 	const { data: promptsData } = useQuery(chatPromptsQuery(chatId));
-	// Sending an async answer again would answer its call again.
+	// Sending an async answer again would answer its call again. A family
+	// message was not typed by the user either, so its envelope never enters
+	// the history cycle and can never be sent again from it.
 	const userPromptHistory: readonly string[] =
 		promptsData?.prompts
 			.map((prompt) => prompt.text)
-			.filter((text) => !isAsyncAnswerPrompt(text)) ?? [];
+			.filter(
+				(text) =>
+					!isAsyncAnswerPrompt(text) && parseFamilyMessage(text) === undefined,
+			) ?? [];
 
 	const rawUsage = getLatestContextUsage(
 		messages,
