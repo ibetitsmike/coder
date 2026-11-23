@@ -31941,6 +31941,14 @@ const docTemplate = `{
                     "type": "string",
                     "format": "uuid"
                 },
+                "permissions": {
+                    "description": "Permissions are the actions the caller may take on the workflow, so\ntwo callers can get different values for the same workflow.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.ForkSavedWorkflowPermissions"
+                        }
+                    ]
+                },
                 "phases": {
                     "description": "Phases are the declared phase names of the workflow, in order.",
                     "type": "array",
@@ -31993,6 +32001,14 @@ const docTemplate = `{
                     "type": "string",
                     "format": "uuid"
                 },
+                "permissions": {
+                    "description": "Permissions are the actions the caller may take on the workflow, so\ntwo callers can get different values for the same workflow.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.ForkSavedWorkflowPermissions"
+                        }
+                    ]
+                },
                 "phases": {
                     "description": "Phases are the declared phase names of the workflow, in order.",
                     "type": "array",
@@ -32008,6 +32024,20 @@ const docTemplate = `{
                     "description": "UserID is the owner of a personal workflow. It is empty on an\norganization workflow.",
                     "type": "string",
                     "format": "uuid"
+                }
+            }
+        },
+        "codersdk.ForkSavedWorkflowPermissions": {
+            "type": "object",
+            "properties": {
+                "delete": {
+                    "type": "boolean"
+                },
+                "share": {
+                    "type": "boolean"
+                },
+                "update": {
+                    "type": "boolean"
                 }
             }
         },

@@ -1,9 +1,11 @@
 // This file is fork code. Organization admins manage organization
-// workflows in AI settings. Members share their personal workflows with the
-// organization here and edit the ones they shared.
+// workflows in AI settings. Members share their personal workflows with
+// the organization here. The server returns the caller's permissions on
+// each workflow, and the tables show only the actions those allow.
 
 import { useEffect, useRef } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
+import type { ForkSavedWorkflowMetadata } from "#/api/typesGenerated";
 import {
 	getOrganizationLabel,
 	OrganizationAutocomplete,
@@ -16,15 +18,15 @@ import {
 import { ForkSavedWorkflowsTable } from "#/pages/AISettingsPage/ForkWorkflowsPage/ForkSavedWorkflowsTable";
 import { orgSearchParam } from "#/pages/AISettingsPage/MCPServersPage/organizationParam";
 import { SectionHeader } from "../../components/SectionHeader";
-import { readOnlySkillAccess, type SkillAccess } from "../../utils/skills";
+import { readOnlySkillAccess } from "../../utils/skills";
 
-// A member who shared a workflow keeps the right to edit and delete it,
-// unless an admin revoked it. The server checks either way.
-const sharedWorkflowAccess: SkillAccess = {
+// The server computes the caller's rights on each row, so edit and delete
+// follow the returned permissions instead of a guess from the author.
+const permissionsRowAccess = (workflow: ForkSavedWorkflowMetadata) => ({
 	create: false,
-	update: true,
-	delete: true,
-};
+	update: workflow.permissions.update,
+	delete: workflow.permissions.delete,
+});
 
 const ForkSavedWorkflowsPage: React.FC = () => {
 	const { user } = useAuthenticated();
@@ -148,18 +150,18 @@ const ForkSavedWorkflowsPage: React.FC = () => {
 			<ForkSavedWorkflowsTable
 				scope={{ tier: "user", organizationId: organization.id }}
 				canShare
+				// Members can always create personal workflows, and the
+				// server's permissions decide the rest of each row.
+				access={{ create: true, update: false, delete: false }}
+				rowAccess={permissionsRowAccess}
 			/>
 			<ForkSavedWorkflowsTable
 				scope={{ tier: "organization", organizationId: organization.id }}
 				access={readOnlySkillAccess}
-				rowAccess={(workflow) =>
-					workflow.created_by === user.id
-						? sharedWorkflowAccess
-						: readOnlySkillAccess
-				}
+				rowAccess={permissionsRowAccess}
 				copy={{
 					description:
-						"Organization workflows you can read. Your chats in this organization run one with run_workflow. You can edit and delete the ones you shared. Ask an organization admin to change the others.",
+						"Organization workflows you can read. Your chats in this organization run one with run_workflow. You can edit and delete the ones you have rights to change. Ask an organization admin to change the others.",
 					emptyMessage: "No organization workflows are available to you.",
 				}}
 			/>

@@ -7087,6 +7087,23 @@ export interface ForkSavedWorkflowMetadata {
 	readonly phases: readonly string[];
 	readonly created_at: string;
 	readonly updated_at: string;
+	/**
+	 * Permissions are the actions the caller may take on the workflow, so
+	 * two callers can get different values for the same workflow.
+	 */
+	readonly permissions: ForkSavedWorkflowPermissions;
+}
+
+// From codersdk/fork_saved_workflows.go
+/**
+ * ForkSavedWorkflowPermissions are the actions the caller may take on a saved
+ * workflow. Share on a personal workflow moves it to the organization, and on
+ * an organization workflow it manages who can read it.
+ */
+export interface ForkSavedWorkflowPermissions {
+	readonly update: boolean;
+	readonly delete: boolean;
+	readonly share: boolean;
 }
 
 // From codersdk/fork_saved_workflows.go

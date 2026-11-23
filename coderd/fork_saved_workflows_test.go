@@ -356,13 +356,17 @@ func TestForkOrganizationSavedWorkflows(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []codersdk.ForkSavedWorkflowMetadata{personal.ForkSavedWorkflowMetadata}, userList)
 
-		// The Everyone grant lets every member read a new workflow.
+		// The Everyone grant lets every member read a new workflow, and
+		// only read it.
+		require.Equal(t, codersdk.ForkSavedWorkflowPermissions{Update: true, Delete: true, Share: true}, created.Permissions)
+		asMember := created
+		asMember.Permissions = codersdk.ForkSavedWorkflowPermissions{}
 		list, err := member.ForkOrganizationSavedWorkflows(ctx, orgID)
 		require.NoError(t, err)
-		require.Equal(t, []codersdk.ForkSavedWorkflowMetadata{created.ForkSavedWorkflowMetadata}, list)
+		require.Equal(t, []codersdk.ForkSavedWorkflowMetadata{asMember.ForkSavedWorkflowMetadata}, list)
 		got, err := member.ForkOrganizationSavedWorkflow(ctx, orgID, "release")
 		require.NoError(t, err)
-		require.Equal(t, created, got)
+		require.Equal(t, asMember, got)
 		_, err = orgAdmin.ForkOrganizationSavedWorkflow(ctx, orgID, "rel\x00ease")
 		_ = requireSDKError(t, err, http.StatusNotFound)
 		_ = requireSDKError(t, orgAdmin.DeleteForkOrganizationSavedWorkflow(ctx, orgID, "rel\x00ease"), http.StatusNotFound)

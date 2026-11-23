@@ -221,3 +221,6 @@ These endpoints need the experiment.
 The run list takes `limit`, at most 100 with a default of 50, and an `after` cursor of `<created_at>/<run ID>` for the next page.
 A list item keeps a preview of the script of 200&nbsp;bytes instead of the script.
 A `PATCH`, a `DELETE`, and a share `POST` of a workflow take `expect_id` as a query parameter: the write goes through only when the stored workflow still has that ID, otherwise it answers 409.
+Every workflow these endpoints return has a `permissions` object with `update`, `delete`, and `share`, the actions the caller may take on it, so two callers can see different values for one workflow.
+On a personal workflow, `share` means the caller may move it to the organization tier, which only its owner may do.
+On an organization workflow, `share` means the caller may read and change its ACL.

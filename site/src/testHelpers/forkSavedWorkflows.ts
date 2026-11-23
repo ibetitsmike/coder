@@ -28,6 +28,7 @@ export const MockForkSavedWorkflowMetadata: ForkSavedWorkflowMetadata = {
 	phases: ["review", "summarize"],
 	created_at: MOCK_TIMESTAMP,
 	updated_at: MOCK_TIMESTAMP,
+	permissions: { update: true, delete: true, share: true },
 };
 
 export const MockForkSavedWorkflow: ForkSavedWorkflow = {
@@ -46,6 +47,8 @@ export const MockForkOrganizationSavedWorkflowMetadata: ForkSavedWorkflowMetadat
 		created_by: undefined,
 		args_schema: undefined,
 		phases: [],
+		// The server grants no rights on this fixture by default.
+		permissions: { update: false, delete: false, share: false },
 	};
 
 /** MockForkSavedWorkflowMetadata after MockUserMember shared it. */
@@ -54,4 +57,6 @@ export const MockForkSharedSavedWorkflowMetadata: ForkSavedWorkflowMetadata = {
 	id: "saved-workflow-shared",
 	user_id: undefined,
 	created_by: MockUserMember.id,
+	// Sharing grants the author edit and delete, not access management.
+	permissions: { update: true, delete: true, share: false },
 };

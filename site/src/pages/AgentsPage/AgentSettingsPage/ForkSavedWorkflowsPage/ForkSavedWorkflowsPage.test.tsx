@@ -5,6 +5,8 @@ import { API } from "#/api/api";
 import * as forkSavedWorkflowsApi from "#/api/forkSavedWorkflows";
 import type {
 	Experiment,
+	ForkSavedWorkflowMetadata,
+	ForkSavedWorkflowPermissions,
 	Organization as TypesGenOrganization,
 } from "#/api/typesGenerated";
 import { toast } from "#/components/Toaster/toast";
@@ -13,6 +15,7 @@ import {
 	MockOrganization2,
 	MockOrganization3,
 	MockUserMember,
+	MockUserOwner,
 	mockApiError,
 } from "#/testHelpers/entities";
 import {
@@ -32,11 +35,15 @@ const renderPage = ({
 		MockOrganization3,
 		MockDefaultOrganization,
 	],
+	userWorkflows = [MockForkSavedWorkflowMetadata],
+	organizationWorkflows = [MockForkOrganizationSavedWorkflowMetadata],
 	route = "/agents/settings/workflows",
 }: {
 	experiments?: Experiment[];
 	organizationIds?: string[];
 	organizations?: TypesGenOrganization[];
+	userWorkflows?: ForkSavedWorkflowMetadata[];
+	organizationWorkflows?: ForkSavedWorkflowMetadata[];
 	route?: string;
 } = {}) => {
 	vi.spyOn(API, "getExperiments").mockResolvedValue(experiments);
@@ -48,10 +55,10 @@ const renderPage = ({
 	vi.spyOn(API, "getOrganizations").mockResolvedValue(organizations);
 	const listUser = vi
 		.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflows")
-		.mockResolvedValue([MockForkSavedWorkflowMetadata]);
+		.mockResolvedValue(userWorkflows);
 	const listOrganization = vi
 		.spyOn(forkSavedWorkflowsApi, "getOrganizationSavedWorkflows")
-		.mockResolvedValue([MockForkOrganizationSavedWorkflowMetadata]);
+		.mockResolvedValue(organizationWorkflows);
 	const { router } = renderWithAuth(<ForkSavedWorkflowsPage />, {
 		path: "/agents/settings/workflows",
 		route,
@@ -115,6 +122,136 @@ describe("ForkSavedWorkflowsPage", () => {
 		expect(
 			screen.queryByRole("button", {
 				name: `More actions for ${MockForkOrganizationSavedWorkflowMetadata.name}`,
+			}),
+		).toBeNull();
+	});
+
+	it("follows each personal workflow's permissions for its actions", async () => {
+		const user = userEvent.setup();
+		const noRights = {
+			...MockForkSavedWorkflowMetadata,
+			id: "saved-workflow-locked",
+			name: "locked-workflow",
+			permissions: { update: false, delete: false, share: false },
+		};
+		const { listUser } = renderPage({
+			userWorkflows: [MockForkSavedWorkflowMetadata, noRights],
+		});
+
+		const personal = await screen.findByRole("table", {
+			name: "Personal workflows",
+		});
+		await within(personal).findByText(noRights.name);
+		expect(listUser).toHaveBeenCalledWith(MockDefaultOrganization.id);
+
+		// A row with no rights gets no menu at all, while the row with
+		// full rights keeps its menu next to it.
+		expect(
+			within(personal).queryByRole("button", {
+				name: `More actions for ${noRights.name}`,
+			}),
+		).toBeNull();
+		await user.click(
+			await within(personal).findByRole("button", {
+				name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
+			}),
+		);
+		expect(
+			await screen.findByRole("menuitem", { name: "Edit" }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("menuitem", {
+				name: "Share with organization\u2026",
+			}),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("menuitem", { name: "Delete\u2026" }),
+		).toBeInTheDocument();
+	});
+
+	it("ignores the author for an organization workflow the caller may not change", async () => {
+		renderPage({
+			organizationWorkflows: [
+				{
+					...MockForkOrganizationSavedWorkflowMetadata,
+					// The caller created this one, but the server returned
+					// no rights, so the old author guess would show menus
+					// the server forbids.
+					created_by: MockUserMember.id,
+					permissions: { update: false, delete: false, share: false },
+				},
+			],
+		});
+
+		const organization = await screen.findByRole("table", {
+			name: "Organization workflows",
+		});
+		await within(organization).findByText(
+			MockForkOrganizationSavedWorkflowMetadata.name,
+		);
+		expect(
+			within(organization).queryByRole("button", {
+				name: `More actions for ${MockForkOrganizationSavedWorkflowMetadata.name}`,
+			}),
+		).toBeNull();
+	});
+
+	it("follows the returned rights on an organization workflow another member made", async () => {
+		const user = userEvent.setup();
+		const editable = {
+			...MockForkOrganizationSavedWorkflowMetadata,
+			created_by: MockUserOwner.id,
+			permissions: { update: true, delete: true, share: false },
+		};
+		renderPage({ organizationWorkflows: [editable] });
+
+		const organization = await screen.findByRole("table", {
+			name: "Organization workflows",
+		});
+		await within(organization).findByText(editable.name);
+
+		await user.click(
+			await within(organization).findByRole("button", {
+				name: `More actions for ${editable.name}`,
+			}),
+		);
+		expect(
+			await screen.findByRole("menuitem", { name: "Edit" }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("menuitem", { name: "Delete\u2026" }),
+		).toBeInTheDocument();
+	});
+
+	it("shows only delete for a personal workflow the caller can delete but not edit or share", async () => {
+		const user = userEvent.setup();
+		const deletable = {
+			...MockForkSavedWorkflowMetadata,
+			permissions: {
+				update: false,
+				delete: true,
+				share: false,
+			} satisfies ForkSavedWorkflowPermissions,
+		};
+		renderPage({ userWorkflows: [deletable] });
+
+		const personal = await screen.findByRole("table", {
+			name: "Personal workflows",
+		});
+		await within(personal).findByText(deletable.name);
+
+		await user.click(
+			await within(personal).findByRole("button", {
+				name: `More actions for ${deletable.name}`,
+			}),
+		);
+		expect(
+			await screen.findByRole("menuitem", { name: "Delete\u2026" }),
+		).toBeInTheDocument();
+		expect(screen.queryByRole("menuitem", { name: "Edit" })).toBeNull();
+		expect(
+			screen.queryByRole("menuitem", {
+				name: "Share with organization\u2026",
 			}),
 		).toBeNull();
 	});

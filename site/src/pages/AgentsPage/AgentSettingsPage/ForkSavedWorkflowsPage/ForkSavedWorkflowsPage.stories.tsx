@@ -86,6 +86,43 @@ export const SharedByMe: Story = {
 	},
 };
 
+/** The server's permissions decide each row's actions. */
+export const PermissionRows: Story = {
+	parameters: {
+		queries: [
+			{
+				key: savedWorkflowsKey({
+					tier: "user",
+					organizationId: MockDefaultOrganization.id,
+				}),
+				data: [
+					MockForkSavedWorkflowMetadata,
+					{
+						...MockForkSavedWorkflowMetadata,
+						id: "saved-workflow-locked",
+						name: "locked-workflow",
+						description: "The server returned no rights for this one.",
+						permissions: { update: false, delete: false, share: false },
+					},
+				],
+			},
+			{
+				key: savedWorkflowsKey({
+					tier: "organization",
+					organizationId: MockDefaultOrganization.id,
+				}),
+				data: [
+					{
+						...MockForkOrganizationSavedWorkflowMetadata,
+						name: "rotate-keys",
+						permissions: { update: true, delete: true, share: false },
+					},
+				],
+			},
+		],
+	},
+};
+
 export const Empty: Story = {
 	parameters: {
 		queries: [

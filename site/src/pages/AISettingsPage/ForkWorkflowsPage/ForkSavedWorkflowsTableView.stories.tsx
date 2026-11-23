@@ -61,7 +61,7 @@ export const ShareMenuOpen: Story = {
 	play: RowMenuOpen.play,
 };
 
-/** Only the row the user shared offers a menu. */
+/** Only the rows whose returned permissions grant rights offer menus. */
 export const RowAccess: Story = {
 	args: {
 		title: "Organization workflows",
@@ -70,10 +70,11 @@ export const RowAccess: Story = {
 			MockForkOrganizationSavedWorkflowMetadata,
 		],
 		access: { create: false, update: false, delete: false },
-		rowAccess: (workflow) =>
-			workflow.id === MockForkSharedSavedWorkflowMetadata.id
-				? { create: false, update: true, delete: true }
-				: { create: false, update: false, delete: false },
+		rowAccess: (workflow) => ({
+			create: false,
+			update: workflow.permissions.update,
+			delete: workflow.permissions.delete,
+		}),
 	},
 };
 
