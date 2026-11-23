@@ -7,6 +7,7 @@ import {
 	MockChatQueuedMessage,
 	MockChatQueuedMessageUnderEdit,
 } from "#/testHelpers/chatEntities";
+import { MockFamilyMessage } from "#/testHelpers/forkFamilyMessages";
 import {
 	getFirstLinePreview,
 	getQueuedMessageInfo,
@@ -27,6 +28,20 @@ describe("getQueuedMessageInfo", () => {
 			attachmentCount: 0,
 			hookNotices: [],
 		});
+	});
+
+	it("previews a queued family message's body without its envelope", () => {
+		const envelope = MockFamilyMessage.content?.at(0);
+		if (envelope?.type !== "text") {
+			throw new Error("MockFamilyMessage must hold a text part");
+		}
+		const result = getQueuedMessageInfo(buildMessage([envelope]));
+		expect(result.previewParts).toEqual([
+			{
+				type: "text",
+				text: "The tests pass, so the **API review** is done.\n\nShould I open the PR?",
+			},
+		]);
 	});
 
 	it("keeps invoked skills in document order", () => {

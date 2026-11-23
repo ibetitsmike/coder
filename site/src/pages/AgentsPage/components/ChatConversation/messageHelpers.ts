@@ -1,6 +1,7 @@
 import type * as TypesGen from "#/api/typesGenerated";
 import { getAttachmentHref } from "../../utils/chatAttachments";
 import { asRecord } from "../ChatElements/runtimeTypeUtils";
+import { parseFamilyMessage } from "../ChatElements/tools/forkFamilyMessage";
 import { shouldRenderTool } from "../ChatElements/tools/toolVisibility";
 import { parseAsyncAnswerContent } from "./messageParsing";
 import type {
@@ -194,7 +195,13 @@ export const deriveMessageDisplayState = ({
 
 	const { hasThinkingOnlyContent, endsWithResponseBlock } =
 		getRenderableContentState(parsed);
+	// Envelope parsing is not gated here because only the
+	// fork-family-messages experiment produces envelopes.
+	const familyMessage = isUser
+		? parseFamilyMessage(parsed.markdown)
+		: undefined;
 	const copyText =
+		familyMessage?.body ??
 		(isUser ? parseAsyncAnswerContent(message.content)?.body : undefined) ??
 		parsed.markdown;
 

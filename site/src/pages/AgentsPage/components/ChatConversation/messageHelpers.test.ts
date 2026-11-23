@@ -5,6 +5,7 @@ import {
 	MockChatFileMetadata,
 	MockChatMessage,
 } from "#/testHelpers/chatEntities";
+import { MockFamilyMessage } from "#/testHelpers/forkFamilyMessages";
 import {
 	buildDisplayMessages,
 	deriveEvictedFileIds,
@@ -179,6 +180,15 @@ describe("deriveMessageDisplayState", () => {
 		const message = buildMessage([{ type: "text", text: "Copy this" }]);
 
 		expect(getDisplayState(message).hasCopyableContent).toBe(true);
+	});
+
+	it("copies a family message's body without its envelope", () => {
+		const state = getDisplayState(MockFamilyMessage);
+
+		expect(state.copyText).toBe(
+			"The tests pass, so the **API review** is done.\n\nShould I open the PR?",
+		);
+		expect(state.hasCopyableContent).toBe(true);
 	});
 
 	it("marks text-only assistant messages as copyable", () => {

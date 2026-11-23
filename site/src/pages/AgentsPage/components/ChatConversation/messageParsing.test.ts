@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChatMessage, ChatMessagePart } from "#/api/typesGenerated";
 import { MockChatMessage } from "#/testHelpers/chatEntities";
+import { MockFamilyMessage } from "#/testHelpers/forkFamilyMessages";
 import { getSubagentDescriptor } from "../ChatElements/tools/subagentDescriptor";
 import {
 	buildSubagentMaps,
@@ -201,6 +202,13 @@ describe("getEditableContentPayload", () => {
 	it("returns empty text and no attachments when content is absent", () => {
 		expect(getEditableContentPayload(undefined)).toEqual({
 			text: "",
+			fileBlocks: undefined,
+		});
+	});
+
+	it("edits a family message's body without its envelope", () => {
+		expect(getEditableContentPayload(MockFamilyMessage.content)).toEqual({
+			text: "The tests pass, so the **API review** is done.\n\nShould I open the PR?",
 			fileBlocks: undefined,
 		});
 	});
