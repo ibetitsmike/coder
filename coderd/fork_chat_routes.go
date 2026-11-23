@@ -82,6 +82,10 @@ func (api *API) registerForkChatRoutes(r chi.Router, apiKeyMiddleware func(http.
 		r.NotFound(func(rw http.ResponseWriter, _ *http.Request) {
 			httpapi.RouteNotFound(rw)
 		})
+		apnsPush := r.With(httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkAPNsPush))
+		apnsPush.Post("/push/apns", api.postForkChatAPNsDevice)
+		apnsPush.Delete("/push/apns", api.deleteForkChatAPNsDevice)
+		apnsPush.Post("/push/apns/test", api.postForkChatAPNsDeviceTest)
 		orgSubagents := r.With(
 			httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentForkNestedSubagents),
 			httpmw.ExtractOrganizationParam(api.Database),

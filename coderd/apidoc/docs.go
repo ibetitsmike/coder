@@ -7362,6 +7362,112 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v2/chats/fork/push/apns": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Register an APNs device for chat pushes",
+                "operationId": "register-an-apns-device-for-chat-pushes",
+                "parameters": [
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.RegisterChatAPNsDeviceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            },
+            "delete": {
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Unregister an APNs device",
+                "operationId": "unregister-an-apns-device",
+                "parameters": [
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ChatAPNsDeviceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
+        "/api/v2/chats/fork/push/apns/test": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Chats"
+                ],
+                "summary": "Send a test push to an APNs device",
+                "operationId": "send-a-test-push-to-an-apns-device",
+                "parameters": [
+                    {
+                        "description": "Request body",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/codersdk.ChatAPNsDeviceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "CoderSessionToken": []
+                    }
+                ],
+                "x-apidocgen": {
+                    "skip": true
+                }
+            }
+        },
         "/api/v2/chats/fork/{chat}/excluded-plugin-packs": {
             "get": {
                 "produces": [
@@ -26083,6 +26189,25 @@ const docTemplate = `{
                 }
             }
         },
+        "codersdk.ChatAPNsDeviceRequest": {
+            "type": "object",
+            "properties": {
+                "device_token": {
+                    "type": "string"
+                }
+            }
+        },
+        "codersdk.ChatAPNsEnvironment": {
+            "type": "string",
+            "enum": [
+                "sandbox",
+                "production"
+            ],
+            "x-enum-varnames": [
+                "ChatAPNsEnvironmentSandbox",
+                "ChatAPNsEnvironmentProduction"
+            ]
+        },
         "codersdk.ChatAttachment": {
             "type": "object",
             "properties": {
@@ -31112,7 +31237,8 @@ const docTemplate = `{
                 "fork-token-budget",
                 "fork-view-image",
                 "fork-context-cache",
-                "fork-context-hash-rows"
+                "fork-context-hash-rows",
+                "fork-apns-push"
             ],
             "x-enum-comments": {
                 "ExperimentAIGatewayReverseProxy": "Uses stateless reverse proxy routing when MCP injection is not configured.",
@@ -31168,6 +31294,7 @@ const docTemplate = `{
                 "",
                 "",
                 "",
+                "",
                 ""
             ],
             "x-enum-varnames": [
@@ -31203,7 +31330,8 @@ const docTemplate = `{
                 "ExperimentForkTokenBudget",
                 "ExperimentForkViewImage",
                 "ExperimentForkContextCache",
-                "ExperimentForkContextHashRows"
+                "ExperimentForkContextHashRows",
+                "ExperimentForkAPNsPush"
             ]
         },
         "codersdk.ExperimentRule": {
@@ -31645,6 +31773,22 @@ const docTemplate = `{
         "codersdk.ForkChatConfig": {
             "type": "object",
             "properties": {
+                "apns_key_file": {
+                    "description": "APNsKeyFile is the path of the APNs auth key (.p8) that signs the\npushes of the fork-apns-push experiment. Empty turns APNs off. The\nkey itself never appears in the deployment config.",
+                    "type": "string"
+                },
+                "apns_key_id": {
+                    "description": "APNsKeyID is the 10-character ID of the APNs auth key.",
+                    "type": "string"
+                },
+                "apns_team_id": {
+                    "description": "APNsTeamID is the Apple Developer team ID that owns the key.",
+                    "type": "string"
+                },
+                "apns_topic": {
+                    "description": "APNsTopic is the bundle ID of the app that receives the pushes. It\nhas no default: an APNs key can push only to the apps of its own\nteam, so the operator names the app the key belongs with.",
+                    "type": "string"
+                },
                 "max_concurrent_subagents": {
                     "description": "MaxConcurrentSubagents is the maximum number of running subagent chats\nin the deployment, not counting a subagent's own ancestors. 0 means no\nlimit.",
                     "type": "integer"
@@ -36534,6 +36678,34 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/codersdk.WorkspaceProxy"
                     }
+                }
+            }
+        },
+        "codersdk.RegisterChatAPNsDeviceRequest": {
+            "type": "object",
+            "properties": {
+                "agent_errors": {
+                    "description": "AgentErrors pushes when a root chat's turn fails.",
+                    "type": "boolean"
+                },
+                "device_token": {
+                    "description": "DeviceToken is the APNs device token in hex.",
+                    "type": "string"
+                },
+                "environment": {
+                    "$ref": "#/definitions/codersdk.ChatAPNsEnvironment"
+                },
+                "finished_turns": {
+                    "description": "FinishedTurns pushes when a root chat finishes a turn.",
+                    "type": "boolean"
+                },
+                "questions": {
+                    "description": "Questions pushes when a root chat asks a question. A turn that ends\nwith a question looks like a finished turn to the server, so it is\npushed when either flag is set.",
+                    "type": "boolean"
+                },
+                "sound": {
+                    "description": "Sound plays the app's chime with each push.",
+                    "type": "boolean"
                 }
             }
         },

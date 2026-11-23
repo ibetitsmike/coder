@@ -970,7 +970,7 @@ func New(options *Options) *API {
 				StartWorkspace:                 api.chatStartWorkspace,
 				StopWorkspace:                  api.chatStopWorkspace,
 				RenderTemplateParameters:       api.chatRenderTemplateParameters,
-				WebpushDispatcher:              options.WebPushDispatcher,
+				WebpushDispatcher:              api.forkChatPushDispatcher(options.WebPushDispatcher),
 				HookDispatcher:                 hookDispatcher,
 				UsageTracker:                   options.WorkspaceUsageTracker,
 				PrometheusRegistry:             options.PrometheusRegistry,
@@ -2315,6 +2315,9 @@ type API struct {
 	pluginManager *plugins.Manager
 	// pluginDB runs the plugin queries. It is set when pluginManager is.
 	pluginDB forkdb.Store
+	// forkPush sends chat pushes over APNs. It is nil unless the
+	// fork-apns-push experiment and the APNs key are set.
+	forkPush *forkPushDispatcher
 	// ID is a uniquely generated ID on initialization.
 	// This is used to associate objects with a specific
 	// Coder API instance, like workspace agents to a
@@ -2500,6 +2503,7 @@ func (api *API) Close() error {
 			api.Logger.Warn(api.ctx, "close chat processor", slog.Error(err))
 		}
 	}
+	api.closeForkPushDispatcher()
 	api.metricsCache.Close()
 	if api.updateChecker != nil {
 		api.updateChecker.Close()

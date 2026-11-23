@@ -24,6 +24,7 @@ var ForkExperiments = Experiments{
 	ExperimentForkViewImage,
 	ExperimentForkContextCache,
 	ExperimentForkContextHashRows,
+	ExperimentForkAPNsPush,
 }
 
 // ExperimentForkChatTodos enables the todo_write and todo_read chat tools and
@@ -87,10 +88,16 @@ const ExperimentForkContextCache Experiment = "fork-context-cache"
 // changed carries one body instead of every body.
 const ExperimentForkContextHashRows Experiment = "fork-context-hash-rows"
 
+// ExperimentForkAPNsPush sends the chat pushes that web push sends to the
+// iOS app over APNs too, and serves the routes that register its devices.
+// It needs the --chat-apns-* key options.
+const ExperimentForkAPNsPush Experiment = "fork-apns-push"
+
 // forkExperimentDisplayNames names the fork experiments whose title-cased
 // names read wrong, such as "Html".
 var forkExperimentDisplayNames = map[Experiment]string{
 	ExperimentForkHTMLAttachments: "Fork HTML Attachments",
+	ExperimentForkAPNsPush:        "Fork APNs Push",
 }
 
 // forkExperimentDisplayName returns the display name of a fork experiment

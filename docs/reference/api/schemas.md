@@ -1277,6 +1277,10 @@ title: Schemas
     "acquire_batch_size": 0,
     "debug_logging_enabled": true,
     "fork": {
+      "apns_key_file": "string",
+      "apns_key_id": "string",
+      "apns_team_id": "string",
+      "apns_topic": "string",
       "max_concurrent_subagents": 0,
       "max_concurrent_subagents_per_family": 0,
       "max_live_subagents_per_family": 0,
@@ -2908,6 +2912,34 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
 | `groups` | array of [codersdk.ChatGroup](#codersdkchatgroup) | false    |              |             |
 | `users`  | array of [codersdk.ChatUser](#codersdkchatuser)   | false    |              |             |
 
+## codersdk.ChatAPNsDeviceRequest
+
+```json
+{
+  "device_token": "string"
+}
+```
+
+### Properties
+
+| Name           | Type   | Required | Restrictions | Description |
+|----------------|--------|----------|--------------|-------------|
+| `device_token` | string | false    |              |             |
+
+## codersdk.ChatAPNsEnvironment
+
+```json
+"sandbox"
+```
+
+### Properties
+
+#### Enumerated Values
+
+| Value(s)                |
+|-------------------------|
+| `production`, `sandbox` |
+
 ## codersdk.ChatAttachment
 
 ```json
@@ -3074,6 +3106,10 @@ AuthorizationObject can represent a "set" of objects, such as: all workspaces in
   "acquire_batch_size": 0,
   "debug_logging_enabled": true,
   "fork": {
+    "apns_key_file": "string",
+    "apns_key_id": "string",
+    "apns_team_id": "string",
+    "apns_topic": "string",
     "max_concurrent_subagents": 0,
     "max_concurrent_subagents_per_family": 0,
     "max_live_subagents_per_family": 0,
@@ -8993,6 +9029,10 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
         "acquire_batch_size": 0,
         "debug_logging_enabled": true,
         "fork": {
+          "apns_key_file": "string",
+          "apns_key_id": "string",
+          "apns_team_id": "string",
+          "apns_topic": "string",
           "max_concurrent_subagents": 0,
           "max_concurrent_subagents_per_family": 0,
           "max_live_subagents_per_family": 0,
@@ -9640,6 +9680,10 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
       "acquire_batch_size": 0,
       "debug_logging_enabled": true,
       "fork": {
+        "apns_key_file": "string",
+        "apns_key_id": "string",
+        "apns_team_id": "string",
+        "apns_topic": "string",
         "max_concurrent_subagents": 0,
         "max_concurrent_subagents_per_family": 0,
         "max_live_subagents_per_family": 0,
@@ -10703,9 +10747,9 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
 
 #### Enumerated Values
 
-| Value(s)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `agent-lifecycle-hooks`, `agent-plugins`, `ai-gateway-reverse-proxy`, `ai-gateway-seat-exclusion`, `chat-acp-subagents`, `chat-automations`, `chat-inline-mcp-servers`, `chat-project-sharing`, `chat-stage-metrics`, `chat-virtual-desktop`, `enable-ai-workspace-debug`, `example`, `fork-agent-definitions`, `fork-chat-todos`, `fork-chat-wakeups`, `fork-context-cache`, `fork-context-hash-rows`, `fork-family-messages`, `fork-html-attachments`, `fork-nested-subagents`, `fork-pinned-skills`, `fork-plugin-packs`, `fork-subagent-isolation`, `fork-token-budget`, `fork-view-image`, `fork-workflows`, `mcp-server-http`, `no_nats_pubsub`, `notifications`, `plugins`, `workspace-build-updates`, `workspace-capable-licensing`, `workspace-usage` |
+| Value(s)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `agent-lifecycle-hooks`, `agent-plugins`, `ai-gateway-reverse-proxy`, `ai-gateway-seat-exclusion`, `chat-acp-subagents`, `chat-automations`, `chat-inline-mcp-servers`, `chat-project-sharing`, `chat-stage-metrics`, `chat-virtual-desktop`, `enable-ai-workspace-debug`, `example`, `fork-agent-definitions`, `fork-apns-push`, `fork-chat-todos`, `fork-chat-wakeups`, `fork-context-cache`, `fork-context-hash-rows`, `fork-family-messages`, `fork-html-attachments`, `fork-nested-subagents`, `fork-pinned-skills`, `fork-plugin-packs`, `fork-subagent-isolation`, `fork-token-budget`, `fork-view-image`, `fork-workflows`, `mcp-server-http`, `no_nats_pubsub`, `notifications`, `plugins`, `workspace-build-updates`, `workspace-capable-licensing`, `workspace-usage` |
 
 ## codersdk.ExperimentRule
 
@@ -11118,6 +11162,10 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 
 ```json
 {
+  "apns_key_file": "string",
+  "apns_key_id": "string",
+  "apns_team_id": "string",
+  "apns_topic": "string",
   "max_concurrent_subagents": 0,
   "max_concurrent_subagents_per_family": 0,
   "max_live_subagents_per_family": 0,
@@ -11129,6 +11177,10 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 
 | Name                                  | Type    | Required | Restrictions | Description                                                                                                                                                                                        |
 |---------------------------------------|---------|----------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `apns_key_file`                       | string  | false    |              | Apns key file is the path of the APNs auth key (.p8) that signs the pushes of the fork-apns-push experiment. Empty turns APNs off. The key itself never appears in the deployment config.          |
+| `apns_key_id`                         | string  | false    |              | Apns key ID is the 10-character ID of the APNs auth key.                                                                                                                                           |
+| `apns_team_id`                        | string  | false    |              | Apns team ID is the Apple Developer team ID that owns the key.                                                                                                                                     |
+| `apns_topic`                          | string  | false    |              | Apns topic is the bundle ID of the app that receives the pushes. It has no default: an APNs key can push only to the apps of its own team, so the operator names the app the key belongs with.     |
 | `max_concurrent_subagents`            | integer | false    |              | Max concurrent subagents is the maximum number of running subagent chats in the deployment, not counting a subagent's own ancestors. 0 means no limit.                                             |
 | `max_concurrent_subagents_per_family` | integer | false    |              | Max concurrent subagents per family is the maximum number of running subagent chats under one root chat, not counting a subagent's own ancestors. 0 means no limit.                                |
 | `max_live_subagents_per_family`       | integer | false    |              | Max live subagents per family is the maximum number of live subagent chats under one root chat, checked when a subagent is spawned or when message_agent resumes a finished one. 0 means no limit. |
@@ -16374,6 +16426,30 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | Name      | Type                                                        | Required | Restrictions | Description |
 |-----------|-------------------------------------------------------------|----------|--------------|-------------|
 | `regions` | array of [codersdk.WorkspaceProxy](#codersdkworkspaceproxy) | false    |              |             |
+
+## codersdk.RegisterChatAPNsDeviceRequest
+
+```json
+{
+  "agent_errors": true,
+  "device_token": "string",
+  "environment": "sandbox",
+  "finished_turns": true,
+  "questions": true,
+  "sound": true
+}
+```
+
+### Properties
+
+| Name             | Type                                                         | Required | Restrictions | Description                                                                                                                                                            |
+|------------------|--------------------------------------------------------------|----------|--------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `agent_errors`   | boolean                                                      | false    |              | Agent errors pushes when a root chat's turn fails.                                                                                                                     |
+| `device_token`   | string                                                       | false    |              | Device token is the APNs device token in hex.                                                                                                                          |
+| `environment`    | [codersdk.ChatAPNsEnvironment](#codersdkchatapnsenvironment) | false    |              |                                                                                                                                                                        |
+| `finished_turns` | boolean                                                      | false    |              | Finished turns pushes when a root chat finishes a turn.                                                                                                                |
+| `questions`      | boolean                                                      | false    |              | Questions pushes when a root chat asks a question. A turn that ends with a question looks like a finished turn to the server, so it is pushed when either flag is set. |
+| `sound`          | boolean                                                      | false    |              | Sound plays the app's chime with each push.                                                                                                                            |
 
 ## codersdk.Replica
 

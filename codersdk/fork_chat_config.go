@@ -37,6 +37,44 @@ type ForkChatConfig struct {
 	// under one root chat, checked when a subagent is spawned or when
 	// message_agent resumes a finished one. 0 means no limit.
 	MaxLiveSubagentsPerFamily serpent.Int64 `json:"max_live_subagents_per_family" typescript:",notnull"`
+	// APNsKeyFile is the path of the APNs auth key (.p8) that signs the
+	// pushes of the fork-apns-push experiment. Empty turns APNs off. The
+	// key itself never appears in the deployment config.
+	APNsKeyFile serpent.String `json:"apns_key_file" typescript:",notnull"`
+	// APNsKeyID is the 10-character ID of the APNs auth key.
+	APNsKeyID serpent.String `json:"apns_key_id" typescript:",notnull"`
+	// APNsTeamID is the Apple Developer team ID that owns the key.
+	APNsTeamID serpent.String `json:"apns_team_id" typescript:",notnull"`
+	// APNsTopic is the bundle ID of the app that receives the pushes. It
+	// has no default: an APNs key can push only to the apps of its own
+	// team, so the operator names the app the key belongs with.
+	APNsTopic serpent.String `json:"apns_topic" typescript:",notnull"`
+}
+
+// APNsConfigured reports whether any APNs key option is set.
+func (c ForkChatConfig) APNsConfigured() bool {
+	return c.APNsKeyFile.Value() != "" || c.APNsKeyID.Value() != "" || c.APNsTeamID.Value() != ""
+}
+
+// APNsMissing lists the flags of the APNs options that are empty. APNs
+// needs them all. The server never refuses to start over them: coderd logs
+// what is missing and leaves APNs off.
+func (c ForkChatConfig) APNsMissing() []string {
+	var missing []string
+	for _, opt := range []struct {
+		flag  string
+		value string
+	}{
+		{"--chat-apns-key-file", c.APNsKeyFile.Value()},
+		{"--chat-apns-key-id", c.APNsKeyID.Value()},
+		{"--chat-apns-team-id", c.APNsTeamID.Value()},
+		{"--chat-apns-topic", c.APNsTopic.Value()},
+	} {
+		if opt.value == "" {
+			missing = append(missing, opt.flag)
+		}
+	}
+	return missing
 }
 
 func (c *DeploymentValues) forkChatOptions(group *serpent.Group) serpent.OptionSet {
@@ -80,6 +118,42 @@ func (c *DeploymentValues) forkChatOptions(group *serpent.Group) serpent.OptionS
 			Default:     "0",
 			Group:       group,
 			YAML:        "maxLiveSubagentsPerFamily",
+		},
+		{
+			Name:        "Chat: APNs Key File",
+			Description: "Path of the APNs auth key (.p8) that signs the chat pushes sent to the iOS app when the fork-apns-push experiment is enabled. Empty turns APNs off. Needs --chat-apns-key-id, --chat-apns-team-id and --chat-apns-topic.",
+			Flag:        "chat-apns-key-file",
+			Env:         "CODER_CHAT_APNS_KEY_FILE",
+			Value:       &c.AI.Chat.Fork.APNsKeyFile,
+			Group:       group,
+			YAML:        "apnsKeyFile",
+		},
+		{
+			Name:        "Chat: APNs Key ID",
+			Description: "The 10-character ID of the APNs auth key in --chat-apns-key-file.",
+			Flag:        "chat-apns-key-id",
+			Env:         "CODER_CHAT_APNS_KEY_ID",
+			Value:       &c.AI.Chat.Fork.APNsKeyID,
+			Group:       group,
+			YAML:        "apnsKeyID",
+		},
+		{
+			Name:        "Chat: APNs Team ID",
+			Description: "The Apple Developer team ID that owns the APNs auth key in --chat-apns-key-file.",
+			Flag:        "chat-apns-team-id",
+			Env:         "CODER_CHAT_APNS_TEAM_ID",
+			Value:       &c.AI.Chat.Fork.APNsTeamID,
+			Group:       group,
+			YAML:        "apnsTeamID",
+		},
+		{
+			Name:        "Chat: APNs Topic",
+			Description: "The bundle ID of the iOS app that receives the chat pushes. The app must belong to the team of the APNs key.",
+			Flag:        "chat-apns-topic",
+			Env:         "CODER_CHAT_APNS_TOPIC",
+			Value:       &c.AI.Chat.Fork.APNsTopic,
+			Group:       group,
+			YAML:        "apnsTopic",
 		},
 	}
 }

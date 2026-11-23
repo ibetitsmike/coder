@@ -54,6 +54,13 @@ type Querier interface {
 	// after the report, such as a message_agent that resumes the child, starts
 	// new work, so the child counts again. A step's ID is its child chat ID.
 	CountLiveSubagentsInFamily(ctx context.Context, rootChatID uuid.UUID) (int64, error)
+	// Unregisters a device of a user. Deleting a token that is not registered,
+	// or that belongs to another user, deletes nothing.
+	DeleteChatAPNsDevice(ctx context.Context, arg DeleteChatAPNsDeviceParams) error
+	// Deletes a token that APNs reported as no longer valid, unless the device
+	// registered again after not_after, so a newer registration survives a
+	// rejection of an older push.
+	DeleteChatAPNsDeviceByToken(ctx context.Context, arg DeleteChatAPNsDeviceByTokenParams) error
 	DeleteChatExcludedPluginPack(ctx context.Context, arg DeleteChatExcludedPluginPackParams) error
 	DeleteChatFamilyMessagesBefore(ctx context.Context, arg DeleteChatFamilyMessagesBeforeParams) error
 	// DeleteChatNote deletes a note and returns the number of deleted notes.
@@ -125,6 +132,10 @@ type Querier interface {
 	// report that the agent sends again changes nothing. The first event keeps
 	// its fired_at. Returns the chats to poke.
 	FireChatProcessWatches(ctx context.Context, arg FireChatProcessWatchesParams) ([]uuid.UUID, error)
+	// Gets one device of a user.
+	GetChatAPNsDevice(ctx context.Context, arg GetChatAPNsDeviceParams) (ChatApnsDevice, error)
+	// Lists the devices of a user, for a push.
+	GetChatAPNsDevicesByUserID(ctx context.Context, userID uuid.UUID) ([]ChatApnsDevice, error)
 	GetChatFamilyMessageRecipient(ctx context.Context, arg GetChatFamilyMessageRecipientParams) (uuid.UUID, error)
 	GetChatNote(ctx context.Context, arg GetChatNoteParams) (ChatNote, error)
 	GetChatNoteCall(ctx context.Context, arg GetChatNoteCallParams) (ChatNoteCall, error)
@@ -438,6 +449,9 @@ type Querier interface {
 	// delivered wake-up run in an hour bucket from runs_since on, so chats that
 	// only humans drive do not count.
 	SumOrganizationWakeupChatCostMicrosSince(ctx context.Context, arg SumOrganizationWakeupChatCostMicrosSinceParams) (int64, error)
+	// Records the environment that APNs accepted a token in, unless the device
+	// registered again after not_after.
+	UpdateChatAPNsDeviceEnvironment(ctx context.Context, arg UpdateChatAPNsDeviceEnvironmentParams) error
 	UpdateChatSubagentWorkspaceID(ctx context.Context, arg UpdateChatSubagentWorkspaceIDParams) error
 	// Records how a delivery of a wake-up locked by LockActiveChatWakeup ended.
 	UpdateChatWakeupRun(ctx context.Context, arg UpdateChatWakeupRunParams) (ChatWakeup, error)
@@ -494,6 +508,11 @@ type Querier interface {
 	// report to an interrupted run replaces it. A write that changes nothing
 	// returns 0 rows.
 	UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) (int64, error)
+	// Registers an APNs device for a user, or updates it. A token that belonged
+	// to another user moves to this one. It keeps the newest max_devices
+	// registrations of the user: the upserted token plus the newest other
+	// max_devices - 1 rows. It only deletes rows of the same user.
+	UpsertChatAPNsDevice(ctx context.Context, arg UpsertChatAPNsDeviceParams) error
 	// A new question of the chat replaces the old one and is pending. The root
 	// comes from chats.root_chat_id; a chat without one names itself.
 	UpsertChatDescendantQuestion(ctx context.Context, arg UpsertChatDescendantQuestionParams) (ChatDescendantQuestion, error)

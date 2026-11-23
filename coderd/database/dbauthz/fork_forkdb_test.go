@@ -528,6 +528,38 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().DeleteOldChatUserNotifications(gomock.Any(), int32(1000)).Return(int64(2), nil).AnyTimes()
 			check.Args(int32(1000)).Asserts(rbac.ResourceSystem, policy.ActionDelete).Returns(int64(2))
 		},
+		"UpsertChatAPNsDevice": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := testutil.Fake(t, faker, forkdb.UpsertChatAPNsDeviceParams{})
+			arg.MaxDevices = 1
+			fdb.EXPECT().UpsertChatAPNsDevice(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceWebpushSubscription.WithOwner(arg.UserID.String()), policy.ActionCreate).Returns()
+		},
+		"GetChatAPNsDevice": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			device := testutil.Fake(t, faker, forkdb.ChatApnsDevice{})
+			arg := forkdb.GetChatAPNsDeviceParams{UserID: device.UserID, DeviceToken: device.DeviceToken}
+			fdb.EXPECT().GetChatAPNsDevice(gomock.Any(), arg).Return(device, nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceWebpushSubscription.WithOwner(device.UserID.String()), policy.ActionRead).Returns(device)
+		},
+		"GetChatAPNsDevicesByUserID": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			device := testutil.Fake(t, faker, forkdb.ChatApnsDevice{})
+			fdb.EXPECT().GetChatAPNsDevicesByUserID(gomock.Any(), device.UserID).Return([]forkdb.ChatApnsDevice{device}, nil).AnyTimes()
+			check.Args(device.UserID).Asserts(rbac.ResourceWebpushSubscription.WithOwner(device.UserID.String()), policy.ActionRead).Returns([]forkdb.ChatApnsDevice{device})
+		},
+		"DeleteChatAPNsDevice": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := testutil.Fake(t, faker, forkdb.DeleteChatAPNsDeviceParams{})
+			fdb.EXPECT().DeleteChatAPNsDevice(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceWebpushSubscription.WithOwner(arg.UserID.String()), policy.ActionDelete).Returns()
+		},
+		"DeleteChatAPNsDeviceByToken": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := testutil.Fake(t, faker, forkdb.DeleteChatAPNsDeviceByTokenParams{})
+			fdb.EXPECT().DeleteChatAPNsDeviceByToken(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceWebpushSubscription, policy.ActionDelete).Returns()
+		},
+		"UpdateChatAPNsDeviceEnvironment": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := testutil.Fake(t, faker, forkdb.UpdateChatAPNsDeviceEnvironmentParams{})
+			fdb.EXPECT().UpdateChatAPNsDeviceEnvironment(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceWebpushSubscription, policy.ActionCreate).Returns()
+		},
 		"InsertPluginPack": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			pack := testutil.Fake(t, faker, forkdb.PluginPack{})
 			arg := forkdb.InsertPluginPackParams{ID: pack.ID, OrganizationID: pack.OrganizationID, Name: pack.Name}

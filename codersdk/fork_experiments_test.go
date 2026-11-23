@@ -37,6 +37,7 @@ func TestForkExperimentDisplayNames(t *testing.T) {
 	t.Parallel()
 
 	require.Equal(t, "Fork HTML Attachments", codersdk.ExperimentForkHTMLAttachments.DisplayName())
+	require.Equal(t, "Fork APNs Push", codersdk.ExperimentForkAPNsPush.DisplayName())
 	// A fork experiment without its own name keeps the title-cased default.
 	require.Equal(t, "Fork Chat Todos", codersdk.ExperimentForkChatTodos.DisplayName())
 }

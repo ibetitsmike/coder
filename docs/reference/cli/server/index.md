@@ -2313,3 +2313,43 @@ Maximum number of running subagent chats under one root chat when the fork-neste
 | Default     | <code>0</code>                                         |
 
 Maximum number of live subagent chats under one root chat when the fork-nested-subagents experiment is enabled. A live subagent has not finished and is not archived. Spawning a subagent, or resuming a finished one with message_agent, fails at the limit. 0 means no limit. An organization can set a lower value.
+
+### --chat-apns-key-file
+
+| Property    | Value                                  |
+|-------------|----------------------------------------|
+| Type        | <code>string</code>                    |
+| Environment | <code>$CODER_CHAT_APNS_KEY_FILE</code> |
+| YAML        | <code>chat.apnsKeyFile</code>          |
+
+Path of the APNs auth key (.p8) that signs the chat pushes sent to the iOS app when the fork-apns-push experiment is enabled. Empty turns APNs off. Needs --chat-apns-key-id, --chat-apns-team-id and --chat-apns-topic.
+
+### --chat-apns-key-id
+
+| Property    | Value                                |
+|-------------|--------------------------------------|
+| Type        | <code>string</code>                  |
+| Environment | <code>$CODER_CHAT_APNS_KEY_ID</code> |
+| YAML        | <code>chat.apnsKeyID</code>          |
+
+The 10-character ID of the APNs auth key in --chat-apns-key-file.
+
+### --chat-apns-team-id
+
+| Property    | Value                                 |
+|-------------|---------------------------------------|
+| Type        | <code>string</code>                   |
+| Environment | <code>$CODER_CHAT_APNS_TEAM_ID</code> |
+| YAML        | <code>chat.apnsTeamID</code>          |
+
+The Apple Developer team ID that owns the APNs auth key in --chat-apns-key-file.
+
+### --chat-apns-topic
+
+| Property    | Value                               |
+|-------------|-------------------------------------|
+| Type        | <code>string</code>                 |
+| Environment | <code>$CODER_CHAT_APNS_TOPIC</code> |
+| YAML        | <code>chat.apnsTopic</code>         |
+
+The bundle ID of the iOS app that receives the chat pushes. The app must belong to the team of the APNs key.

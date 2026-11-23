@@ -268,6 +268,23 @@ AI GATEWAY PROXY OPTIONS:
 CHAT OPTIONS: 
 Configure the background chat processing daemon.
 
+      --chat-apns-key-file string, $CODER_CHAT_APNS_KEY_FILE
+          Path of the APNs auth key (.p8) that signs the chat pushes sent to the
+          iOS app when the fork-apns-push experiment is enabled. Empty turns
+          APNs off. Needs --chat-apns-key-id, --chat-apns-team-id and
+          --chat-apns-topic.
+
+      --chat-apns-key-id string, $CODER_CHAT_APNS_KEY_ID
+          The 10-character ID of the APNs auth key in --chat-apns-key-file.
+
+      --chat-apns-team-id string, $CODER_CHAT_APNS_TEAM_ID
+          The Apple Developer team ID that owns the APNs auth key in
+          --chat-apns-key-file.
+
+      --chat-apns-topic string, $CODER_CHAT_APNS_TOPIC
+          The bundle ID of the iOS app that receives the chat pushes. The app
+          must belong to the team of the APNs key.
+
       --chat-debug-logging-enabled bool, $CODER_CHAT_DEBUG_LOGGING_ENABLED (default: false)
           Force chat debug logging on for every chat, bypassing the runtime
           admin and user opt-in settings.

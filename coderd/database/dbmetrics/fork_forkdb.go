@@ -926,3 +926,33 @@ func (f forkQueryMetricsStore) UpdateUserSavedWorkflowByName(ctx context.Context
 	defer f.observe(ctx, "UpdateUserSavedWorkflowByName", time.Now())
 	return f.s.UpdateUserSavedWorkflowByName(ctx, arg)
 }
+
+func (f forkQueryMetricsStore) UpsertChatAPNsDevice(ctx context.Context, arg forkdb.UpsertChatAPNsDeviceParams) error {
+	defer f.observe(ctx, "UpsertChatAPNsDevice", time.Now())
+	return f.s.UpsertChatAPNsDevice(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) GetChatAPNsDevice(ctx context.Context, arg forkdb.GetChatAPNsDeviceParams) (forkdb.ChatApnsDevice, error) {
+	defer f.observe(ctx, "GetChatAPNsDevice", time.Now())
+	return f.s.GetChatAPNsDevice(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) GetChatAPNsDevicesByUserID(ctx context.Context, userID uuid.UUID) ([]forkdb.ChatApnsDevice, error) {
+	defer f.observe(ctx, "GetChatAPNsDevicesByUserID", time.Now())
+	return f.s.GetChatAPNsDevicesByUserID(ctx, userID)
+}
+
+func (f forkQueryMetricsStore) DeleteChatAPNsDevice(ctx context.Context, arg forkdb.DeleteChatAPNsDeviceParams) error {
+	defer f.observe(ctx, "DeleteChatAPNsDevice", time.Now())
+	return f.s.DeleteChatAPNsDevice(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) DeleteChatAPNsDeviceByToken(ctx context.Context, arg forkdb.DeleteChatAPNsDeviceByTokenParams) error {
+	defer f.observe(ctx, "DeleteChatAPNsDeviceByToken", time.Now())
+	return f.s.DeleteChatAPNsDeviceByToken(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) UpdateChatAPNsDeviceEnvironment(ctx context.Context, arg forkdb.UpdateChatAPNsDeviceEnvironmentParams) error {
+	defer f.observe(ctx, "UpdateChatAPNsDeviceEnvironment", time.Now())
+	return f.s.UpdateChatAPNsDeviceEnvironment(ctx, arg)
+}
