@@ -65,8 +65,6 @@ export const getQueuedMessageInfo = (
 			(part.text?.trim() ||
 				(previewParts.length > 0 && part.text?.includes("\n")))
 		) {
-			// A family envelope wraps the sender's body; the preview shows the
-			// body's first line, not the envelope's.
 			const familyMessage =
 				previewParts.length === 0 ? parseFamilyMessage(part.text) : undefined;
 			previewParts.push({
