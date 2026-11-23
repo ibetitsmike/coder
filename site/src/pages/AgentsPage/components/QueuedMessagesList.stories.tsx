@@ -159,7 +159,6 @@ export const AsyncQuestionAnswer: Story = {
 	},
 };
 
-// A queued family message previews the sender's body, not the envelope.
 export const FamilyMessage: Story = {
 	args: {
 		messages: [buildMessage(1, MockFamilyMessage.content ?? [])],
