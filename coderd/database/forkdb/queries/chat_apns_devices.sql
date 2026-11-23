@@ -52,14 +52,19 @@ DELETE FROM chat_apns_devices
 WHERE user_id = @user_id
     AND device_token = @device_token;
 
--- Deletes a token that APNs reported as no longer valid.
+-- Deletes a token that APNs reported as no longer valid, unless the device
+-- registered again after not_after, so a newer registration survives a
+-- rejection of an older push.
 -- name: DeleteChatAPNsDeviceByToken :exec
 DELETE FROM chat_apns_devices
-WHERE device_token = @device_token;
+WHERE device_token = @device_token
+    AND updated_at <= @not_after;
 
--- Records the environment that APNs accepted a token in.
+-- Records the environment that APNs accepted a token in, unless the device
+-- registered again after not_after.
 -- name: UpdateChatAPNsDeviceEnvironment :exec
 UPDATE chat_apns_devices
 SET environment = @environment,
     updated_at = @updated_at
-WHERE device_token = @device_token;
+WHERE device_token = @device_token
+    AND updated_at <= @not_after;

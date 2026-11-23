@@ -947,9 +947,9 @@ func (f forkQueryMetricsStore) DeleteChatAPNsDevice(ctx context.Context, arg for
 	return f.s.DeleteChatAPNsDevice(ctx, arg)
 }
 
-func (f forkQueryMetricsStore) DeleteChatAPNsDeviceByToken(ctx context.Context, deviceToken string) error {
+func (f forkQueryMetricsStore) DeleteChatAPNsDeviceByToken(ctx context.Context, arg forkdb.DeleteChatAPNsDeviceByTokenParams) error {
 	defer f.observe(ctx, "DeleteChatAPNsDeviceByToken", time.Now())
-	return f.s.DeleteChatAPNsDeviceByToken(ctx, deviceToken)
+	return f.s.DeleteChatAPNsDeviceByToken(ctx, arg)
 }
 
 func (f forkQueryMetricsStore) UpdateChatAPNsDeviceEnvironment(ctx context.Context, arg forkdb.UpdateChatAPNsDeviceEnvironmentParams) error {

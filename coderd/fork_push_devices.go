@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"net/http"
+	"strings"
 
 	"golang.org/x/xerrors"
 
@@ -15,6 +16,8 @@ import (
 	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/httpapi"
 	"github.com/coder/coder/v2/coderd/httpmw"
+	"github.com/coder/coder/v2/coderd/rbac"
+	"github.com/coder/coder/v2/coderd/rbac/policy"
 	"github.com/coder/coder/v2/codersdk"
 )
 
@@ -40,7 +43,8 @@ func (api *API) postForkChatAPNsDevice(rw http.ResponseWriter, r *http.Request) 
 	if !httpapi.Read(ctx, rw, r, &req) {
 		return
 	}
-	if !validForkAPNsToken(rw, r, req.DeviceToken) {
+	token, ok := canonicalForkAPNsToken(rw, r, req.DeviceToken)
+	if !ok {
 		return
 	}
 	switch req.Environment {
@@ -58,7 +62,7 @@ func (api *API) postForkChatAPNsDevice(rw http.ResponseWriter, r *http.Request) 
 		return
 	}
 	err = fdb.UpsertChatAPNsDevice(ctx, forkdb.UpsertChatAPNsDeviceParams{
-		DeviceToken:   req.DeviceToken,
+		DeviceToken:   token,
 		UserID:        httpmw.APIKey(r).UserID,
 		Environment:   string(req.Environment),
 		FinishedTurns: req.FinishedTurns,
@@ -96,7 +100,8 @@ func (api *API) deleteForkChatAPNsDevice(rw http.ResponseWriter, r *http.Request
 	if !httpapi.Read(ctx, rw, r, &req) {
 		return
 	}
-	if !validForkAPNsToken(rw, r, req.DeviceToken) {
+	token, ok := canonicalForkAPNsToken(rw, r, req.DeviceToken)
+	if !ok {
 		return
 	}
 	fdb, err := forkdb.From(api.Database)
@@ -106,7 +111,7 @@ func (api *API) deleteForkChatAPNsDevice(rw http.ResponseWriter, r *http.Request
 	}
 	err = fdb.DeleteChatAPNsDevice(ctx, forkdb.DeleteChatAPNsDeviceParams{
 		UserID:      httpmw.APIKey(r).UserID,
-		DeviceToken: req.DeviceToken,
+		DeviceToken: token,
 	})
 	if dbauthz.IsNotAuthorizedError(err) {
 		httpapi.Forbidden(rw)
@@ -137,7 +142,15 @@ func (api *API) postForkChatAPNsDeviceTest(rw http.ResponseWriter, r *http.Reque
 	if !httpapi.Read(ctx, rw, r, &req) {
 		return
 	}
-	if !validForkAPNsToken(rw, r, req.DeviceToken) {
+	token, ok := canonicalForkAPNsToken(rw, r, req.DeviceToken)
+	if !ok {
+		return
+	}
+	userID := httpmw.APIKey(r).UserID
+	// The push below runs as the notifier, so the caller must be allowed to
+	// send themselves a notification, like upstream's web push test.
+	if !api.Authorize(r, policy.ActionCreate, rbac.ResourceNotificationMessage.WithOwner(userID.String())) {
+		httpapi.Forbidden(rw)
 		return
 	}
 	fdb, err := forkdb.From(api.Database)
@@ -146,8 +159,8 @@ func (api *API) postForkChatAPNsDeviceTest(rw http.ResponseWriter, r *http.Reque
 		return
 	}
 	device, err := fdb.GetChatAPNsDevice(ctx, forkdb.GetChatAPNsDeviceParams{
-		UserID:      httpmw.APIKey(r).UserID,
-		DeviceToken: req.DeviceToken,
+		UserID:      userID,
+		DeviceToken: token,
 	})
 	if xerrors.Is(err, sql.ErrNoRows) {
 		httpapi.Write(ctx, rw, http.StatusNotFound, codersdk.Response{
@@ -198,13 +211,16 @@ func (api *API) forkAPNsConfigured(rw http.ResponseWriter, r *http.Request) bool
 	return false
 }
 
-func validForkAPNsToken(rw http.ResponseWriter, r *http.Request, token string) bool {
+// canonicalForkAPNsToken validates a device token and returns it in lower
+// case hex, the one form the table stores, so the same device never has two
+// rows.
+func canonicalForkAPNsToken(rw http.ResponseWriter, r *http.Request, token string) (string, bool) {
 	if _, err := hex.DecodeString(token); err == nil && token != "" && len(token) <= forkAPNsMaxTokenLength {
-		return true
+		return strings.ToLower(token), true
 	}
 	httpapi.Write(r.Context(), rw, http.StatusBadRequest, codersdk.Response{
 		Message: "Invalid device token.",
 		Detail:  "device_token must be the APNs device token in hex.",
 	})
-	return false
+	return "", false
 }

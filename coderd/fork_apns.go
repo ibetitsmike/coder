@@ -100,15 +100,31 @@ func parseForkAPNsKey(data []byte) (*ecdsa.PrivateKey, error) {
 	return key, nil
 }
 
-// providerToken returns the signed provider token, made again when it is
-// older than forkAPNsTokenLifetime or when refresh is set.
-func (c *forkAPNsClient) providerToken(refresh bool) (string, error) {
+// providerToken returns the cached signed provider token, made again when
+// it is older than forkAPNsTokenLifetime.
+func (c *forkAPNsClient) providerToken() (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	now := c.clock.Now()
-	if !refresh && c.token != "" && now.Sub(c.issuedAt) < forkAPNsTokenLifetime {
+	if c.token != "" && c.clock.Now().Sub(c.issuedAt) < forkAPNsTokenLifetime {
 		return c.token, nil
 	}
+	return c.signTokenLocked(c.clock.Now())
+}
+
+// refreshProviderToken re-signs the provider token only when stale is the
+// one it holds, so pushes that saw the same expired token rotate it once.
+// Otherwise it returns the cached token.
+func (c *forkAPNsClient) refreshProviderToken(stale string) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.token != stale {
+		return c.token, nil
+	}
+	return c.signTokenLocked(c.clock.Now())
+}
+
+// signTokenLocked signs a provider token and caches it. c.mu must be held.
+func (c *forkAPNsClient) signTokenLocked(now time.Time) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
 		"iss": c.teamID,
 		"iat": now.Unix(),
@@ -184,12 +200,16 @@ type forkAPNsResponse struct {
 	Status int
 	// Reason is APNs's error reason, such as "BadDeviceToken".
 	Reason string
+	// Timestamp is when APNs last confirmed the token was invalid, set on
+	// a 410.
+	Timestamp time.Time
 }
 
 func (r forkAPNsResponse) ok() bool { return r.Status == http.StatusOK }
 
 // send sends a push to one device. An error means the push never reached
-// APNs; a reached APNs answers with a response, rejected or not.
+// APNs; a reached APNs answers with a response, rejected or not. A push
+// rejected for an expired token retries once with a freshly signed one.
 func (c *forkAPNsClient) send(ctx context.Context, env codersdk.ChatAPNsEnvironment, deviceToken string, push forkAPNsPush) (forkAPNsResponse, error) {
 	baseURL, ok := c.baseURLs[env]
 	if !ok {
@@ -199,21 +219,26 @@ func (c *forkAPNsClient) send(ctx context.Context, env codersdk.ChatAPNsEnvironm
 	if err != nil {
 		return forkAPNsResponse{}, err
 	}
-	res, err := c.post(ctx, baseURL, deviceToken, push.ChatID, payload, false)
+	token, err := c.providerToken()
+	if err != nil {
+		return forkAPNsResponse{}, err
+	}
+	res, err := c.post(ctx, baseURL, deviceToken, push.ChatID, payload, token)
 	if err != nil {
 		return forkAPNsResponse{}, err
 	}
 	if res.Status == http.StatusForbidden && res.Reason == "ExpiredProviderToken" {
-		return c.post(ctx, baseURL, deviceToken, push.ChatID, payload, true)
+		refreshed, err := c.refreshProviderToken(token)
+		if err != nil {
+			return forkAPNsResponse{}, err
+		}
+		return c.post(ctx, baseURL, deviceToken, push.ChatID, payload, refreshed)
 	}
 	return res, nil
 }
 
-func (c *forkAPNsClient) post(ctx context.Context, baseURL, deviceToken, collapseID string, payload []byte, refreshToken bool) (forkAPNsResponse, error) {
-	token, err := c.providerToken(refreshToken)
-	if err != nil {
-		return forkAPNsResponse{}, err
-	}
+// post sends the payload with the given provider token.
+func (c *forkAPNsClient) post(ctx context.Context, baseURL, deviceToken, collapseID string, payload []byte, token string) (forkAPNsResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/3/device/"+deviceToken, bytes.NewReader(payload))
 	if err != nil {
 		return forkAPNsResponse{}, xerrors.Errorf("build APNs request: %w", err)
@@ -240,10 +265,14 @@ func (c *forkAPNsClient) post(ctx context.Context, baseURL, deviceToken, collaps
 	response := forkAPNsResponse{Status: res.StatusCode}
 	if res.StatusCode != http.StatusOK {
 		var body struct {
-			Reason string `json:"reason"`
+			Reason    string `json:"reason"`
+			Timestamp int64  `json:"timestamp"`
 		}
 		_ = json.NewDecoder(io.LimitReader(res.Body, 4096)).Decode(&body)
 		response.Reason = body.Reason
+		if body.Timestamp > 0 {
+			response.Timestamp = time.UnixMilli(body.Timestamp)
+		}
 	}
 	return response, nil
 }

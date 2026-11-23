@@ -206,17 +206,17 @@ func (mr *MockStoreMockRecorder) DeleteChatAPNsDevice(ctx, arg any) *gomock.Call
 }
 
 // DeleteChatAPNsDeviceByToken mocks base method.
-func (m *MockStore) DeleteChatAPNsDeviceByToken(ctx context.Context, deviceToken string) error {
+func (m *MockStore) DeleteChatAPNsDeviceByToken(ctx context.Context, arg forkdb.DeleteChatAPNsDeviceByTokenParams) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteChatAPNsDeviceByToken", ctx, deviceToken)
+	ret := m.ctrl.Call(m, "DeleteChatAPNsDeviceByToken", ctx, arg)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // DeleteChatAPNsDeviceByToken indicates an expected call of DeleteChatAPNsDeviceByToken.
-func (mr *MockStoreMockRecorder) DeleteChatAPNsDeviceByToken(ctx, deviceToken any) *gomock.Call {
+func (mr *MockStoreMockRecorder) DeleteChatAPNsDeviceByToken(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChatAPNsDeviceByToken", reflect.TypeOf((*MockStore)(nil).DeleteChatAPNsDeviceByToken), ctx, deviceToken)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChatAPNsDeviceByToken", reflect.TypeOf((*MockStore)(nil).DeleteChatAPNsDeviceByToken), ctx, arg)
 }
 
 // DeleteChatExcludedPluginPack mocks base method.

@@ -33,11 +33,19 @@ func (q *Queries) DeleteChatAPNsDevice(ctx context.Context, arg DeleteChatAPNsDe
 const deleteChatAPNsDeviceByToken = `-- name: DeleteChatAPNsDeviceByToken :exec
 DELETE FROM chat_apns_devices
 WHERE device_token = $1
+    AND updated_at <= $2
 `
 
-// Deletes a token that APNs reported as no longer valid.
-func (q *Queries) DeleteChatAPNsDeviceByToken(ctx context.Context, deviceToken string) error {
-	_, err := q.db.ExecContext(ctx, deleteChatAPNsDeviceByToken, deviceToken)
+type DeleteChatAPNsDeviceByTokenParams struct {
+	DeviceToken string    `db:"device_token" json:"device_token"`
+	NotAfter    time.Time `db:"not_after" json:"not_after"`
+}
+
+// Deletes a token that APNs reported as no longer valid, unless the device
+// registered again after not_after, so a newer registration survives a
+// rejection of an older push.
+func (q *Queries) DeleteChatAPNsDeviceByToken(ctx context.Context, arg DeleteChatAPNsDeviceByTokenParams) error {
+	_, err := q.db.ExecContext(ctx, deleteChatAPNsDeviceByToken, arg.DeviceToken, arg.NotAfter)
 	return err
 }
 
@@ -117,17 +125,25 @@ UPDATE chat_apns_devices
 SET environment = $1,
     updated_at = $2
 WHERE device_token = $3
+    AND updated_at <= $4
 `
 
 type UpdateChatAPNsDeviceEnvironmentParams struct {
 	Environment string    `db:"environment" json:"environment"`
 	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
 	DeviceToken string    `db:"device_token" json:"device_token"`
+	NotAfter    time.Time `db:"not_after" json:"not_after"`
 }
 
-// Records the environment that APNs accepted a token in.
+// Records the environment that APNs accepted a token in, unless the device
+// registered again after not_after.
 func (q *Queries) UpdateChatAPNsDeviceEnvironment(ctx context.Context, arg UpdateChatAPNsDeviceEnvironmentParams) error {
-	_, err := q.db.ExecContext(ctx, updateChatAPNsDeviceEnvironment, arg.Environment, arg.UpdatedAt, arg.DeviceToken)
+	_, err := q.db.ExecContext(ctx, updateChatAPNsDeviceEnvironment,
+		arg.Environment,
+		arg.UpdatedAt,
+		arg.DeviceToken,
+		arg.NotAfter,
+	)
 	return err
 }
 

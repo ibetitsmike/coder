@@ -232,6 +232,7 @@ func (d *forkPushDispatcher) sendToDevice(ctx context.Context, fdb forkdb.Store,
 				DeviceToken: device.DeviceToken,
 				Environment: string(other),
 				UpdatedAt:   d.apns.clock.Now(),
+				NotAfter:    device.UpdatedAt,
 			}); err != nil {
 				logger.Warn(ctx, "update APNs device environment", slog.Error(err))
 			}
@@ -243,13 +244,26 @@ func (d *forkPushDispatcher) sendToDevice(ctx context.Context, fdb forkdb.Store,
 	case res.ok():
 	case res.Status == http.StatusGone || (res.Status == http.StatusBadRequest && res.Reason == "BadDeviceToken"):
 		logger.Info(ctx, "APNs rejected the device token, deleting it", slog.F("response", res.String()))
-		if err := fdb.DeleteChatAPNsDeviceByToken(ctx, device.DeviceToken); err != nil {
+		if err := fdb.DeleteChatAPNsDeviceByToken(ctx, forkdb.DeleteChatAPNsDeviceByTokenParams{
+			DeviceToken: device.DeviceToken,
+			NotAfter:    forkAPNsDeleteNotAfter(device, res),
+		}); err != nil {
 			logger.Warn(ctx, "delete APNs device", slog.Error(err))
 		}
 	default:
 		logger.Warn(ctx, "APNs rejected the push", slog.F("response", res.String()))
 	}
 	return res, nil
+}
+
+// forkAPNsDeleteNotAfter bounds the delete of a rejected token: a device that
+// registered again after the row this push read, or after the time APNs gave
+// for the token going invalid, keeps its row.
+func forkAPNsDeleteNotAfter(device forkdb.ChatApnsDevice, res forkAPNsResponse) time.Time {
+	if !res.Timestamp.IsZero() && res.Timestamp.Before(device.UpdatedAt) {
+		return res.Timestamp
+	}
+	return device.UpdatedAt
 }
 
 // forkPushChatID reads the chat of a chatd push from its /agents/<id> URL.

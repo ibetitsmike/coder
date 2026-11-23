@@ -1608,11 +1608,11 @@ func (f *forkQuerier) DeleteChatAPNsDevice(ctx context.Context, arg forkdb.Delet
 
 // DeleteChatAPNsDeviceByToken names no owner, so it needs site-wide delete,
 // which only the notifier has.
-func (f *forkQuerier) DeleteChatAPNsDeviceByToken(ctx context.Context, deviceToken string) error {
+func (f *forkQuerier) DeleteChatAPNsDeviceByToken(ctx context.Context, arg forkdb.DeleteChatAPNsDeviceByTokenParams) error {
 	if err := f.q.authorizeContext(ctx, policy.ActionDelete, rbac.ResourceWebpushSubscription); err != nil {
 		return err
 	}
-	return f.db.DeleteChatAPNsDeviceByToken(ctx, deviceToken)
+	return f.db.DeleteChatAPNsDeviceByToken(ctx, arg)
 }
 
 // UpdateChatAPNsDeviceEnvironment names no owner, so it needs site-wide

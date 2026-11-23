@@ -549,9 +549,10 @@ func TestForkQuerier(t *testing.T) {
 			fdb.EXPECT().DeleteChatAPNsDevice(gomock.Any(), arg).Return(nil).AnyTimes()
 			check.Args(arg).Asserts(rbac.ResourceWebpushSubscription.WithOwner(arg.UserID.String()), policy.ActionDelete).Returns()
 		},
-		"DeleteChatAPNsDeviceByToken": func(_ *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, _ *gofakeit.Faker, check *expects) {
-			fdb.EXPECT().DeleteChatAPNsDeviceByToken(gomock.Any(), "token").Return(nil).AnyTimes()
-			check.Args("token").Asserts(rbac.ResourceWebpushSubscription, policy.ActionDelete).Returns()
+		"DeleteChatAPNsDeviceByToken": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			arg := testutil.Fake(t, faker, forkdb.DeleteChatAPNsDeviceByTokenParams{})
+			fdb.EXPECT().DeleteChatAPNsDeviceByToken(gomock.Any(), arg).Return(nil).AnyTimes()
+			check.Args(arg).Asserts(rbac.ResourceWebpushSubscription, policy.ActionDelete).Returns()
 		},
 		"UpdateChatAPNsDeviceEnvironment": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			arg := testutil.Fake(t, faker, forkdb.UpdateChatAPNsDeviceEnvironmentParams{})

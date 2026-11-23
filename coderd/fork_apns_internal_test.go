@@ -48,6 +48,8 @@ type fakeAPNsRequest struct {
 type fakeAPNsAnswer struct {
 	Status int
 	Reason string
+	// Timestamp becomes the 410 body timestamp when not zero.
+	Timestamp time.Time
 }
 
 func newFakeAPNs(t *testing.T) *fakeAPNs {
@@ -77,7 +79,11 @@ func (f *fakeAPNs) serve(rw http.ResponseWriter, r *http.Request) {
 	if answer.Status != http.StatusOK {
 		rw.Header().Set("Content-Type", "application/json")
 		rw.WriteHeader(answer.Status)
-		_ = json.NewEncoder(rw).Encode(map[string]string{"reason": answer.Reason})
+		body := map[string]any{"reason": answer.Reason}
+		if !answer.Timestamp.IsZero() {
+			body["timestamp"] = answer.Timestamp.UnixMilli()
+		}
+		_ = json.NewEncoder(rw).Encode(body)
 		return
 	}
 	rw.WriteHeader(http.StatusOK)
@@ -232,6 +238,30 @@ func TestForkChatAPNsClientProviderToken(t *testing.T) {
 	require.NotEqual(t, bearer(3), bearer(4))
 }
 
+// TestForkChatAPNsClientRefreshesAnExpiredTokenOnce coalesces refreshes:
+// callers that saw the same stale token share one re-signed token.
+func TestForkChatAPNsClientRefreshesAnExpiredTokenOnce(t *testing.T) {
+	t.Parallel()
+	clock := quartz.NewMock(t)
+	client, _ := newTestForkAPNsClient(t, newFakeAPNs(t), clock)
+
+	stale, err := client.providerToken()
+	require.NoError(t, err)
+	// iat holds seconds, so the mock clock moves before a re-signing.
+	clock.Advance(time.Second)
+
+	first, err := client.refreshProviderToken(stale)
+	require.NoError(t, err)
+	require.NotEqual(t, stale, first, "the stale token is re-signed")
+	second, err := client.refreshProviderToken(stale)
+	require.NoError(t, err)
+	require.Equal(t, first, second, "a second caller of the same stale token gets the refreshed one")
+
+	other, err := client.refreshProviderToken("not the cached token")
+	require.NoError(t, err)
+	require.Equal(t, first, other, "a token that is not the cached one is not re-signed")
+}
+
 func TestForkChatAPNsClientRejections(t *testing.T) {
 	t.Parallel()
 	fake := newFakeAPNs(t)
@@ -248,6 +278,22 @@ func TestForkChatAPNsClientRejections(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, forkAPNsResponse{Status: answer.Status, Reason: answer.Reason}, res)
 	}
+}
+
+// TestForkChatAPNsClientUnregisteredTimestamp checks that the 410 body
+// timestamp lands on the response as a time.Time.
+func TestForkChatAPNsClientUnregisteredTimestamp(t *testing.T) {
+	t.Parallel()
+	fake := newFakeAPNs(t)
+	client, _ := newTestForkAPNsClient(t, fake, quartz.NewMock(t))
+
+	want := time.UnixMilli(1700000000000)
+	fake.answer(fakeAPNsAnswer{Status: http.StatusGone, Reason: "Unregistered", Timestamp: want})
+	res, err := client.send(testutil.Context(t, testutil.WaitShort), codersdk.ChatAPNsEnvironmentSandbox, testAPNsToken, forkAPNsPush{Title: "t", Body: "b"})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusGone, res.Status)
+	require.Equal(t, "Unregistered", res.Reason)
+	require.True(t, res.Timestamp.Equal(want), "the 410 carries the timestamp APNs sent")
 }
 
 func TestForkChatAPNsClientNeverLogsTheToken(t *testing.T) {

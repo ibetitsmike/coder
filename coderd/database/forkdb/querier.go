@@ -57,8 +57,10 @@ type Querier interface {
 	// Unregisters a device of a user. Deleting a token that is not registered,
 	// or that belongs to another user, deletes nothing.
 	DeleteChatAPNsDevice(ctx context.Context, arg DeleteChatAPNsDeviceParams) error
-	// Deletes a token that APNs reported as no longer valid.
-	DeleteChatAPNsDeviceByToken(ctx context.Context, deviceToken string) error
+	// Deletes a token that APNs reported as no longer valid, unless the device
+	// registered again after not_after, so a newer registration survives a
+	// rejection of an older push.
+	DeleteChatAPNsDeviceByToken(ctx context.Context, arg DeleteChatAPNsDeviceByTokenParams) error
 	DeleteChatExcludedPluginPack(ctx context.Context, arg DeleteChatExcludedPluginPackParams) error
 	DeleteChatFamilyMessagesBefore(ctx context.Context, arg DeleteChatFamilyMessagesBeforeParams) error
 	// DeleteChatNote deletes a note and returns the number of deleted notes.
@@ -447,7 +449,8 @@ type Querier interface {
 	// delivered wake-up run in an hour bucket from runs_since on, so chats that
 	// only humans drive do not count.
 	SumOrganizationWakeupChatCostMicrosSince(ctx context.Context, arg SumOrganizationWakeupChatCostMicrosSinceParams) (int64, error)
-	// Records the environment that APNs accepted a token in.
+	// Records the environment that APNs accepted a token in, unless the device
+	// registered again after not_after.
 	UpdateChatAPNsDeviceEnvironment(ctx context.Context, arg UpdateChatAPNsDeviceEnvironmentParams) error
 	UpdateChatSubagentWorkspaceID(ctx context.Context, arg UpdateChatSubagentWorkspaceIDParams) error
 	// Records how a delivery of a wake-up locked by LockActiveChatWakeup ended.
