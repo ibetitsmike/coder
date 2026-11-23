@@ -11148,11 +11148,11 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 
 ### Properties
 
-| Name                   | Type            | Required | Restrictions | Description                                                                                                                                                                                 |
-|------------------------|-----------------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `live_subagents`       | integer         | false    |              | Live subagents counts the unarchived subagents that have not finished: status running, interrupting, requires_action or paused.                                                             |
-| `max_live_subagents`   | integer         | false    |              | Max live subagents is the family's live subagent limit in force. 0 means no limit. A spawn, or a message_agent that resumes a finished subagent, fails while LiveSubagents is at the limit. |
-| `waiting_for_capacity` | array of string | false    |              | Waiting for capacity lists the running subagents that no worker owns because a deployment, organization or family concurrency limit is full.                                                |
+| Name                   | Type            | Required | Restrictions | Description                                                                                                                                                                                                                                                                                                       |
+|------------------------|-----------------|----------|--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `live_subagents`       | integer         | false    |              | Live subagents counts the unarchived subagent chats in the family of a root chat that have not finished: status running, interrupting, requires_action or paused. A workflow step child whose step is reported counts as finished until a user message, such as a message_agent resume, arrives after the report. |
+| `max_live_subagents`   | integer         | false    |              | Max live subagents is the family's live subagent limit in force. 0 means no limit. A spawn, or a message_agent that resumes a finished subagent, fails while LiveSubagents is at the limit.                                                                                                                       |
+| `waiting_for_capacity` | array of string | false    |              | Waiting for capacity lists the running subagents that no worker owns because a deployment, organization or family concurrency limit is full.                                                                                                                                                                      |
 
 ## codersdk.ForkEnabledPluginPack
 

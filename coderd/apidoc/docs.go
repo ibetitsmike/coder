@@ -31667,7 +31667,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "live_subagents": {
-                    "description": "LiveSubagents counts the unarchived subagents that have not finished:\nstatus running, interrupting, requires_action or paused.",
+                    "description": "LiveSubagents counts the unarchived subagent chats in the family of\na root chat that have not finished: status running, interrupting,\nrequires_action or paused. A workflow step child whose step is\nreported counts as finished until a user message, such as a\nmessage_agent resume, arrives after the report.",
                     "type": "integer",
                     "example": 3
                 },
