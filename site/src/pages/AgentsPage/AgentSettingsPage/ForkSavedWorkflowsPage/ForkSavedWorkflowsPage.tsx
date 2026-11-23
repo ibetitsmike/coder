@@ -20,8 +20,6 @@ import { orgSearchParam } from "#/pages/AISettingsPage/MCPServersPage/organizati
 import { SectionHeader } from "../../components/SectionHeader";
 import { readOnlySkillAccess } from "../../utils/skills";
 
-// The server computes the caller's rights on each row, so edit and delete
-// follow the returned permissions instead of a guess from the author.
 const permissionsRowAccess = (workflow: ForkSavedWorkflowMetadata) => ({
 	create: false,
 	update: workflow.permissions.update,
@@ -150,8 +148,6 @@ const ForkSavedWorkflowsPage: React.FC = () => {
 			<ForkSavedWorkflowsTable
 				scope={{ tier: "user", organizationId: organization.id }}
 				canShare
-				// Members can always create personal workflows, and the
-				// server's permissions decide the rest of each row.
 				access={{ create: true, update: false, delete: false }}
 				rowAccess={permissionsRowAccess}
 			/>

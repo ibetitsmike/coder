@@ -31,6 +31,24 @@ export const MockForkSavedWorkflowMetadata: ForkSavedWorkflowMetadata = {
 	permissions: { update: true, delete: true, share: true },
 };
 
+/** A personal workflow the server grants no rights on. */
+export const MockForkLockedSavedWorkflowMetadata: ForkSavedWorkflowMetadata = {
+	...MockForkSavedWorkflowMetadata,
+	id: "saved-workflow-locked",
+	name: "locked-workflow",
+	description: "The server returned no rights for this one.",
+	permissions: { update: false, delete: false, share: false },
+};
+
+/** A personal workflow the caller can delete but not edit or share. */
+export const MockForkDeleteOnlySavedWorkflowMetadata: ForkSavedWorkflowMetadata =
+	{
+		...MockForkSavedWorkflowMetadata,
+		id: "saved-workflow-delete-only",
+		name: "delete-only-workflow",
+		permissions: { update: false, delete: true, share: false },
+	};
+
 export const MockForkSavedWorkflow: ForkSavedWorkflow = {
 	...MockForkSavedWorkflowMetadata,
 	script: MockForkWorkflowScript,
@@ -60,3 +78,11 @@ export const MockForkSharedSavedWorkflowMetadata: ForkSavedWorkflowMetadata = {
 	// Sharing grants the author edit and delete, not access management.
 	permissions: { update: true, delete: true, share: false },
 };
+
+/** An organization workflow another member made that the caller may edit and delete. */
+export const MockForkEditableOrganizationSavedWorkflowMetadata: ForkSavedWorkflowMetadata =
+	{
+		...MockForkOrganizationSavedWorkflowMetadata,
+		created_by: MockUserOwner.id,
+		permissions: { update: true, delete: true, share: false },
+	};

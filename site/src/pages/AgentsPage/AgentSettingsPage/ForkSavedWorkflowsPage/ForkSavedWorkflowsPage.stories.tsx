@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { screen, userEvent, within } from "storybook/test";
 import { reactRouterParameters } from "storybook-addon-remix-react-router";
 import { savedWorkflowsKey } from "#/api/queries/forkSavedWorkflows";
 import {
@@ -7,6 +8,9 @@ import {
 	MockUserMember,
 } from "#/testHelpers/entities";
 import {
+	MockForkDeleteOnlySavedWorkflowMetadata,
+	MockForkEditableOrganizationSavedWorkflowMetadata,
+	MockForkLockedSavedWorkflowMetadata,
 	MockForkOrganizationSavedWorkflowMetadata,
 	MockForkSavedWorkflowMetadata,
 	MockForkSharedSavedWorkflowMetadata,
@@ -97,13 +101,8 @@ export const PermissionRows: Story = {
 				}),
 				data: [
 					MockForkSavedWorkflowMetadata,
-					{
-						...MockForkSavedWorkflowMetadata,
-						id: "saved-workflow-locked",
-						name: "locked-workflow",
-						description: "The server returned no rights for this one.",
-						permissions: { update: false, delete: false, share: false },
-					},
+					MockForkDeleteOnlySavedWorkflowMetadata,
+					MockForkLockedSavedWorkflowMetadata,
 				],
 			},
 			{
@@ -111,15 +110,57 @@ export const PermissionRows: Story = {
 					tier: "organization",
 					organizationId: MockDefaultOrganization.id,
 				}),
-				data: [
-					{
-						...MockForkOrganizationSavedWorkflowMetadata,
-						name: "rotate-keys",
-						permissions: { update: true, delete: true, share: false },
-					},
-				],
+				data: [MockForkEditableOrganizationSavedWorkflowMetadata],
 			},
 		],
+	},
+};
+
+/** The menu of a personal row with every right. */
+export const PermissionRowsPersonalMenu: Story = {
+	parameters: PermissionRows.parameters,
+	play: async () => {
+		const personal = await screen.findByRole("table", {
+			name: "Personal workflows",
+		});
+		await userEvent.click(
+			await within(personal).findByRole("button", {
+				name: `More actions for ${MockForkSavedWorkflowMetadata.name}`,
+			}),
+		);
+		await screen.findByRole("menuitem", { name: "Delete\u2026" });
+	},
+};
+
+/** The menu of a personal row with only the delete right. */
+export const PermissionRowsDeleteOnlyMenu: Story = {
+	parameters: PermissionRows.parameters,
+	play: async () => {
+		const personal = await screen.findByRole("table", {
+			name: "Personal workflows",
+		});
+		await userEvent.click(
+			await within(personal).findByRole("button", {
+				name: `More actions for ${MockForkDeleteOnlySavedWorkflowMetadata.name}`,
+			}),
+		);
+		await screen.findByRole("menuitem", { name: "Delete\u2026" });
+	},
+};
+
+/** The menu of an editable organization row. */
+export const PermissionRowsOrganizationMenu: Story = {
+	parameters: PermissionRows.parameters,
+	play: async () => {
+		const organization = await screen.findByRole("table", {
+			name: "Organization workflows",
+		});
+		await userEvent.click(
+			await within(organization).findByRole("button", {
+				name: `More actions for ${MockForkEditableOrganizationSavedWorkflowMetadata.name}`,
+			}),
+		);
+		await screen.findByRole("menuitem", { name: "Delete\u2026" });
 	},
 };
 
