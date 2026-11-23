@@ -28,7 +28,8 @@ import (
 )
 
 // fakeAPNs is an HTTP/2 APNs that records each push and answers with the
-// next queued response, else 200.
+// next response queued for its device token, else the next one queued for any
+// token, else 200. A push to a stalled token gets no answer.
 type fakeAPNs struct {
 	t   *testing.T
 	srv *httptest.Server
@@ -36,6 +37,8 @@ type fakeAPNs struct {
 	mu        sync.Mutex
 	requests  []fakeAPNsRequest
 	responses []fakeAPNsAnswer
+	byToken   map[string][]fakeAPNsAnswer
+	stalled   map[string]bool
 }
 
 type fakeAPNsRequest struct {
@@ -53,7 +56,7 @@ type fakeAPNsAnswer struct {
 }
 
 func newFakeAPNs(t *testing.T) *fakeAPNs {
-	f := &fakeAPNs{t: t}
+	f := &fakeAPNs{t: t, byToken: map[string][]fakeAPNsAnswer{}, stalled: map[string]bool{}}
 	f.srv = httptest.NewUnstartedServer(http.HandlerFunc(f.serve))
 	f.srv.EnableHTTP2 = true
 	f.srv.StartTLS()
@@ -68,14 +71,22 @@ func (f *fakeAPNs) serve(rw http.ResponseWriter, r *http.Request) {
 	}
 	var payload map[string]any
 	_ = json.Unmarshal(body, &payload)
+	_, token, _ := strings.Cut(r.URL.Path, "/3/device/")
 	f.mu.Lock()
 	f.requests = append(f.requests, fakeAPNsRequest{Path: r.URL.Path, Proto: r.ProtoMajor, Header: r.Header.Clone(), Payload: payload})
+	stalled := f.stalled[token]
 	answer := fakeAPNsAnswer{Status: http.StatusOK}
-	if len(f.responses) > 0 {
+	if queued := f.byToken[token]; len(queued) > 0 {
+		answer, f.byToken[token] = queued[0], queued[1:]
+	} else if len(f.responses) > 0 {
 		answer = f.responses[0]
 		f.responses = f.responses[1:]
 	}
 	f.mu.Unlock()
+	if stalled {
+		<-r.Context().Done()
+		return
+	}
 	if answer.Status != http.StatusOK {
 		rw.Header().Set("Content-Type", "application/json")
 		rw.WriteHeader(answer.Status)
@@ -101,6 +112,18 @@ func (f *fakeAPNs) answer(answers ...fakeAPNsAnswer) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.responses = append(f.responses, answers...)
+}
+
+func (f *fakeAPNs) answerToken(token string, answers ...fakeAPNsAnswer) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.byToken[token] = append(f.byToken[token], answers...)
+}
+
+func (f *fakeAPNs) stall(token string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stalled[token] = true
 }
 
 func (f *fakeAPNs) received() []fakeAPNsRequest {

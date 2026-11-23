@@ -4,6 +4,7 @@ package coderd
 // fork-apns-push experiment. registerForkChatRoutes mounts these handlers.
 
 import (
+	"context"
 	"database/sql"
 	"encoding/hex"
 	"net/http"
@@ -178,8 +179,11 @@ func (api *API) postForkChatAPNsDeviceTest(rw http.ResponseWriter, r *http.Reque
 	}
 	// The same words as upstream's web push test. The caller may notify
 	// themselves, checked above, and the notifier prunes a rejected token.
+	// A dispatch's bound holds here too, so a stalled APNs ends in a 502.
+	sendCtx, cancel := context.WithTimeout(ctx, api.forkPush.timeout)
+	defer cancel()
 	//nolint:gocritic // See above.
-	res, err := api.forkPush.sendToDevice(dbauthz.AsNotifier(ctx), fdb, device, forkAPNsPush{
+	res, err := api.forkPush.sendToDevice(dbauthz.AsNotifier(sendCtx), fdb, device, forkAPNsPush{
 		Title:      "It's working!",
 		Body:       "You've subscribed to push notifications.",
 		Deployment: api.forkPush.deployment,
@@ -217,8 +221,11 @@ func (api *API) forkAPNsConfigured(rw http.ResponseWriter, r *http.Request) bool
 // case hex, the one form the table stores, so the same device never has two
 // rows.
 func canonicalForkAPNsToken(rw http.ResponseWriter, r *http.Request, token string) (string, bool) {
-	if _, err := hex.DecodeString(token); err == nil && token != "" && len(token) <= forkAPNsMaxTokenLength {
-		return strings.ToLower(token), true
+	// The length goes first, so an oversized token is not decoded.
+	if token != "" && len(token) <= forkAPNsMaxTokenLength {
+		if _, err := hex.DecodeString(token); err == nil {
+			return strings.ToLower(token), true
+		}
 	}
 	httpapi.Write(r.Context(), rw, http.StatusBadRequest, codersdk.Response{
 		Message: "Invalid device token.",

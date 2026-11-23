@@ -325,15 +325,14 @@ func TestForkChatAPNsDispatchKeepsDevicesInLine(t *testing.T) {
 	env.register(t, forkdb.UpsertChatAPNsDeviceParams{DeviceToken: otherToken, FinishedTurns: true, Now: now.Add(time.Millisecond)})
 
 	// The first token is dead. The second was issued by production.
-	env.apns.answer(
-		fakeAPNsAnswer{Status: http.StatusGone, Reason: "Unregistered"},
-		fakeAPNsAnswer{Status: http.StatusBadRequest, Reason: "BadDeviceToken"},
-	)
+	env.apns.answerToken(testAPNsToken, fakeAPNsAnswer{Status: http.StatusGone, Reason: "Unregistered"})
+	env.apns.answerToken(otherToken, fakeAPNsAnswer{Status: http.StatusBadRequest, Reason: "BadDeviceToken"})
 	env.dispatch(t, env.chat(t, database.ChatStatusWaiting), "Done")
-	got := env.pushes(0)
-	require.Len(t, got, 3)
-	require.Equal(t, []string{"sandbox", "sandbox", "production"}, []string{got[0].Environment, got[1].Environment, got[2].Environment})
-	require.Equal(t, []string{testAPNsToken, otherToken, otherToken}, []string{got[0].Token, got[1].Token, got[2].Token})
+	var got []string
+	for _, push := range env.pushes(0) {
+		got = append(got, push.Environment+"/"+push.Token)
+	}
+	require.ElementsMatch(t, []string{"sandbox/" + testAPNsToken, "sandbox/" + otherToken, "production/" + otherToken}, got)
 
 	devices := env.devices(t)
 	require.Len(t, devices, 1)
@@ -343,7 +342,7 @@ func TestForkChatAPNsDispatchKeepsDevicesInLine(t *testing.T) {
 	// A busy or failing APNs drops the push and keeps the device, and web
 	// push is sent all the same.
 	for _, status := range []int{http.StatusTooManyRequests, http.StatusInternalServerError} {
-		env.apns.answer(fakeAPNsAnswer{Status: status, Reason: "Busy"})
+		env.apns.answerToken(otherToken, fakeAPNsAnswer{Status: status, Reason: "Busy"})
 		env.dispatch(t, env.chat(t, database.ChatStatusWaiting), "Done")
 		require.Len(t, env.devices(t), 1)
 	}
@@ -365,18 +364,7 @@ func TestForkChatAPNsDispatchTimesOut(t *testing.T) {
 	env := newForkPushTestEnv(t, "vapid")
 	env.register(t, forkdb.UpsertChatAPNsDeviceParams{DeviceToken: testAPNsToken, FinishedTurns: true})
 
-	// An APNs that never answers.
-	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		<-r.Context().Done()
-	}))
-	srv.EnableHTTP2 = true
-	srv.StartTLS()
-	t.Cleanup(srv.Close)
-	env.d.apns.client = srv.Client()
-	env.d.apns.baseURLs = map[codersdk.ChatAPNsEnvironment]string{
-		codersdk.ChatAPNsEnvironmentSandbox:    srv.URL,
-		codersdk.ChatAPNsEnvironmentProduction: srv.URL,
-	}
+	env.apns.stall(testAPNsToken)
 	env.d.timeout = testutil.IntervalFast
 
 	env.dispatch(t, env.chat(t, database.ChatStatusWaiting), "Done")
@@ -385,9 +373,32 @@ func TestForkChatAPNsDispatchTimesOut(t *testing.T) {
 	require.Len(t, env.sink.Entries(func(e slog.SinkEntry) bool { return e.Message == "failed to send APNs push" }), 1)
 }
 
+// A device whose push stalls until the timeout does not keep the push from
+// the user's other devices.
+func TestForkChatAPNsDispatchStalledDevice(t *testing.T) {
+	t.Parallel()
+	env := newForkPushTestEnv(t, "vapid")
+	const otherToken = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0" //nolint:gosec // A fake APNs device token.
+	now := dbtime.Now()
+	// The stalled device comes first in the list.
+	env.register(t, forkdb.UpsertChatAPNsDeviceParams{DeviceToken: testAPNsToken, FinishedTurns: true, Now: now})
+	env.register(t, forkdb.UpsertChatAPNsDeviceParams{DeviceToken: otherToken, FinishedTurns: true, Now: now.Add(time.Millisecond)})
+	env.apns.stall(testAPNsToken)
+	env.d.timeout = testutil.IntervalSlow
+
+	env.dispatch(t, env.chat(t, database.ChatStatusWaiting), "Done")
+	var got []string
+	for _, push := range env.pushes(0) {
+		got = append(got, push.Token)
+	}
+	require.ElementsMatch(t, []string{testAPNsToken, otherToken}, got)
+	require.Len(t, env.sink.Entries(func(e slog.SinkEntry) bool { return e.Message == "failed to send APNs push" }), 1, "only the stalled device fails")
+}
+
 // A device that registers again while a push to its old registration is in
-// flight keeps its row, whatever APNs answers to the old push. So does a
-// token that APNs reports invalid since before the device registered.
+// flight keeps its row, unless APNs reports the token invalid since after
+// that registration. So does a token that APNs reports invalid since before
+// the device registered.
 func TestForkChatAPNsRejectionKeepsANewerRegistration(t *testing.T) {
 	t.Parallel()
 
@@ -409,6 +420,9 @@ func TestForkChatAPNsRejectionKeepsANewerRegistration(t *testing.T) {
 		{name: "GoneAfterReregistering", pushes: 1, answers: []fakeAPNsAnswer{gone}, stale: true, wantKept: true, wantEnv: "sandbox"},
 		{name: "GoneSinceAfterRegistering", pushes: 1, answers: []fakeAPNsAnswer{gone}, invalidSince: time.Second},
 		{name: "GoneSinceBeforeRegistering", pushes: 1, answers: []fakeAPNsAnswer{gone}, invalidSince: -time.Second, wantKept: true, wantEnv: "sandbox"},
+		// The device registers again at one minute.
+		{name: "GoneSinceBeforeReregistering", pushes: 1, answers: []fakeAPNsAnswer{gone}, stale: true, invalidSince: 30 * time.Second, wantKept: true, wantEnv: "sandbox"},
+		{name: "GoneSinceAfterReregistering", pushes: 1, answers: []fakeAPNsAnswer{gone}, stale: true, invalidSince: 2 * time.Minute},
 		{name: "BadTokenDeletes", pushes: 2, answers: []fakeAPNsAnswer{badToken, badToken}},
 		{name: "BadTokenAfterReregistering", pushes: 2, answers: []fakeAPNsAnswer{badToken, badToken}, stale: true, wantKept: true, wantEnv: "sandbox"},
 		{name: "OtherEnvironmentMoves", pushes: 2, answers: []fakeAPNsAnswer{badToken}, wantKept: true, wantEnv: "production"},
@@ -447,9 +461,10 @@ func TestForkChatAPNsRejectionKeepsANewerRegistration(t *testing.T) {
 	}
 }
 
-func TestForkChatAPNsTestPushRoute(t *testing.T) {
-	t.Parallel()
-	env := newForkPushTestEnv(t, "vapid")
+// newForkPushTestRoute serves the test push route of env's dispatcher and
+// returns a client of env's user.
+func newForkPushTestRoute(t *testing.T, env *forkPushTestEnv) *codersdk.Client {
+	t.Helper()
 	api := &API{
 		Options: &Options{Database: env.db, Logger: testutil.Logger(t)},
 		HTTPAuth: &HTTPAuthorizer{
@@ -464,10 +479,16 @@ func TestForkChatAPNsTestPushRoute(t *testing.T) {
 	serverURL, err := url.Parse(srv.URL)
 	require.NoError(t, err)
 	_, token := dbgen.APIKey(t, env.raw, database.APIKey{UserID: env.user.ID})
-	client := codersdk.New(serverURL, codersdk.WithSessionToken(token))
+	return codersdk.New(serverURL, codersdk.WithSessionToken(token))
+}
+
+func TestForkChatAPNsTestPushRoute(t *testing.T) {
+	t.Parallel()
+	env := newForkPushTestEnv(t, "vapid")
+	client := newForkPushTestRoute(t, env)
 	ctx := testutil.Context(t, testutil.WaitShort)
 
-	err = client.TestChatAPNsDevice(ctx, codersdk.ChatAPNsDeviceRequest{DeviceToken: testAPNsToken})
+	err := client.TestChatAPNsDevice(ctx, codersdk.ChatAPNsDeviceRequest{DeviceToken: testAPNsToken})
 	requireForkPushStatus(t, err, http.StatusNotFound)
 
 	env.register(t, forkdb.UpsertChatAPNsDeviceParams{DeviceToken: testAPNsToken, FinishedTurns: true, Sound: true})
@@ -487,6 +508,21 @@ func TestForkChatAPNsTestPushRoute(t *testing.T) {
 	requireForkPushStatus(t, err, http.StatusBadGateway)
 	require.ErrorContains(t, err, "400 BadDeviceToken")
 	require.Empty(t, env.devices(t))
+}
+
+// A test push that APNs never answers ends in a 502 at the send timeout.
+func TestForkChatAPNsTestPushTimesOut(t *testing.T) {
+	t.Parallel()
+	env := newForkPushTestEnv(t, "vapid")
+	env.d.timeout = testutil.IntervalFast
+	client := newForkPushTestRoute(t, env)
+	env.register(t, forkdb.UpsertChatAPNsDeviceParams{DeviceToken: testAPNsToken, FinishedTurns: true})
+	env.apns.stall(testAPNsToken)
+
+	err := client.TestChatAPNsDevice(testutil.Context(t, testutil.WaitShort), codersdk.ChatAPNsDeviceRequest{DeviceToken: testAPNsToken})
+	requireForkPushStatus(t, err, http.StatusBadGateway)
+	require.ErrorContains(t, err, "Failed to send the test push.")
+	require.Len(t, env.devices(t), 1)
 }
 
 func requireForkPushStatus(t *testing.T, err error, status int) {

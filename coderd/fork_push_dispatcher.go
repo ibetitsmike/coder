@@ -195,6 +195,9 @@ func (d *forkPushDispatcher) dispatchAPNs(ctx context.Context, userID uuid.UUID,
 		d.logger.Warn(ctx, "list APNs devices", slog.F("user_id", userID), slog.Error(err))
 		return
 	}
+	// Each device gets its own send, so a device whose APNs host stalls
+	// does not use up the time of the others.
+	var wg sync.WaitGroup
 	for _, device := range devices {
 		if !kind.wantedBy(device) {
 			continue
@@ -206,8 +209,13 @@ func (d *forkPushDispatcher) dispatchAPNs(ctx context.Context, userID uuid.UUID,
 			Deployment: d.deployment,
 			Sound:      device.Sound,
 		}
-		_, _ = d.sendToDevice(notifierCtx, fdb, device, push)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = d.sendToDevice(notifierCtx, fdb, device, push)
+		}()
 	}
+	wg.Wait()
 }
 
 // sendToDevice sends a push to one device and keeps its row in line with
@@ -258,11 +266,12 @@ func (d *forkPushDispatcher) sendToDevice(ctx context.Context, fdb forkdb.Store,
 	return res, nil
 }
 
-// forkAPNsDeleteNotAfter bounds the delete of a rejected token: a device that
-// registered again after the row this push read, or after the time APNs gave
-// for the token going invalid, keeps its row.
+// forkAPNsDeleteNotAfter bounds the delete of a rejected token. APNs's 410
+// gives the time the token went invalid, and only a registration after that
+// time is valid again. Without that time, a device that registered again
+// after the row this push read keeps its row.
 func forkAPNsDeleteNotAfter(device forkdb.ChatApnsDevice, res forkAPNsResponse) time.Time {
-	if !res.Timestamp.IsZero() && res.Timestamp.Before(device.UpdatedAt) {
+	if !res.Timestamp.IsZero() {
 		return res.Timestamp
 	}
 	return device.UpdatedAt
