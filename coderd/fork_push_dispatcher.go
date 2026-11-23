@@ -44,12 +44,12 @@ func (api *API) forkChatPushDispatcher(inner webpush.Dispatcher) webpush.Dispatc
 		return inner
 	}
 	if missing := fork.APNsMissing(); len(missing) > 0 {
-		api.Logger.Error(api.ctx, "APNs push is off: an APNs option is not set", slog.F("missing", missing))
+		api.Logger.Error(api.ctx, "turned APNs push off: an APNs option is not set", slog.F("missing", missing))
 		return inner
 	}
 	client, err := newForkAPNsClient(fork.APNsKeyFile.Value(), fork.APNsKeyID.Value(), fork.APNsTeamID.Value(), fork.APNsTopic.Value(), quartz.NewReal())
 	if err != nil {
-		api.Logger.Error(api.ctx, "APNs push is off: the APNs key does not load", slog.F("key_file", fork.APNsKeyFile.Value()), slog.Error(err))
+		api.Logger.Error(api.ctx, "turned APNs push off: the APNs key does not load", slog.F("key_file", fork.APNsKeyFile.Value()), slog.Error(err))
 		return inner
 	}
 	if inner == nil {
@@ -176,6 +176,7 @@ func (d *forkPushDispatcher) dispatchAPNs(ctx context.Context, userID uuid.UUID,
 	if !ok {
 		return
 	}
+	//nolint:gocritic // Pushes run outside any request: chatd reads the chat it pushes about.
 	chat, err := d.db.GetChatByID(dbauthz.AsChatd(ctx), chatID)
 	if err != nil {
 		d.logger.Warn(ctx, "read chat for APNs push", slog.F("chat_id", chatID), slog.Error(err))
@@ -187,6 +188,7 @@ func (d *forkPushDispatcher) dispatchAPNs(ctx context.Context, userID uuid.UUID,
 		d.logger.Error(ctx, "fork queries for APNs push", slog.Error(err))
 		return
 	}
+	//nolint:gocritic // The notifier reads the user's devices and prunes the ones APNs rejects, like upstream's web push.
 	notifierCtx := dbauthz.AsNotifier(ctx)
 	devices, err := fdb.GetChatAPNsDevicesByUserID(notifierCtx, userID)
 	if err != nil {
@@ -217,14 +219,14 @@ func (d *forkPushDispatcher) sendToDevice(ctx context.Context, fdb forkdb.Store,
 	env := codersdk.ChatAPNsEnvironment(device.Environment)
 	res, err := d.apns.send(ctx, env, device.DeviceToken, push)
 	if err != nil {
-		logger.Warn(ctx, "send APNs push", slog.Error(err))
+		logger.Warn(ctx, "failed to send APNs push", slog.Error(err))
 		return res, err
 	}
 	if res.Status == http.StatusBadRequest && res.Reason == "BadDeviceToken" {
 		other := otherForkAPNsEnvironment(env)
 		retry, err := d.apns.send(ctx, other, device.DeviceToken, push)
 		if err != nil {
-			logger.Warn(ctx, "send APNs push", slog.Error(err))
+			logger.Warn(ctx, "failed to send APNs push", slog.Error(err))
 			return res, err
 		}
 		if retry.ok() {
@@ -243,7 +245,7 @@ func (d *forkPushDispatcher) sendToDevice(ctx context.Context, fdb forkdb.Store,
 	switch {
 	case res.ok():
 	case res.Status == http.StatusGone || (res.Status == http.StatusBadRequest && res.Reason == "BadDeviceToken"):
-		logger.Info(ctx, "APNs rejected the device token, deleting it", slog.F("response", res.String()))
+		logger.Info(ctx, "deleting a device token that APNs rejected", slog.F("response", res.String()))
 		if err := fdb.DeleteChatAPNsDeviceByToken(ctx, forkdb.DeleteChatAPNsDeviceByTokenParams{
 			DeviceToken: device.DeviceToken,
 			NotAfter:    forkAPNsDeleteNotAfter(device, res),
@@ -251,7 +253,7 @@ func (d *forkPushDispatcher) sendToDevice(ctx context.Context, fdb forkdb.Store,
 			logger.Warn(ctx, "delete APNs device", slog.Error(err))
 		}
 	default:
-		logger.Warn(ctx, "APNs rejected the push", slog.F("response", res.String()))
+		logger.Warn(ctx, "dropped a push that APNs rejected", slog.F("response", res.String()))
 	}
 	return res, nil
 }

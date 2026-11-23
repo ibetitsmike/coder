@@ -176,7 +176,9 @@ func (api *API) postForkChatAPNsDeviceTest(rw http.ResponseWriter, r *http.Reque
 		httpapi.InternalServerError(rw, err)
 		return
 	}
-	// The same words as upstream's web push test.
+	// The same words as upstream's web push test. The caller may notify
+	// themselves, checked above, and the notifier prunes a rejected token.
+	//nolint:gocritic // See above.
 	res, err := api.forkPush.sendToDevice(dbauthz.AsNotifier(ctx), fdb, device, forkAPNsPush{
 		Title:      "It's working!",
 		Body:       "You've subscribed to push notifications.",
