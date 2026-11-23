@@ -617,7 +617,9 @@ func (api *API) forkSavedWorkflowPermissions(r *http.Request, row forkdb.SavedWo
 	if !row.UserID.Valid {
 		object := row.RBACObject()
 		return codersdk.ForkSavedWorkflowPermissions{
-			Update: can(policy.ActionUpdate, object),
+			// patchForkOrganizationSavedWorkflow reads the row before it
+			// updates it, so an update needs read as well.
+			Update: can(policy.ActionUpdate, object) && can(policy.ActionRead, object),
 			Delete: can(policy.ActionDelete, object),
 			Share:  can(policy.ActionShare, object),
 		}

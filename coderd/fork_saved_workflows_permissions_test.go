@@ -6,6 +6,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/coderdtest"
+	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
@@ -21,7 +23,7 @@ func TestForkSavedWorkflowPermissions(t *testing.T) {
 	t.Parallel()
 
 	ctx := testutil.Context(t, testutil.WaitLong)
-	client := coderdtest.New(t, &coderdtest.Options{
+	client, db := coderdtest.NewWithDatabase(t, &coderdtest.Options{
 		DeploymentValues: coderdtest.DeploymentValues(t, func(dv *codersdk.DeploymentValues) {
 			dv.Experiments = []string{string(codersdk.ExperimentForkWorkflows)}
 		}),
@@ -123,6 +125,21 @@ func TestForkSavedWorkflowPermissions(t *testing.T) {
 			requireAllowed(t, perms.Update, updateOrg(c, "release"))
 			requireAllowed(t, perms.Share, readACL(c, "release"))
 		}
+	})
+
+	// A key that may create and update organization workflows but not read
+	// them cannot patch one, because the patch reads the row first.
+	t.Run("OrganizationUpdateWithoutRead", func(t *testing.T) { //nolint:paralleltest // subtests share parent state
+		_, token := dbgen.APIKey(t, db, database.APIKey{
+			UserID: owner.UserID,
+			Scopes: database.APIKeyScopes{"organization:read", "organization_skill:create", "organization_skill:update"},
+		})
+		scoped := codersdk.New(client.URL)
+		scoped.SetSessionToken(token)
+		created, err := scoped.CreateForkOrganizationSavedWorkflow(ctx, orgID, codersdk.CreateForkSavedWorkflowRequest{Name: "write-only", Script: savedWorkflowScript})
+		require.NoError(t, err)
+		require.False(t, created.Permissions.Update)
+		requireAllowed(t, created.Permissions.Update, updateOrg(scoped, "write-only"))
 	})
 
 	// Sharing grants the author edit and delete through a user ACL, which the
