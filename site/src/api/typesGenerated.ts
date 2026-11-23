@@ -5837,12 +5837,6 @@ export interface DebugProfileOptions {
 	readonly Profiles: readonly string[];
 }
 
-// From codersdk/fork_chat_config.go
-/**
- * DefaultChatAPNsTopic is the bundle ID of Coder for iOS.
- */
-export const DefaultChatAPNsTopic = "com.coder.ios";
-
 // From codersdk/chats.go
 /**
  * DefaultChatAutoArchiveDays is the default auto-archive window, in
@@ -6879,7 +6873,9 @@ export interface ForkChatConfig {
 	 */
 	readonly apns_team_id: string;
 	/**
-	 * APNsTopic is the bundle ID of the app that receives the pushes.
+	 * APNsTopic is the bundle ID of the app that receives the pushes. It
+	 * has no default: an APNs key can push only to the apps of its own
+	 * team, so the operator names the app the key belongs with.
 	 */
 	readonly apns_topic: string;
 }

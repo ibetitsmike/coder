@@ -610,7 +610,7 @@ Configure the background chat processing daemon.
 
 Path of the APNs auth key (.p8) that signs the chat pushes sent to the iOS app when the fork-apns-push experiment is enabled.
 Empty turns APNs off.
-Needs --chat-apns-key-id and --chat-apns-team-id.
+Needs --chat-apns-key-id, --chat-apns-team-id and --chat-apns-topic.
 
 - Type: `string`
 - Environment variable: `CODER_CHAT_APNS_KEY_FILE`
@@ -638,12 +638,12 @@ The Apple Developer team ID that owns the APNs auth key in --chat-apns-key-file.
 ### APNs topic
 
 The bundle ID of the iOS app that receives the chat pushes.
+The app must belong to the team of the APNs key.
 
 - Type: `string`
 - Environment variable: `CODER_CHAT_APNS_TOPIC`
 - CLI flag: [`--chat-apns-topic`](../../reference/cli/server/index.md#--chat-apns-topic)
 - YAML key: `chat.apnsTopic`
-- Default value: `com.coder.ios`
 
 ### Debug logging enabled
 

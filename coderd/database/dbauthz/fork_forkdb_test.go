@@ -530,6 +530,7 @@ func TestForkQuerier(t *testing.T) {
 		},
 		"UpsertChatAPNsDevice": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			arg := testutil.Fake(t, faker, forkdb.UpsertChatAPNsDeviceParams{})
+			arg.MaxDevices = 1
 			fdb.EXPECT().UpsertChatAPNsDevice(gomock.Any(), arg).Return(nil).AnyTimes()
 			check.Args(arg).Asserts(rbac.ResourceWebpushSubscription.WithOwner(arg.UserID.String()), policy.ActionCreate).Returns()
 		},

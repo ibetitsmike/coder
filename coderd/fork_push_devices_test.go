@@ -69,6 +69,7 @@ func newForkAPNsTestEnv(t *testing.T, opts forkAPNsTestOptions) forkAPNsTestEnv 
 		require.NoError(t, values.AI.Chat.Fork.APNsKeyFile.Set(path))
 		require.NoError(t, values.AI.Chat.Fork.APNsKeyID.Set("TESTKEY123"))
 		require.NoError(t, values.AI.Chat.Fork.APNsTeamID.Set("TEAM123456"))
+		require.NoError(t, values.AI.Chat.Fork.APNsTopic.Set("com.coder.ios"))
 	}
 	client, _, api := coderdtest.NewWithAPI(t, &coderdtest.Options{
 		DeploymentValues: values,

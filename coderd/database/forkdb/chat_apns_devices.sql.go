@@ -148,6 +148,23 @@ func (q *Queries) UpdateChatAPNsDeviceEnvironment(ctx context.Context, arg Updat
 }
 
 const upsertChatAPNsDevice = `-- name: UpsertChatAPNsDevice :exec
+WITH kept AS (
+    -- The newest other registrations of the user, seen before the insert.
+    SELECT device_token
+    FROM chat_apns_devices
+    WHERE user_id = $2
+        AND device_token <> $1
+    ORDER BY updated_at DESC, device_token DESC
+    LIMIT $9::int - 1
+),
+removed AS (
+    -- Drop the user's registrations that are neither the upserted token
+    -- nor among the newest ones to keep.
+    DELETE FROM chat_apns_devices
+    WHERE user_id = $2
+        AND device_token <> $1
+        AND device_token NOT IN (SELECT device_token FROM kept)
+)
 INSERT INTO chat_apns_devices (
     device_token,
     user_id,
@@ -188,10 +205,13 @@ type UpsertChatAPNsDeviceParams struct {
 	AgentErrors   bool      `db:"agent_errors" json:"agent_errors"`
 	Sound         bool      `db:"sound" json:"sound"`
 	Now           time.Time `db:"now" json:"now"`
+	MaxDevices    int32     `db:"max_devices" json:"max_devices"`
 }
 
 // Registers an APNs device for a user, or updates it. A token that belonged
-// to another user moves to this one.
+// to another user moves to this one. It keeps the newest max_devices
+// registrations of the user: the upserted token plus the newest other
+// max_devices - 1 rows. It only deletes rows of the same user.
 func (q *Queries) UpsertChatAPNsDevice(ctx context.Context, arg UpsertChatAPNsDeviceParams) error {
 	_, err := q.db.ExecContext(ctx, upsertChatAPNsDevice,
 		arg.DeviceToken,
@@ -202,6 +222,7 @@ func (q *Queries) UpsertChatAPNsDevice(ctx context.Context, arg UpsertChatAPNsDe
 		arg.AgentErrors,
 		arg.Sound,
 		arg.Now,
+		arg.MaxDevices,
 	)
 	return err
 }

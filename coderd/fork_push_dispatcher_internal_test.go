@@ -101,7 +101,7 @@ func TestForkChatPushDispatcherBadConfig(t *testing.T) {
 			require.NoError(t, values.AI.Chat.Fork.APNsKeyFile.Set(tc.keyFile))
 			require.NoError(t, values.AI.Chat.Fork.APNsKeyID.Set(tc.keyID))
 			require.NoError(t, values.AI.Chat.Fork.APNsTeamID.Set("TEAM123456"))
-			require.NoError(t, values.AI.Chat.Fork.APNsTopic.Set(codersdk.DefaultChatAPNsTopic))
+			require.NoError(t, values.AI.Chat.Fork.APNsTopic.Set("com.coder.ios"))
 			sink := testutil.NewFakeSink(t)
 			api := &API{
 				ctx:         context.Background(),
@@ -126,12 +126,21 @@ func TestForkChatPushDispatcherBadConfig(t *testing.T) {
 // forkPushTestWebpush stands in for upstream's web push dispatcher.
 type forkPushTestWebpush struct {
 	publicKey string
+	// block, when set, holds each web push until it closes.
+	block chan struct{}
 
 	mu    sync.Mutex
 	count int
 }
 
-func (w *forkPushTestWebpush) Dispatch(context.Context, uuid.UUID, codersdk.WebpushMessage) error {
+func (w *forkPushTestWebpush) Dispatch(ctx context.Context, _ uuid.UUID, _ codersdk.WebpushMessage) error {
+	if w.block != nil {
+		select {
+		case <-w.block:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.count++
@@ -194,6 +203,9 @@ func (e *forkPushTestEnv) register(t *testing.T, params forkdb.UpsertChatAPNsDev
 	if params.Now.IsZero() {
 		params.Now = dbtime.Now()
 	}
+	if params.MaxDevices == 0 {
+		params.MaxDevices = forkAPNsMaxDevicesPerUser
+	}
 	require.NoError(t, e.fdb.UpsertChatAPNsDevice(context.Background(), params))
 	device, err := e.fdb.GetChatAPNsDevice(context.Background(), forkdb.GetChatAPNsDeviceParams{UserID: e.user.ID, DeviceToken: params.DeviceToken})
 	require.NoError(t, err)
@@ -223,14 +235,27 @@ func (e *forkPushTestEnv) chat(t *testing.T, status database.ChatStatus) databas
 // APNs sends.
 func (e *forkPushTestEnv) dispatch(t *testing.T, chat database.Chat, body string) {
 	t.Helper()
-	err := e.d.Dispatch(testutil.Context(t, testutil.WaitShort), chat.OwnerID, codersdk.WebpushMessage{
+	require.NoError(t, e.startDispatch(testutil.Context(t, testutil.WaitShort), chat, body))
+	e.d.wg.Wait()
+}
+
+// startDispatch sends a push the way chatd's dispatchPush does, without
+// waiting for its APNs sends.
+func (e *forkPushTestEnv) startDispatch(ctx context.Context, chat database.Chat, body string) error {
+	return e.d.Dispatch(ctx, chat.OwnerID, codersdk.WebpushMessage{
 		Title: chat.Title,
 		Body:  body,
 		Icon:  "/favicon.ico",
 		Data:  map[string]string{"url": "/agents/" + chat.ID.String()},
 	})
-	require.NoError(t, err)
-	e.d.wg.Wait()
+}
+
+// waitForPushes waits until the fake APNs received n pushes.
+func (e *forkPushTestEnv) waitForPushes(t *testing.T, n int) {
+	t.Helper()
+	require.True(t, testutil.Eventually(testutil.Context(t, testutil.WaitShort), t, func(context.Context) bool {
+		return len(e.apns.received()) >= n
+	}, testutil.IntervalFast), "fake APNs never received %d pushes", n)
 }
 
 // send sends a push to device the way a dispatch does.
@@ -359,15 +384,77 @@ func TestForkChatAPNsDispatchKeepsDevicesInLine(t *testing.T) {
 	require.Contains(t, text, "dropped a push that APNs rejected")
 }
 
+// A token that belongs to another app is deleted without a retry, since
+// APNs will never take it for this topic.
+func TestForkChatAPNsDispatchDropsATokenOfAnotherTopic(t *testing.T) {
+	t.Parallel()
+	env := newForkPushTestEnv(t, "vapid")
+	env.register(t, forkdb.UpsertChatAPNsDeviceParams{DeviceToken: testAPNsToken, FinishedTurns: true})
+	env.apns.answerToken(testAPNsToken, fakeAPNsAnswer{Status: http.StatusBadRequest, Reason: "DeviceTokenNotForTopic"})
+
+	env.dispatch(t, env.chat(t, database.ChatStatusWaiting), "Done")
+	require.Len(t, env.pushes(0), 1)
+	require.Empty(t, env.devices(t))
+}
+
+// A web push that takes long does not hold the APNs push back.
+func TestForkChatAPNsDispatchDoesNotWaitForWebPush(t *testing.T) {
+	t.Parallel()
+	env := newForkPushTestEnv(t, "vapid")
+	env.register(t, forkdb.UpsertChatAPNsDeviceParams{DeviceToken: testAPNsToken, FinishedTurns: true})
+	env.webpush.block = make(chan struct{})
+	chat := env.chat(t, database.ChatStatusWaiting)
+
+	dispatched := make(chan error, 1)
+	go func() {
+		dispatched <- env.startDispatch(testutil.Context(t, testutil.WaitShort), chat, "Done")
+	}()
+	env.waitForPushes(t, 1)
+	close(env.webpush.block)
+	require.NoError(t, testutil.RequireReceive(testutil.Context(t, testutil.WaitShort), t, dispatched))
+	env.d.wg.Wait()
+	require.Equal(t, 1, env.webpush.dispatched())
+}
+
+// A push goes to the newest devices only, even when more than the limit are
+// registered.
+func TestForkChatAPNsDispatchSendsToTheNewestDevices(t *testing.T) {
+	t.Parallel()
+	env := newForkPushTestEnv(t, "vapid")
+	now := dbtime.Now()
+	var newest []string
+	for i := range forkAPNsMaxDevicesPerUser + 2 {
+		token := fmt.Sprintf("%064x", i+1)
+		// Two registrations at once can pass the limit, so these skip it.
+		env.register(t, forkdb.UpsertChatAPNsDeviceParams{DeviceToken: token, FinishedTurns: true, Now: now.Add(time.Duration(i) * time.Minute), MaxDevices: 100})
+		if i >= 2 {
+			newest = append(newest, token)
+		}
+	}
+	require.Len(t, env.devices(t), forkAPNsMaxDevicesPerUser+2)
+
+	env.dispatch(t, env.chat(t, database.ChatStatusWaiting), "Done")
+	var got []string
+	for _, push := range env.pushes(0) {
+		got = append(got, push.Token)
+	}
+	require.ElementsMatch(t, newest, got)
+}
+
 func TestForkChatAPNsDispatchTimesOut(t *testing.T) {
 	t.Parallel()
 	env := newForkPushTestEnv(t, "vapid")
 	env.register(t, forkdb.UpsertChatAPNsDeviceParams{DeviceToken: testAPNsToken, FinishedTurns: true})
 
 	env.apns.stall(testAPNsToken)
-	env.d.timeout = testutil.IntervalFast
+	clock := quartz.NewMock(t)
+	env.d.clock = clock
 
-	env.dispatch(t, env.chat(t, database.ChatStatusWaiting), "Done")
+	ctx := testutil.Context(t, testutil.WaitShort)
+	require.NoError(t, env.startDispatch(ctx, env.chat(t, database.ChatStatusWaiting), "Done"))
+	env.waitForPushes(t, 1)
+	clock.Advance(env.d.timeout).MustWait(ctx)
+	env.d.wg.Wait()
 	require.Len(t, env.devices(t), 1)
 	require.Equal(t, 1, env.webpush.dispatched())
 	require.Len(t, env.sink.Entries(func(e slog.SinkEntry) bool { return e.Message == "failed to send APNs push" }), 1)
@@ -384,14 +471,23 @@ func TestForkChatAPNsDispatchStalledDevice(t *testing.T) {
 	env.register(t, forkdb.UpsertChatAPNsDeviceParams{DeviceToken: testAPNsToken, FinishedTurns: true, Now: now})
 	env.register(t, forkdb.UpsertChatAPNsDeviceParams{DeviceToken: otherToken, FinishedTurns: true, Now: now.Add(time.Millisecond)})
 	env.apns.stall(testAPNsToken)
-	env.d.timeout = testutil.IntervalSlow
+	// The other device's answer leaves a trace: its row goes.
+	env.apns.answerToken(otherToken, fakeAPNsAnswer{Status: http.StatusGone, Reason: "Unregistered"})
+	clock := quartz.NewMock(t)
+	env.d.clock = clock
 
-	env.dispatch(t, env.chat(t, database.ChatStatusWaiting), "Done")
-	var got []string
-	for _, push := range env.pushes(0) {
-		got = append(got, push.Token)
-	}
-	require.ElementsMatch(t, []string{testAPNsToken, otherToken}, got)
+	ctx := testutil.Context(t, testutil.WaitShort)
+	require.NoError(t, env.startDispatch(ctx, env.chat(t, database.ChatStatusWaiting), "Done"))
+	// The other device is done while the stalled one still waits.
+	require.True(t, testutil.Eventually(ctx, t, func(context.Context) bool {
+		return len(env.devices(t)) == 1
+	}, testutil.IntervalFast), "the other device never got its push")
+	clock.Advance(env.d.timeout).MustWait(ctx)
+	env.d.wg.Wait()
+
+	devices := env.devices(t)
+	require.Len(t, devices, 1)
+	require.Equal(t, testAPNsToken, devices[0].DeviceToken)
 	require.Len(t, env.sink.Entries(func(e slog.SinkEntry) bool { return e.Message == "failed to send APNs push" }), 1, "only the stalled device fails")
 }
 
@@ -514,12 +610,21 @@ func TestForkChatAPNsTestPushRoute(t *testing.T) {
 func TestForkChatAPNsTestPushTimesOut(t *testing.T) {
 	t.Parallel()
 	env := newForkPushTestEnv(t, "vapid")
-	env.d.timeout = testutil.IntervalFast
+	clock := quartz.NewMock(t)
+	env.d.clock = clock
 	client := newForkPushTestRoute(t, env)
 	env.register(t, forkdb.UpsertChatAPNsDeviceParams{DeviceToken: testAPNsToken, FinishedTurns: true})
 	env.apns.stall(testAPNsToken)
+	ctx := testutil.Context(t, testutil.WaitShort)
 
-	err := client.TestChatAPNsDevice(testutil.Context(t, testutil.WaitShort), codersdk.ChatAPNsDeviceRequest{DeviceToken: testAPNsToken})
+	tested := make(chan error, 1)
+	go func() {
+		tested <- client.TestChatAPNsDevice(ctx, codersdk.ChatAPNsDeviceRequest{DeviceToken: testAPNsToken})
+	}()
+	// The timer starts before the push is sent.
+	env.waitForPushes(t, 1)
+	clock.Advance(env.d.timeout).MustWait(ctx)
+	err := testutil.RequireReceive(ctx, t, tested)
 	requireForkPushStatus(t, err, http.StatusBadGateway)
 	require.ErrorContains(t, err, "Failed to send the test push.")
 	require.Len(t, env.devices(t), 1)

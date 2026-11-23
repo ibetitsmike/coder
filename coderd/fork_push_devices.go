@@ -4,7 +4,6 @@ package coderd
 // fork-apns-push experiment. registerForkChatRoutes mounts these handlers.
 
 import (
-	"context"
 	"database/sql"
 	"encoding/hex"
 	"net/http"
@@ -25,6 +24,10 @@ import (
 // forkAPNsMaxTokenLength bounds a device token in hex. Apple's tokens are
 // 32 bytes today and documented as variable length.
 const forkAPNsMaxTokenLength = 200
+
+// forkAPNsMaxDevicesPerUser bounds how many APNs device registrations a
+// single user may keep.
+const forkAPNsMaxDevicesPerUser = 10
 
 // @Summary Register an APNs device for chat pushes
 // @ID register-an-apns-device-for-chat-pushes
@@ -71,6 +74,7 @@ func (api *API) postForkChatAPNsDevice(rw http.ResponseWriter, r *http.Request) 
 		AgentErrors:   req.AgentErrors,
 		Sound:         req.Sound,
 		Now:           dbtime.Now(),
+		MaxDevices:    forkAPNsMaxDevicesPerUser,
 	})
 	if dbauthz.IsNotAuthorizedError(err) {
 		httpapi.Forbidden(rw)
@@ -180,7 +184,7 @@ func (api *API) postForkChatAPNsDeviceTest(rw http.ResponseWriter, r *http.Reque
 	// The same words as upstream's web push test. The caller may notify
 	// themselves, checked above, and the notifier prunes a rejected token.
 	// A dispatch's bound holds here too, so a stalled APNs ends in a 502.
-	sendCtx, cancel := context.WithTimeout(ctx, api.forkPush.timeout)
+	sendCtx, cancel := api.forkPush.withSendTimeout(ctx)
 	defer cancel()
 	//nolint:gocritic // See above.
 	res, err := api.forkPush.sendToDevice(dbauthz.AsNotifier(sendCtx), fdb, device, forkAPNsPush{

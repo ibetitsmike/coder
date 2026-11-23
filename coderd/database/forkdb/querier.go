@@ -509,7 +509,9 @@ type Querier interface {
 	// returns 0 rows.
 	UpdateWorkflowStep(ctx context.Context, arg UpdateWorkflowStepParams) (int64, error)
 	// Registers an APNs device for a user, or updates it. A token that belonged
-	// to another user moves to this one.
+	// to another user moves to this one. It keeps the newest max_devices
+	// registrations of the user: the upserted token plus the newest other
+	// max_devices - 1 rows. It only deletes rows of the same user.
 	UpsertChatAPNsDevice(ctx context.Context, arg UpsertChatAPNsDeviceParams) error
 	// A new question of the chat replaces the old one and is pending. The root
 	// comes from chats.root_chat_id; a chat without one names itself.

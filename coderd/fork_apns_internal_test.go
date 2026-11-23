@@ -39,6 +39,8 @@ type fakeAPNs struct {
 	responses []fakeAPNsAnswer
 	byToken   map[string][]fakeAPNsAnswer
 	stalled   map[string]bool
+	// released ends the stalled pushes when the test ends.
+	released chan struct{}
 }
 
 type fakeAPNsRequest struct {
@@ -56,11 +58,12 @@ type fakeAPNsAnswer struct {
 }
 
 func newFakeAPNs(t *testing.T) *fakeAPNs {
-	f := &fakeAPNs{t: t, byToken: map[string][]fakeAPNsAnswer{}, stalled: map[string]bool{}}
+	f := &fakeAPNs{t: t, byToken: map[string][]fakeAPNsAnswer{}, stalled: map[string]bool{}, released: make(chan struct{})}
 	f.srv = httptest.NewUnstartedServer(http.HandlerFunc(f.serve))
 	f.srv.EnableHTTP2 = true
 	f.srv.StartTLS()
 	t.Cleanup(f.srv.Close)
+	t.Cleanup(func() { close(f.released) })
 	return f
 }
 
@@ -84,7 +87,10 @@ func (f *fakeAPNs) serve(rw http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Unlock()
 	if stalled {
-		<-r.Context().Done()
+		select {
+		case <-r.Context().Done():
+		case <-f.released:
+		}
 		return
 	}
 	if answer.Status != http.StatusOK {

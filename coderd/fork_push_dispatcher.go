@@ -7,6 +7,7 @@ package coderd
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -73,6 +74,8 @@ type forkPushDispatcher struct {
 	logger     slog.Logger
 	deployment string
 	timeout    time.Duration
+	// clock runs the send timeout.
+	clock quartz.Clock
 
 	mu     sync.Mutex
 	closed bool
@@ -89,6 +92,17 @@ func newForkPushDispatcher(inner webpush.Dispatcher, apns *forkAPNsClient, db da
 		logger:     logger,
 		deployment: deployment,
 		timeout:    forkAPNsSendTimeout,
+		clock:      apns.clock,
+	}
+}
+
+// withSendTimeout returns ctx bounded by the send timeout.
+func (d *forkPushDispatcher) withSendTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(ctx)
+	timer := d.clock.AfterFunc(d.timeout, cancel, "fork-apns", "send")
+	return ctx, func() {
+		timer.Stop()
+		cancel()
 	}
 }
 
@@ -103,27 +117,31 @@ func (d *forkPushDispatcher) Test(ctx context.Context, req codersdk.WebpushSubsc
 	return d.inner.Test(ctx, req)
 }
 
-// Dispatch sends the web push, then starts the APNs sends and returns. The
-// web push result is the result: APNs never fails it.
+// Dispatch starts the APNs sends, then sends the web push and returns. The
+// web push result is the result: APNs never fails it, and a slow web push
+// never delays APNs.
 func (d *forkPushDispatcher) Dispatch(ctx context.Context, userID uuid.UUID, msg codersdk.WebpushMessage) error {
-	var err error
-	if d.inner.PublicKey() != "" {
-		err = d.inner.Dispatch(ctx, userID, msg)
+	d.startAPNs(ctx, userID, msg)
+	if d.inner.PublicKey() == "" {
+		return nil
 	}
+	return d.inner.Dispatch(ctx, userID, msg)
+}
+
+func (d *forkPushDispatcher) startAPNs(ctx context.Context, userID uuid.UUID, msg codersdk.WebpushMessage) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {
-		return err
+		return
 	}
 	// chatd stops its context once Dispatch returns.
-	sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.timeout)
+	sendCtx, cancel := d.withSendTimeout(context.WithoutCancel(ctx))
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
 		defer cancel()
 		d.dispatchAPNs(sendCtx, userID, msg)
 	}()
-	return err
 }
 
 func (d *forkPushDispatcher) close() {
@@ -195,6 +213,15 @@ func (d *forkPushDispatcher) dispatchAPNs(ctx context.Context, userID uuid.UUID,
 		d.logger.Warn(ctx, "list APNs devices", slog.F("user_id", userID), slog.Error(err))
 		return
 	}
+	// Registration keeps a user's devices under the limit, but two
+	// registrations at once can pass it, so a push also sends only to the
+	// newest.
+	if len(devices) > forkAPNsMaxDevicesPerUser {
+		slices.SortFunc(devices, func(a, b forkdb.ChatApnsDevice) int {
+			return b.UpdatedAt.Compare(a.UpdatedAt)
+		})
+		devices = devices[:forkAPNsMaxDevicesPerUser]
+	}
 	// Each device gets its own send, so a device whose APNs host stalls
 	// does not use up the time of the others.
 	var wg sync.WaitGroup
@@ -252,7 +279,7 @@ func (d *forkPushDispatcher) sendToDevice(ctx context.Context, fdb forkdb.Store,
 	}
 	switch {
 	case res.ok():
-	case res.Status == http.StatusGone || (res.Status == http.StatusBadRequest && res.Reason == "BadDeviceToken"):
+	case res.Status == http.StatusGone || (res.Status == http.StatusBadRequest && (res.Reason == "BadDeviceToken" || res.Reason == "DeviceTokenNotForTopic")):
 		logger.Info(ctx, "deleting a device token that APNs rejected", slog.F("response", res.String()))
 		if err := fdb.DeleteChatAPNsDeviceByToken(ctx, forkdb.DeleteChatAPNsDeviceByTokenParams{
 			DeviceToken: device.DeviceToken,

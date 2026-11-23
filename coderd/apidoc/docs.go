@@ -31786,7 +31786,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "apns_topic": {
-                    "description": "APNsTopic is the bundle ID of the app that receives the pushes.",
+                    "description": "APNsTopic is the bundle ID of the app that receives the pushes. It\nhas no default: an APNs key can push only to the apps of its own\nteam, so the operator names the app the key belongs with.",
                     "type": "string"
                 },
                 "max_concurrent_subagents": {

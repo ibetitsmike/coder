@@ -45,12 +45,11 @@ type ForkChatConfig struct {
 	APNsKeyID serpent.String `json:"apns_key_id" typescript:",notnull"`
 	// APNsTeamID is the Apple Developer team ID that owns the key.
 	APNsTeamID serpent.String `json:"apns_team_id" typescript:",notnull"`
-	// APNsTopic is the bundle ID of the app that receives the pushes.
+	// APNsTopic is the bundle ID of the app that receives the pushes. It
+	// has no default: an APNs key can push only to the apps of its own
+	// team, so the operator names the app the key belongs with.
 	APNsTopic serpent.String `json:"apns_topic" typescript:",notnull"`
 }
-
-// DefaultChatAPNsTopic is the bundle ID of Coder for iOS.
-const DefaultChatAPNsTopic = "com.coder.ios"
 
 // APNsConfigured reports whether any APNs key option is set.
 func (c ForkChatConfig) APNsConfigured() bool {
@@ -122,7 +121,7 @@ func (c *DeploymentValues) forkChatOptions(group *serpent.Group) serpent.OptionS
 		},
 		{
 			Name:        "Chat: APNs Key File",
-			Description: "Path of the APNs auth key (.p8) that signs the chat pushes sent to the iOS app when the fork-apns-push experiment is enabled. Empty turns APNs off. Needs --chat-apns-key-id and --chat-apns-team-id.",
+			Description: "Path of the APNs auth key (.p8) that signs the chat pushes sent to the iOS app when the fork-apns-push experiment is enabled. Empty turns APNs off. Needs --chat-apns-key-id, --chat-apns-team-id and --chat-apns-topic.",
 			Flag:        "chat-apns-key-file",
 			Env:         "CODER_CHAT_APNS_KEY_FILE",
 			Value:       &c.AI.Chat.Fork.APNsKeyFile,
@@ -149,11 +148,10 @@ func (c *DeploymentValues) forkChatOptions(group *serpent.Group) serpent.OptionS
 		},
 		{
 			Name:        "Chat: APNs Topic",
-			Description: "The bundle ID of the iOS app that receives the chat pushes.",
+			Description: "The bundle ID of the iOS app that receives the chat pushes. The app must belong to the team of the APNs key.",
 			Flag:        "chat-apns-topic",
 			Env:         "CODER_CHAT_APNS_TOPIC",
 			Value:       &c.AI.Chat.Fork.APNsTopic,
-			Default:     DefaultChatAPNsTopic,
 			Group:       group,
 			YAML:        "apnsTopic",
 		},
