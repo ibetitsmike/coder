@@ -9,10 +9,12 @@ import (
 )
 
 // ChatProcessFired is the fired_payload of a process watch. Exit or Lost ends
-// the watch. Without either, the payload holds the output lines that matched
-// the pattern of the watch since its last delivery: Matched counts them and
-// Lines keeps the last of them. FireChatProcessWatches and
-// MarkLostChatProcessWatches write it.
+// the watch, and the payload keeps beside it the output lines that matched
+// the pattern of the watch since its last delivery and were still held back
+// when the exit or loss merged in: Matched counts them and Lines keeps the
+// last of them, which the delivery folds into the exit or loss message.
+// Without an exit or a loss, the payload holds such lines alone.
+// FireChatProcessWatches and MarkLostChatProcessWatches write it.
 type ChatProcessFired struct {
 	Exit    *ChatProcessExit `json:"exit,omitempty"`
 	Lost    *ChatProcessLost `json:"lost,omitempty"`
