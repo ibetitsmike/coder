@@ -6,7 +6,7 @@ import {
 	getAsyncAnswerPrefix,
 	parseAsyncAnswer,
 } from "../ChatElements/tools/asyncAnswer";
-import { getFamilyMessageBody } from "../ChatElements/tools/forkFamilyMessage";
+import { parseFamilyMessage } from "../ChatElements/tools/forkFamilyMessage";
 import {
 	getProvidedSubagentTitle,
 	getSubagentChatId,
@@ -467,8 +467,13 @@ export const getEditableContentPayload = (
 } => {
 	// A family envelope is not the user's text: editing or resending the
 	// message works on the body, or it would resend the envelope.
+	const firstPart = content?.at(0);
+	const familyBody =
+		firstPart?.type === "text"
+			? parseFamilyMessage(firstPart.text)?.body
+			: undefined;
 	const text =
-		getFamilyMessageBody(content) ??
+		familyBody ??
 		parseAsyncAnswerContent(content)?.text ??
 		getMessageText(content);
 	const parsed = parseMessageContent(content);

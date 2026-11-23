@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MockFamilyMessageSenderId as senderId } from "#/testHelpers/forkFamilyMessages";
-import { getFamilyMessageBody, parseFamilyMessage } from "./forkFamilyMessage";
+import { parseFamilyMessage } from "./forkFamilyMessage";
 
 const envelope = (quotedTitle: string, body: string) =>
 	`<agent-message from_chat_id="${senderId}" from_title=${quotedTitle}>\nThis message comes from another agent in your chat family, not from the user. If you have the message_family_chat tool, you can reply with it and chat_id "${senderId}".\n\n${body}\n</agent-message>`;
@@ -66,27 +66,5 @@ describe("parseFamilyMessage", () => {
 		],
 	])("ignores %s", (_, text) => {
 		expect(parseFamilyMessage(text)).toBeUndefined();
-	});
-});
-
-describe("getFamilyMessageBody", () => {
-	it("reads the body from the message's first text part", () => {
-		expect(
-			getFamilyMessageBody([
-				{ type: "text", text: envelope('"Review the API"', "Done.") },
-			]),
-		).toBe("Done.");
-	});
-
-	it("ignores ordinary text and non-text first parts", () => {
-		expect(getFamilyMessageBody([{ type: "text", text: "Hello." }])).toBe(
-			undefined,
-		);
-		expect(
-			getFamilyMessageBody([
-				{ type: "hook-notice", text: envelope('"S"', "D.") },
-			]),
-		).toBe(undefined);
-		expect(getFamilyMessageBody(undefined)).toBe(undefined);
 	});
 });
