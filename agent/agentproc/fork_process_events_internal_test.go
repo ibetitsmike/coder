@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -596,6 +597,19 @@ func TestForkNewLines(t *testing.T) {
 			cursor: tailEnd("rt line\nERROR t1\n"), wantLines: []string{"t2"}, wantEnd: tailEnd("rt line\nERROR t1\nt2\n"),
 		},
 		{name: "TruncatedOneLine", head: head, tail: "no line end", total: total, cursor: 7, wantEnd: 7},
+		{name: "CRLF", head: "READY\r\nsecond\r\n", total: 14, wantLines: []string{"READY", "second"}, wantEnd: 14},
+		{name: "MixedLineEnds", head: "lf\nCRLF\r\ncrlf\r\nlf2\n", total: 18,
+			wantLines: []string{"lf", "CRLF", "crlf", "lf2"}, wantEnd: 18},
+		{name: "CRLFPosition", head: "READY\r\n", total: 7, cursor: 7, wantEnd: 7},
+		{
+			// A bare CR does not end a line, so the CR stays in the text.
+			name: "BareCRKept", head: "a\rb\n", total: 4, wantLines: []string{"a\rb"}, wantEnd: 4,
+		},
+		{
+			// CR LF of an empty line is still a complete line, and the
+			// empty text of it drops the CR.
+			name: "EmptyCRLF", head: "\r\n", total: 2, wantLines: []string{""}, wantEnd: 2,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -623,6 +637,63 @@ func TestForkRaw(t *testing.T) {
 	lines, end := forkNewLines(head, tail, total, 3)
 	require.Equal(t, []string{"ERROR part"}, lines)
 	require.Equal(t, 14, end)
+}
+
+// A line that ends in CR LF is reported without the trailing CR, so a
+// pattern with an end anchor such as ^READY$ matches it.
+func TestForkNewLinesCRLF(t *testing.T) {
+	t.Parallel()
+	lines, end := forkNewLines("READY\r\nb\r\n", "", 10, 0)
+	require.Equal(t, []string{"READY", "b"}, lines)
+	require.Equal(t, 10, end)
+	// A pattern with an end anchor matches the line as reported.
+	require.True(t, regexp.MustCompile(`^READY$`).MatchString(lines[0]))
+	// Positions still count the raw bytes, so a second poll after the
+	// first reports nothing and no line is reported twice.
+	lines, end = forkNewLines("READY\r\nb\r\n", "", 10, end)
+	require.Empty(t, lines)
+	require.Equal(t, 10, end)
+	// New bytes after a poll: only the new lines come back.
+	lines, end = forkNewLines("READY\r\nb\r\nlast\r\n", "", 16, 10)
+	require.Equal(t, []string{"last"}, lines)
+	require.Equal(t, 16, end)
+	// A line that is still open holds its bytes for the next poll.
+	lines, end = forkNewLines("READY\r\nb\r\nopen\r", "", 15, 10)
+	require.Empty(t, lines)
+	require.Equal(t, 10, end)
+}
+
+// The matching path of an output watch reports CR LF lines without the
+// trailing CR, so a pattern with an end anchor fires.
+func TestForkOutputWatchCRLF(t *testing.T) {
+	t.Parallel()
+	ctx := testutil.Context(t, testutil.WaitLong)
+	mClock := quartz.NewMock(t)
+	api, handler := forkTestAPI(t, mClock)
+	client := newForkEventsClient(0)
+	stop := forkReport(ctx, t, api, client)
+	defer stop()
+
+	gate := filepath.Join(t.TempDir(), "gate")
+	chatID, wakeupID := uuid.New(), uuid.New()
+	proc := forkStart(t, api, handler, chatID, uuid.New(), fmt.Sprintf(
+		"printf 'a\r\nREADY\r\n'; while [ ! -e %q ]; do sleep 0.05; done; sleep 60", gate))
+	require.Eventually(t, func() bool {
+		_, _, total := proc.buf.forkRaw()
+		return total == len("a\r\nREADY\r\n")
+	}, testutil.WaitLong, testutil.IntervalFast)
+
+	code, _ := forkWatch(t, handler, chatID, proc.id, workspacesdk.ForkWatchProcessRequest{
+		WakeupID: wakeupID, OutputPattern: "^READY$",
+	})
+	require.Equal(t, http.StatusOK, code)
+	mClock.Advance(forkOutputWatchInterval).MustWait(ctx)
+	req := testutil.TryReceive(ctx, t, client.calls)
+	match := req.GetEvents()[0].GetOutputMatch()
+	require.NotNil(t, match)
+	require.EqualValues(t, 1, match.GetMatched())
+	require.Equal(t, []string{"READY"}, match.GetLines())
+	require.Equal(t, wakeupID.String(), match.GetWakeupId())
 }
 
 func TestForkOutputTail(t *testing.T) {
