@@ -14,8 +14,11 @@ import (
 // ForkChatFamilyCapacity is the subagent capacity of the family under a root
 // chat. It is computed without a lock, so it may be stale when read.
 type ForkChatFamilyCapacity struct {
-	// LiveSubagents counts the unarchived subagents that have not finished:
-	// status running, interrupting, requires_action or paused.
+	// LiveSubagents counts the unarchived subagent chats in the family of
+	// a root chat that have not finished: status running, interrupting,
+	// requires_action or paused. A workflow step child whose step is
+	// reported counts as finished until a user message, such as a
+	// message_agent resume, arrives after the report.
 	LiveSubagents int64 `json:"live_subagents" example:"3"`
 	// MaxLiveSubagents is the family's live subagent limit in force. 0 means
 	// no limit. A spawn, or a message_agent that resumes a finished

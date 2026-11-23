@@ -6849,8 +6849,11 @@ export interface ForkChatConfig {
  */
 export interface ForkChatFamilyCapacity {
 	/**
-	 * LiveSubagents counts the unarchived subagents that have not finished:
-	 * status running, interrupting, requires_action or paused.
+	 * LiveSubagents counts the unarchived subagent chats in the family of
+	 * a root chat that have not finished: status running, interrupting,
+	 * requires_action or paused. A workflow step child whose step is
+	 * reported counts as finished until a user message, such as a
+	 * message_agent resume, arrives after the report.
 	 */
 	readonly live_subagents: number;
 	/**
