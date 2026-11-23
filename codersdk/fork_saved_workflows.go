@@ -34,6 +34,18 @@ type ForkSavedWorkflowMetadata struct {
 	Phases    []string  `json:"phases"`
 	CreatedAt time.Time `json:"created_at" format:"date-time"`
 	UpdatedAt time.Time `json:"updated_at" format:"date-time"`
+	// Permissions are the actions the caller may take on the workflow, so
+	// two callers can get different values for the same workflow.
+	Permissions ForkSavedWorkflowPermissions `json:"permissions"`
+}
+
+// ForkSavedWorkflowPermissions are the actions the caller may take on a saved
+// workflow. Share on a personal workflow moves it to the organization, and on
+// an organization workflow it manages who can read it.
+type ForkSavedWorkflowPermissions struct {
+	Update bool `json:"update"`
+	Delete bool `json:"delete"`
+	Share  bool `json:"share"`
 }
 
 // ForkSavedWorkflow is a saved workflow with its script.

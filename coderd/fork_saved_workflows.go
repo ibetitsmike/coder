@@ -28,6 +28,7 @@ import (
 	"github.com/coder/coder/v2/coderd/httpapi"
 	"github.com/coder/coder/v2/coderd/httpapi/httperror"
 	"github.com/coder/coder/v2/coderd/httpmw"
+	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/rbac/policy"
 	"github.com/coder/coder/v2/coderd/x/chatd"
 	"github.com/coder/coder/v2/codersdk"
@@ -76,11 +77,12 @@ func (api *API) forkUserSavedWorkflows(rw http.ResponseWriter, r *http.Request) 
 	}
 	metadata := make([]codersdk.ForkSavedWorkflowMetadata, 0, len(rows))
 	for _, row := range rows {
-		metadata = append(metadata, convertForkSavedWorkflowMetadata(forkdb.SavedWorkflow{
+		workflow := forkdb.SavedWorkflow{
 			ID: row.ID, OrganizationID: row.OrganizationID, UserID: row.UserID, CreatedBy: row.CreatedBy,
 			Name: row.Name, Description: row.Description, ArgsSchema: row.ArgsSchema, Phases: row.Phases,
 			CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
-		}))
+		}
+		metadata = append(metadata, convertForkSavedWorkflowMetadata(workflow, api.forkSavedWorkflowPermissions(r, workflow)))
 	}
 	httpapi.Write(ctx, rw, http.StatusOK, metadata)
 }
@@ -122,7 +124,7 @@ func (api *API) postForkUserSavedWorkflow(rw http.ResponseWriter, r *http.Reques
 		writeForkSavedWorkflowWriteError(ctx, rw, err)
 		return
 	}
-	httpapi.Write(ctx, rw, http.StatusCreated, convertForkSavedWorkflow(row))
+	httpapi.Write(ctx, rw, http.StatusCreated, api.convertForkSavedWorkflow(r, row))
 }
 
 // @Summary Get a user saved workflow
@@ -156,7 +158,7 @@ func (api *API) forkUserSavedWorkflow(rw http.ResponseWriter, r *http.Request) {
 		writeForkAgentDefinitionReadError(rw, err)
 		return
 	}
-	httpapi.Write(ctx, rw, http.StatusOK, convertForkSavedWorkflow(row))
+	httpapi.Write(ctx, rw, http.StatusOK, api.convertForkSavedWorkflow(r, row))
 }
 
 // @Summary Update a user saved workflow
@@ -206,7 +208,7 @@ func (api *API) patchForkUserSavedWorkflow(rw http.ResponseWriter, r *http.Reque
 	if !okAfterConditionalWrite(ctx, rw, err, expectID, false, probe, conflict) {
 		return
 	}
-	httpapi.Write(ctx, rw, http.StatusOK, convertForkSavedWorkflow(row))
+	httpapi.Write(ctx, rw, http.StatusOK, api.convertForkSavedWorkflow(r, row))
 }
 
 // @Summary Delete a user saved workflow
@@ -598,7 +600,47 @@ func writeForkSavedWorkflowWriteError(ctx context.Context, rw http.ResponseWrite
 	}
 }
 
-func convertForkSavedWorkflowMetadata(row forkdb.SavedWorkflow) codersdk.ForkSavedWorkflowMetadata {
+// forkSavedWorkflowPermissions reports what the caller may do with a loaded
+// workflow row, with the same checks as the handlers and dbauthz methods
+// that change it. It only evaluates policy, so a list costs no extra query.
+// It calls the authorizer directly, like convertChatProjects, because a
+// denial here is expected and should not log a warning.
+func (api *API) forkSavedWorkflowPermissions(r *http.Request, row forkdb.SavedWorkflow) codersdk.ForkSavedWorkflowPermissions {
+	ctx := r.Context()
+	subject, ok := httpmw.UserAuthorizationOptional(ctx)
+	if !ok {
+		return codersdk.ForkSavedWorkflowPermissions{}
+	}
+	can := func(action policy.Action, object rbac.Object) bool {
+		return api.HTTPAuth.Authorizer.Authorize(ctx, subject, action, object) == nil
+	}
+	if !row.UserID.Valid {
+		object := row.RBACObject()
+		return codersdk.ForkSavedWorkflowPermissions{
+			// patchForkOrganizationSavedWorkflow reads the row before it
+			// updates it, so an update needs read as well.
+			Update: can(policy.ActionUpdate, object) && can(policy.ActionRead, object),
+			Delete: can(policy.ActionDelete, object),
+			Share:  can(policy.ActionShare, object),
+		}
+	}
+	// A personal row authorizes like authorizeUserAgentDefinition in dbauthz:
+	// organization read first, then the action on the owner's personal skills.
+	if !can(policy.ActionRead, rbac.ResourceOrganization.WithID(row.OrganizationID).InOrg(row.OrganizationID)) {
+		return codersdk.ForkSavedWorkflowPermissions{}
+	}
+	object := rbac.ResourceUserSkill.WithOwner(row.UserID.UUID.String())
+	canDelete := can(policy.ActionDelete, object)
+	return codersdk.ForkSavedWorkflowPermissions{
+		Update: can(policy.ActionUpdate, object),
+		Delete: canDelete,
+		// postForkShareUserSavedWorkflow admits only the owner, and the move
+		// needs delete and read of the personal row.
+		Share: httpmw.APIKey(r).UserID == row.UserID.UUID && canDelete && can(policy.ActionRead, object),
+	}
+}
+
+func convertForkSavedWorkflowMetadata(row forkdb.SavedWorkflow, permissions codersdk.ForkSavedWorkflowPermissions) codersdk.ForkSavedWorkflowMetadata {
 	phases := row.Phases
 	if phases == nil {
 		phases = []string{}
@@ -607,6 +649,7 @@ func convertForkSavedWorkflowMetadata(row forkdb.SavedWorkflow) codersdk.ForkSav
 		ID: row.ID, OrganizationID: row.OrganizationID, Name: row.Name, Description: row.Description,
 		Phases: phases, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 		UserID: nullUUIDPtr(row.UserID), CreatedBy: nullUUIDPtr(row.CreatedBy),
+		Permissions: permissions,
 	}
 	if row.ArgsSchema.Valid {
 		metadata.ArgsSchema = row.ArgsSchema.RawMessage
@@ -614,8 +657,13 @@ func convertForkSavedWorkflowMetadata(row forkdb.SavedWorkflow) codersdk.ForkSav
 	return metadata
 }
 
-func convertForkSavedWorkflow(row forkdb.SavedWorkflow) codersdk.ForkSavedWorkflow {
-	return codersdk.ForkSavedWorkflow{ForkSavedWorkflowMetadata: convertForkSavedWorkflowMetadata(row), Script: row.Script}
+// convertForkSavedWorkflow converts a row for the caller of r, with the
+// caller's permissions on it.
+func (api *API) convertForkSavedWorkflow(r *http.Request, row forkdb.SavedWorkflow) codersdk.ForkSavedWorkflow {
+	return codersdk.ForkSavedWorkflow{
+		ForkSavedWorkflowMetadata: convertForkSavedWorkflowMetadata(row, api.forkSavedWorkflowPermissions(r, row)),
+		Script:                    row.Script,
+	}
 }
 
 func nullUUIDPtr(id uuid.NullUUID) *uuid.UUID {

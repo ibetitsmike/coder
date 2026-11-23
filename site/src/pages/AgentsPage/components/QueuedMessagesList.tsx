@@ -24,6 +24,7 @@ import {
 } from "#/components/Tooltip/Tooltip";
 import { isPendingRowID } from "./ChatConversation/chatStore";
 import { parseAsyncAnswer } from "./ChatElements/tools/asyncAnswer";
+import { parseFamilyMessage } from "./ChatElements/tools/forkFamilyMessage";
 import { SkillChip } from "./ChatMessageInput/SkillChip";
 
 type QueuedMessagesListProps = {
@@ -64,7 +65,12 @@ export const getQueuedMessageInfo = (
 			(part.text?.trim() ||
 				(previewParts.length > 0 && part.text?.includes("\n")))
 		) {
-			previewParts.push({ type: "text", text: part.text });
+			const familyMessage =
+				previewParts.length === 0 ? parseFamilyMessage(part.text) : undefined;
+			previewParts.push({
+				type: "text",
+				text: familyMessage?.body ?? part.text,
+			});
 		} else if (part.type === "skill-invocation") {
 			previewParts.push(part);
 		} else if (part.type === "hook-notice" && part.text?.trim()) {

@@ -109,5 +109,5 @@ func (api *API) postForkShareUserSavedWorkflow(rw http.ResponseWriter, r *http.R
 	if !okAfterConditionalWrite(ctx, rw, err, expectID, false, probe, conflict) {
 		return
 	}
-	httpapi.Write(ctx, rw, http.StatusCreated, convertForkSavedWorkflow(shared))
+	httpapi.Write(ctx, rw, http.StatusCreated, api.convertForkSavedWorkflow(r, shared))
 }

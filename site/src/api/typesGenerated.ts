@@ -6891,8 +6891,11 @@ export interface ForkChatConfig {
  */
 export interface ForkChatFamilyCapacity {
 	/**
-	 * LiveSubagents counts the unarchived subagents that have not finished:
-	 * status running, interrupting, requires_action or paused.
+	 * LiveSubagents counts the unarchived subagent chats in the family of
+	 * a root chat that have not finished: status running, interrupting,
+	 * requires_action or paused. A workflow step child whose step is
+	 * reported counts as finished until a user message, such as a
+	 * message_agent resume, arrives after the report.
 	 */
 	readonly live_subagents: number;
 	/**
@@ -7126,6 +7129,23 @@ export interface ForkSavedWorkflowMetadata {
 	readonly phases: readonly string[];
 	readonly created_at: string;
 	readonly updated_at: string;
+	/**
+	 * Permissions are the actions the caller may take on the workflow, so
+	 * two callers can get different values for the same workflow.
+	 */
+	readonly permissions: ForkSavedWorkflowPermissions;
+}
+
+// From codersdk/fork_saved_workflows.go
+/**
+ * ForkSavedWorkflowPermissions are the actions the caller may take on a saved
+ * workflow. Share on a personal workflow moves it to the organization, and on
+ * an organization workflow it manages who can read it.
+ */
+export interface ForkSavedWorkflowPermissions {
+	readonly update: boolean;
+	readonly delete: boolean;
+	readonly share: boolean;
 }
 
 // From codersdk/fork_saved_workflows.go

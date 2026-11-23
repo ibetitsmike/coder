@@ -31811,7 +31811,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "live_subagents": {
-                    "description": "LiveSubagents counts the unarchived subagents that have not finished:\nstatus running, interrupting, requires_action or paused.",
+                    "description": "LiveSubagents counts the unarchived subagent chats in the family of\na root chat that have not finished: status running, interrupting,\nrequires_action or paused. A workflow step child whose step is\nreported counts as finished until a user message, such as a\nmessage_agent resume, arrives after the report.",
                     "type": "integer",
                     "example": 3
                 },
@@ -32085,6 +32085,14 @@ const docTemplate = `{
                     "type": "string",
                     "format": "uuid"
                 },
+                "permissions": {
+                    "description": "Permissions are the actions the caller may take on the workflow, so\ntwo callers can get different values for the same workflow.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.ForkSavedWorkflowPermissions"
+                        }
+                    ]
+                },
                 "phases": {
                     "description": "Phases are the declared phase names of the workflow, in order.",
                     "type": "array",
@@ -32137,6 +32145,14 @@ const docTemplate = `{
                     "type": "string",
                     "format": "uuid"
                 },
+                "permissions": {
+                    "description": "Permissions are the actions the caller may take on the workflow, so\ntwo callers can get different values for the same workflow.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/codersdk.ForkSavedWorkflowPermissions"
+                        }
+                    ]
+                },
                 "phases": {
                     "description": "Phases are the declared phase names of the workflow, in order.",
                     "type": "array",
@@ -32152,6 +32168,20 @@ const docTemplate = `{
                     "description": "UserID is the owner of a personal workflow. It is empty on an\norganization workflow.",
                     "type": "string",
                     "format": "uuid"
+                }
+            }
+        },
+        "codersdk.ForkSavedWorkflowPermissions": {
+            "type": "object",
+            "properties": {
+                "delete": {
+                    "type": "boolean"
+                },
+                "share": {
+                    "type": "boolean"
+                },
+                "update": {
+                    "type": "boolean"
                 }
             }
         },
