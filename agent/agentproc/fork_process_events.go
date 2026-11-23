@@ -547,8 +547,14 @@ func forkNewLines(head, tail string, total, cursor int) ([]string, int) {
 			break
 		}
 		lineEnd := start + newline + 1
+		// The report drops a trailing CR, so \r\n output matches patterns
+		// that end at a line end such as ^READY$.
+		line := output[start : lineEnd-1]
+		if lineEnd-start >= 2 && line[len(line)-1] == '\r' {
+			line = line[:len(line)-1]
+		}
 		if offset+lineEnd > cursor {
-			lines = append(lines, output[start:lineEnd-1])
+			lines = append(lines, line)
 			end = offset + lineEnd
 		}
 		start = lineEnd
