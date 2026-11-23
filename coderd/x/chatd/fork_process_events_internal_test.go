@@ -381,6 +381,88 @@ func TestWakeupEventsProcessOutputCooldown(t *testing.T) {
 	require.Contains(t, messages[1], "ERROR two")
 }
 
+// A failed send for matching lines keeps the lines in the payload, and an
+// exit that fires while they are held back folds them into the exit message.
+// The watch ends with that one message and no line message is sent twice.
+func TestWakeupEventsProcessLinesOnExit(t *testing.T) {
+	t.Parallel()
+	f := newWorkerTestFixture(t)
+	ctx := testutil.Context(t, testutil.WaitLong)
+	chat := f.createWakeupChat(t)
+	_, _, agent := f.bindProcessWorkspace(t, chat)
+	events := []wakeupEvent{{
+		Type: wakeupEventProcessExit, ProcessID: "proc-1", Command: "sleep 600", AgentID: agent.ID,
+		OutputPattern: "ERROR", OutputCooldownSeconds: 60, OutputMaxEvents: 3,
+	}}
+	wakeup := f.insertWakeup(t, chat, forkdb.InsertChatWakeupParams{Kind: forkdb.ChatWakeupKindEvents}, events...)
+	worker := f.newArchiveWorker(t, nil, nil, nil)
+	now := wakeupTestSlot
+	tick := func(step time.Duration) {
+		t.Helper()
+		forceExecutionState(t, f, chat.ID, database.ChatStatusWaiting, false)
+		now = now.Add(step)
+		worker.wakeupOnce(ctx, now)
+	}
+	prefix := wakeup.Prompt + "\n\nBackground process proc-1 (`sleep 600`) "
+	linesMessage := prefix + "is still running and printed 1 new line matching `ERROR`.\n\nMatching lines:\n```\nERROR one\n```"
+	exitMessage := prefix + "exited with code 1." +
+		"\n\nLast 1 lines of output:\n```\ndone\n```" +
+		"\n\nBefore it exited, it printed 1 new line matching `ERROR`.\n\nMatching lines:\n```\nERROR two\n```"
+
+	// The first line delivers.
+	require.NotEmpty(t, f.fireProcessLines(t, chat, agent.ID, "proc-1", wakeup.ID, "ERROR one"))
+	tick(time.Second)
+	require.Equal(t, []string{linesMessage}, f.wakeMessages(t, chat, wakeup.Prompt))
+	first := f.wakeup(t, wakeup.ID)
+	require.True(t, first.LastRunAt.Valid)
+
+	// A second line fires, but every send of its message fails. Lines that
+	// fire in the cool-down after the last message wait for its end, so the
+	// failing pass runs one cool-down after the delivered one.
+	require.NotEmpty(t, f.fireProcessLines(t, chat, agent.ID, "proc-1", wakeup.ID, "ERROR two"))
+	var prompts atomic.Int32
+	useUserPromptHook(t, worker, func(rw http.ResponseWriter) {
+		if prompts.Add(1) == 1 {
+			rw.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, _ = rw.Write([]byte(`{}`))
+	})
+	tick(first.LastRunAt.Time.Add(time.Minute + time.Second).Sub(now))
+	require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 1, "the send failed")
+	require.Equal(t, []string{"delivered", "failed"}, f.wakeupRunStatuses(t, wakeup.ID))
+
+	// The process exits while the second line is still held back. After the
+	// failed send the wake-up runs again eventsPollInterval later, and that
+	// retry delivers the exit and folds the line in.
+	useUserPromptHook(t, worker, func(rw http.ResponseWriter) {
+		_, _ = rw.Write([]byte(`{}`))
+	})
+	require.NotEmpty(t, f.fireProcessExit(t, chat, agent.ID, "proc-1", 1, "done\n", now))
+	tick(eventsPollInterval + time.Second)
+	messages := f.wakeMessages(t, chat, wakeup.Prompt)
+	require.Equal(t, []string{linesMessage, exitMessage}, messages)
+	require.Equal(t, []string{"delivered", "failed", "delivered"}, f.wakeupRunStatuses(t, wakeup.ID))
+	require.NotContains(t, messages[1], "Last 2 lines of output", "the exit tail and the folded lines stay apart")
+
+	require.Equal(t, []string{"proc-1"}, f.deliveredWatches(t, wakeup.ID))
+	got := f.wakeup(t, wakeup.ID)
+	require.Equal(t, forkdb.ChatWakeupStatusCompleted, got.Status)
+	require.Equal(t, "done", got.StatusReason.String)
+	fdb, err := forkdb.From(f.db)
+	require.NoError(t, err)
+	watches, err := fdb.ListChatWakeupWatchesByWakeupID(ctx, wakeup.ID)
+	require.NoError(t, err)
+	require.Len(t, watches, 1)
+	require.EqualValues(t, 2, watches[0].Deliveries, "the line message and the exit message")
+
+	// A resent exit delivers nothing again.
+	require.Empty(t, f.fireProcessExit(t, chat, agent.ID, "proc-1", 1, "done\n", now))
+	forceExecutionState(t, f, chat.ID, database.ChatStatusWaiting, false)
+	tick(eventsPollInterval + time.Second)
+	require.Len(t, f.wakeMessages(t, chat, wakeup.Prompt), 2)
+}
+
 // A watch whose process already exited or that the agent does not know
 // fires when it is registered, and one whose workspace stopped or whose
 // agent restarted fires on the sweep.
@@ -714,7 +796,13 @@ func TestWaitForEventsProcessExitOrder(t *testing.T) {
 func TestProcessFiredText(t *testing.T) {
 	t.Parallel()
 	event := wakeupEvent{Type: wakeupEventProcessExit, ProcessID: "proc-1", Command: "make", OutputPattern: "ERROR", OutputMaxEvents: 10}
-	wakeup := forkdb.ChatWakeup{Kind: forkdb.ChatWakeupKindEvents}
+	wakeup := func(expired bool) forkdb.ChatWakeup {
+		w := forkdb.ChatWakeup{Kind: forkdb.ChatWakeupKindEvents}
+		if expired {
+			w.ExpiresAt = sql.NullTime{Time: wakeupTestSlot, Valid: true}
+		}
+		return w
+	}
 	watch := func(fired string, deliveries int32) forkdb.ChatWakeupWatch {
 		w := forkdb.ChatWakeupWatch{Deliveries: max(deliveries, 1)}
 		w.FiredPayload.RawMessage, w.FiredPayload.Valid = json.RawMessage(fired), true
@@ -725,6 +813,7 @@ func TestProcessFiredText(t *testing.T) {
 		name       string
 		fired      string
 		deliveries int32
+		expired    bool
 		wantText   string
 		wantDone   bool
 	}{
@@ -734,14 +823,33 @@ func TestProcessFiredText(t *testing.T) {
 			wantText: prefix + "is still running and printed 3 new lines matching `ERROR`.\n\nLast 2 matching lines:\n```\nERROR b\nERROR c\n```" +
 				"\n\nThis is the last message for matching lines of this process. Its exit still wakes this chat.",
 		},
-		{name: "ExitOverLines", fired: `{"matched":1,"lines":"ERROR a","exit":{"code":2,"at":"2026-05-29T12:00:00Z"}}`, wantText: prefix + "exited with code 2.", wantDone: true},
+		{name: "ExitOverLines", fired: `{"matched":1,"lines":"ERROR a","exit":{"code":2,"at":"2026-05-29T12:00:00Z"}}`,
+			wantText: prefix + "exited with code 2.\n\nBefore it exited, it printed 1 new line matching `ERROR`.\n\nMatching lines:\n```\nERROR a\n```", wantDone: true},
+		{
+			name: "ExitOverManyLines", fired: `{"matched":3,"lines":"ERROR a\nERROR b\nERROR c","exit":{"code":2,"at":"2026-05-29T12:00:00Z"}}`,
+			wantText: prefix + "exited with code 2.\n\nBefore it exited, it printed 3 new lines matching `ERROR`.\n\nMatching lines:\n```\nERROR a\nERROR b\nERROR c\n```", wantDone: true,
+		},
+		{
+			// A folded batch is one delivery either way, so it carries no
+			// last-message text even when it is the last one.
+			name: "ExitOverLinesOnLastDelivery", fired: `{"matched":3,"lines":"ERROR a\nERROR b","exit":{"code":2,"at":"2026-05-29T12:00:00Z"}}`, deliveries: 9,
+			wantText: prefix + "exited with code 2.\n\nBefore it exited, it printed 3 new lines matching `ERROR`.\n\nLast 2 matching lines:\n```\nERROR a\nERROR b\n```", wantDone: true,
+		},
+		{
+			// A held-back batch delivered on the final poll goes out with the
+			// exit or loss that fired it.
+			name: "ExitOverLinesOnFinalPoll", fired: `{"matched":1,"lines":"ERROR a","exit":{"code":2,"at":"2026-05-29T12:00:00Z"}}`, expired: true,
+			wantText: prefix + "exited with code 2.\n\nBefore it exited, it printed 1 new line matching `ERROR`.\n\nMatching lines:\n```\nERROR a\n```", wantDone: true,
+		},
+		{name: "LostOverLines", fired: `{"matched":2,"lines":"ERROR a\nERROR b","lost":{"reason":"gone","at":"2026-05-29T12:00:00Z"}}`,
+			wantText: "Lost the watch on background process proc-1 (`make`): gone.\n\nBefore the watch was lost, it printed 2 new lines matching `ERROR`.\n\nMatching lines:\n```\nERROR a\nERROR b\n```", wantDone: true},
 		{name: "Lost", fired: `{"lost":{"reason":"gone","at":"2026-05-29T12:00:00Z"}}`, wantText: "Lost the watch on background process proc-1 (`make`): gone.", wantDone: true},
 		{name: "Invalid", fired: `[]`, wantText: "Lost the watch on background process proc-1 (`make`): its event could not be read.", wantDone: true},
 		{name: "Empty", fired: `{}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			text, done := processFiredText(wakeup, watch(tc.fired, tc.deliveries), event, wakeupTestSlot, false)
+			text, done := processFiredText(wakeup(tc.expired), watch(tc.fired, tc.deliveries), event, wakeupTestSlot, false)
 			require.Equal(t, tc.wantText, text)
 			require.Equal(t, tc.wantDone, done)
 		})
