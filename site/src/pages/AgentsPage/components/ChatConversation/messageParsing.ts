@@ -6,7 +6,7 @@ import {
 	getAsyncAnswerPrefix,
 	parseAsyncAnswer,
 } from "../ChatElements/tools/asyncAnswer";
-import { parseFamilyMessage } from "../ChatElements/tools/forkFamilyMessage";
+import { getFamilyMessageBody } from "../ChatElements/tools/forkFamilyMessage";
 import {
 	getProvidedSubagentTitle,
 	getSubagentChatId,
@@ -457,31 +457,6 @@ export const parseAsyncAnswerContent = (
 	};
 };
 
-// The message_family_chat tool wraps a delivered family message in the
-// envelope. The envelope is not the user's text: editing or resending the
-// message must work on the body, or it would resend the envelope.
-const familyMessageBodyFromContent = (
-	content: readonly TypesGen.ChatMessagePart[] | undefined,
-): string | undefined => {
-	const firstPart = content?.at(0);
-	return firstPart?.type === "text"
-		? parseFamilyMessage(firstPart.text)?.body
-		: undefined;
-};
-
-const withoutFamilyEnvelope = (
-	content: readonly TypesGen.ChatMessagePart[],
-): readonly TypesGen.ChatMessagePart[] => {
-	const firstPart = content.at(0);
-	if (firstPart?.type !== "text") {
-		return content;
-	}
-	const body = familyMessageBodyFromContent(content);
-	return body === undefined
-		? content
-		: [{ ...firstPart, text: body }, ...content.slice(1)];
-};
-
 export const getEditableContentPayload = (
 	content: readonly TypesGen.ChatMessagePart[] | undefined,
 ): {
@@ -490,8 +465,10 @@ export const getEditableContentPayload = (
 	/** Restores skill and file-reference chips in place; undefined without chips. */
 	editorState: string | undefined;
 } => {
+	// A family envelope is not the user's text: editing or resending the
+	// message works on the body, or it would resend the envelope.
 	const text =
-		familyMessageBodyFromContent(content) ??
+		getFamilyMessageBody(content) ??
 		parseAsyncAnswerContent(content)?.text ??
 		getMessageText(content);
 	const parsed = parseMessageContent(content);
@@ -503,9 +480,7 @@ export const getEditableContentPayload = (
 			(block) =>
 				block.type === "skill-invocation" || block.type === "file-reference",
 		)
-			? serializeMessageDraft(
-					withoutFamilyEnvelope(withoutAsyncAnswerPrefix(content ?? [])),
-				)
+			? serializeMessageDraft(withoutAsyncAnswerPrefix(content ?? []))
 			: undefined,
 	};
 };

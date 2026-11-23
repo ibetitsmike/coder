@@ -1,6 +1,8 @@
 // This file is fork code: it reads the envelope that message_family_chat, of
 // the fork-family-messages experiment, wraps around a message it delivers.
 
+import type { ChatMessagePart } from "#/api/typesGenerated";
+
 /** A message that another chat in the family sent with message_family_chat. */
 export type FamilyMessage = {
 	fromChatId: string;
@@ -46,4 +48,19 @@ export const parseFamilyMessage = (text: string): FamilyMessage | undefined => {
 			unescapeAgentMessageTags(parseQuotedTitle(match[2])) || "Untitled",
 		body: match[3],
 	};
+};
+
+/**
+ * Returns the envelope body held in the first text part of a message's
+ * content, or undefined when that part is not a family message envelope.
+ * The server delivers a family message as a single text part, so the later
+ * parts never carry the envelope.
+ */
+export const getFamilyMessageBody = (
+	content: readonly ChatMessagePart[] | undefined,
+): string | undefined => {
+	const firstPart = content?.at(0);
+	return firstPart?.type === "text"
+		? parseFamilyMessage(firstPart.text)?.body
+		: undefined;
 };

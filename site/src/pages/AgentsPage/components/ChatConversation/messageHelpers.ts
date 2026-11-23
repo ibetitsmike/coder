@@ -195,8 +195,9 @@ export const deriveMessageDisplayState = ({
 
 	const { hasThinkingOnlyContent, endsWithResponseBlock } =
 		getRenderableContentState(parsed);
-	// The bubble already shows the body through ForkFamilyMessageHeader, so
-	// the copy gives the body too.
+	// Only the fork-family-messages experiment produces envelopes, so this
+	// parse needs no experiment gate of its own. The bubble shows the body
+	// through ForkFamilyMessageHeader, and the copy gives the body too.
 	const familyMessage = isUser
 		? parseFamilyMessage(parsed.markdown)
 		: undefined;
