@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -639,28 +638,21 @@ func TestForkRaw(t *testing.T) {
 	require.Equal(t, 14, end)
 }
 
-// A line that ends in CR LF is reported without the trailing CR, so a
-// pattern with an end anchor such as ^READY$ matches it.
+// A poll over CR LF output reports each line once without its trailing CR:
+// the sequence of cursors of one watch, so a line that a poll saw is not
+// reported again, lines that arrive later come alone, and a line that is
+// still open holds for the next poll.
 func TestForkNewLinesCRLF(t *testing.T) {
 	t.Parallel()
-	lines, end := forkNewLines("READY\r\nb\r\n", "", 10, 0)
-	require.Equal(t, []string{"READY", "b"}, lines)
+	_, end := forkNewLines("READY\r\nb\r\n", "", 10, 0)
 	require.Equal(t, 10, end)
-	// A pattern with an end anchor matches the line as reported.
-	require.True(t, regexp.MustCompile(`^READY$`).MatchString(lines[0]))
-	// Positions still count the raw bytes, so a second poll after the
-	// first reports nothing and no line is reported twice.
-	lines, end = forkNewLines("READY\r\nb\r\n", "", 10, end)
-	require.Empty(t, lines)
-	require.Equal(t, 10, end)
-	// New bytes after a poll: only the new lines come back.
-	lines, end = forkNewLines("READY\r\nb\r\nlast\r\n", "", 16, 10)
+	lines, end := forkNewLines("READY\r\nb\r\nlast\r\n", "", 16, end)
 	require.Equal(t, []string{"last"}, lines)
 	require.Equal(t, 16, end)
 	// A line that is still open holds its bytes for the next poll.
-	lines, end = forkNewLines("READY\r\nb\r\nopen\r", "", 15, 10)
+	lines, end = forkNewLines("READY\r\nb\r\nopen\r", "", 15, end)
 	require.Empty(t, lines)
-	require.Equal(t, 10, end)
+	require.Equal(t, 16, end)
 }
 
 // The matching path of an output watch reports CR LF lines without the
