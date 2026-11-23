@@ -442,6 +442,7 @@ func TestWakeupEventsProcessLinesOnExit(t *testing.T) {
 	tick(eventsPollInterval + time.Second)
 	messages := f.wakeMessages(t, chat, wakeup.Prompt)
 	require.Equal(t, []string{linesMessage, exitMessage}, messages)
+	require.Equal(t, []string{"delivered", "failed", "delivered"}, f.wakeupRunStatuses(t, wakeup.ID))
 	require.NotContains(t, messages[1], "Last 2 lines of output", "the exit tail and the folded lines stay apart")
 
 	require.Equal(t, []string{"proc-1"}, f.deliveredWatches(t, wakeup.ID))
@@ -795,7 +796,13 @@ func TestWaitForEventsProcessExitOrder(t *testing.T) {
 func TestProcessFiredText(t *testing.T) {
 	t.Parallel()
 	event := wakeupEvent{Type: wakeupEventProcessExit, ProcessID: "proc-1", Command: "make", OutputPattern: "ERROR", OutputMaxEvents: 10}
-	wakeup := forkdb.ChatWakeup{Kind: forkdb.ChatWakeupKindEvents}
+	wakeup := func(expired bool) forkdb.ChatWakeup {
+		w := forkdb.ChatWakeup{Kind: forkdb.ChatWakeupKindEvents}
+		if expired {
+			w.ExpiresAt = sql.NullTime{Time: wakeupTestSlot, Valid: true}
+		}
+		return w
+	}
 	watch := func(fired string, deliveries int32) forkdb.ChatWakeupWatch {
 		w := forkdb.ChatWakeupWatch{Deliveries: max(deliveries, 1)}
 		w.FiredPayload.RawMessage, w.FiredPayload.Valid = json.RawMessage(fired), true
@@ -806,6 +813,7 @@ func TestProcessFiredText(t *testing.T) {
 		name       string
 		fired      string
 		deliveries int32
+		expired    bool
 		wantText   string
 		wantDone   bool
 	}{
@@ -821,6 +829,18 @@ func TestProcessFiredText(t *testing.T) {
 			name: "ExitOverManyLines", fired: `{"matched":3,"lines":"ERROR a\nERROR b\nERROR c","exit":{"code":2,"at":"2026-05-29T12:00:00Z"}}`,
 			wantText: prefix + "exited with code 2.\n\nBefore it exited, it printed 3 new lines matching `ERROR`.\n\nMatching lines:\n```\nERROR a\nERROR b\nERROR c\n```", wantDone: true,
 		},
+		{
+			// A folded batch is one delivery either way, so it carries no
+			// last-message text even when it is the last one.
+			name: "ExitOverLinesOnLastDelivery", fired: `{"matched":3,"lines":"ERROR a\nERROR b","exit":{"code":2,"at":"2026-05-29T12:00:00Z"}}`, deliveries: 9,
+			wantText: prefix + "exited with code 2.\n\nBefore it exited, it printed 3 new lines matching `ERROR`.\n\nLast 2 matching lines:\n```\nERROR a\nERROR b\n```", wantDone: true,
+		},
+		{
+			// A held-back batch delivered on the final poll goes out with the
+			// exit or loss that fired it.
+			name: "ExitOverLinesOnFinalPoll", fired: `{"matched":1,"lines":"ERROR a","exit":{"code":2,"at":"2026-05-29T12:00:00Z"}}`, expired: true,
+			wantText: prefix + "exited with code 2.\n\nBefore it exited, it printed 1 new line matching `ERROR`.\n\nMatching lines:\n```\nERROR a\n```", wantDone: true,
+		},
 		{name: "LostOverLines", fired: `{"matched":2,"lines":"ERROR a\nERROR b","lost":{"reason":"gone","at":"2026-05-29T12:00:00Z"}}`,
 			wantText: "Lost the watch on background process proc-1 (`make`): gone.\n\nBefore the watch was lost, it printed 2 new lines matching `ERROR`.\n\nMatching lines:\n```\nERROR a\nERROR b\n```", wantDone: true},
 		{name: "Lost", fired: `{"lost":{"reason":"gone","at":"2026-05-29T12:00:00Z"}}`, wantText: "Lost the watch on background process proc-1 (`make`): gone.", wantDone: true},
@@ -829,7 +849,7 @@ func TestProcessFiredText(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			text, done := processFiredText(wakeup, watch(tc.fired, tc.deliveries), event, wakeupTestSlot, false)
+			text, done := processFiredText(wakeup(tc.expired), watch(tc.fired, tc.deliveries), event, wakeupTestSlot, false)
 			require.Equal(t, tc.wantText, text)
 			require.Equal(t, tc.wantDone, done)
 		})

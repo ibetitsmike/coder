@@ -447,6 +447,7 @@ That message is made of the `prompt`, an empty line, ``Background process <id> (
 `process_output_cooldown_seconds`, from 0 to 86400 and 60 by default, sets how long such a message waits after the wake-up's last message, so it collects the lines printed meanwhile.
 The workspace agent also waits that long between two reports of matching lines of one process, and its first report goes out at once.
 While the chat is busy, the reports collect, and one message carries their lines, at most the last 16384 characters of them.
+An exit or a lost watch that happens while lines still wait for their message folds those lines into the exit or lost-watch message: ``Before it exited, it printed <n> new lines matching `<pattern>`.`` or ``Before the watch was lost, it printed <n> new lines matching `<pattern>`.``, with the lines, after the exit output.
 A report holds at most the last 100 matching lines and cuts each one to 4&nbsp;KiB, while its count covers every match.
 Lines that match in the cool-down before the process exits arrive only in the exit message's output.
 After a lost connection, a message doesn't repeat or miss a line.
@@ -454,7 +455,7 @@ After a lost connection, a message doesn't repeat or miss a line.
 The workspace agent keeps only the first and the last 16&nbsp;KiB of a process's output, and once a process has printed more, matching sees only the kept last 16&nbsp;KiB, so earlier lines can be missed.
 Matching reads the whole line as the workspace agent kept it, so a match past the first 4&nbsp;KiB of a long line still wakes the chat, but the message shows only those first 4&nbsp;KiB, with no marker.
 The result also holds `processes`, with the `process_id`, `command`, and `output_pattern` of each watched process.
-At `expires_at`, one last check reports the processes that exited by then, and no more matching lines.
+At `expires_at`, one last check reports the processes that exited by then, and no more matching line messages.
 If a process has not reported an exit, the last check waits until the workspace agent says, at least 5&nbsp;seconds after the expiry, that it holds no exit it could not send, at most 10 minutes, so that an exit the agent could not send in time still arrives.
 While a chat process runs, the agent says so every 30&nbsp;seconds.
 It dates that statement by when Coder Agents answered its previous report, so a slow report or a skewed clock can't make the check miss an exit.
