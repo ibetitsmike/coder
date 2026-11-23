@@ -505,8 +505,7 @@ export const ChatPageInput: React.FC<ChatPageInputProps> = ({
 	// Source the composer's prompt-history cycle from the dedicated /prompts endpoint.
 	const { data: promptsData } = useQuery(chatPromptsQuery(chatId));
 	// Sending an async answer again would answer its call again. A family
-	// message was not typed by the user either, so its envelope never enters
-	// the history cycle and can never be sent again from it.
+	// message was never typed by the user, so it is filtered the same way.
 	const userPromptHistory: readonly string[] =
 		promptsData?.prompts
 			.map((prompt) => prompt.text)

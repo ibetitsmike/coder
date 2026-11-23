@@ -567,9 +567,6 @@ describe("ChatPageInput", () => {
 		await user.click(screen.getByRole("textbox", { name: "Chat message" }));
 		await user.keyboard("{ArrowUp}");
 
-		// Cycling history stops at the real user prompt. The family envelope
-		// never loads into the composer, so sending from history can never
-		// resend an agent-message envelope as a user message.
 		expect(inputRef.current?.getValue()).toBe("Build the settings page");
 	});
 

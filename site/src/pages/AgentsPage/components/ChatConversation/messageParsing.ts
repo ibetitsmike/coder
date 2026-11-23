@@ -476,7 +476,7 @@ const withoutFamilyEnvelope = (
 	if (firstPart?.type !== "text") {
 		return content;
 	}
-	const body = parseFamilyMessage(firstPart.text)?.body;
+	const body = familyMessageBodyFromContent(content);
 	return body === undefined
 		? content
 		: [{ ...firstPart, text: body }, ...content.slice(1)];

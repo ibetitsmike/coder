@@ -195,9 +195,8 @@ export const deriveMessageDisplayState = ({
 
 	const { hasThinkingOnlyContent, endsWithResponseBlock } =
 		getRenderableContentState(parsed);
-	// A family message copy is the sender's body, without the envelope that
-	// message_family_chat wrapped around it. The bubble already shows the body
-	// through ForkFamilyMessageHeader.
+	// The bubble already shows the body through ForkFamilyMessageHeader, so
+	// the copy gives the body too.
 	const familyMessage = isUser
 		? parseFamilyMessage(parsed.markdown)
 		: undefined;

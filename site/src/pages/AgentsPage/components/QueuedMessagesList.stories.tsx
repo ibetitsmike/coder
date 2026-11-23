@@ -5,6 +5,7 @@ import {
 	MockChatQueuedMessage,
 	MockChatQueuedMessageUnderEdit,
 } from "#/testHelpers/chatEntities";
+import { MockFamilyMessage } from "#/testHelpers/forkFamilyMessages";
 import { getAsyncAnswerPrefix } from "./ChatElements/tools/asyncAnswer";
 import { QueuedMessagesList } from "./QueuedMessagesList";
 
@@ -155,6 +156,13 @@ export const AsyncQuestionAnswer: Story = {
 			),
 			buildMessage(2, textContent("Also update the docs")),
 		],
+	},
+};
+
+// A queued family message previews the sender's body, not the envelope.
+export const FamilyMessage: Story = {
+	args: {
+		messages: [buildMessage(1, MockFamilyMessage.content ?? [])],
 	},
 };
 
