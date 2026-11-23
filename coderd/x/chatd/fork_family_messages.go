@@ -270,11 +270,14 @@ func escapeAgentMessageTags(text string) string {
 	})
 }
 
+// familyMessageEnvelopePrefix starts the text of every family message.
+const familyMessageEnvelopePrefix = "<agent-message from_chat_id=\""
+
 // familyMessageEnvelope returns the user message text that delivers body from
 // the sender chat. Clients parse this text to show the message as one from an
 // agent, so its format must stay stable.
 func familyMessageEnvelope(senderID uuid.UUID, senderTitle, body string) string {
-	return fmt.Sprintf("<agent-message from_chat_id=\"%s\" from_title=%s>\n"+
+	return fmt.Sprintf(familyMessageEnvelopePrefix+"%s\" from_title=%s>\n"+
 		"This message comes from another agent in your chat family, not from the user. "+
 		"If you have the %s tool, you can reply with it and chat_id \"%s\".\n\n"+
 		"%s\n</agent-message>",
