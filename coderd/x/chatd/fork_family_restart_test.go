@@ -44,9 +44,10 @@ var (
 // TestChatFamilySurvivesRestart stops chatd under a busy family and starts a
 // new server on the same database. The root waits for its coordinator with
 // wait_for_events, the coordinator is blocked in wait_agent for three
-// workers, two workers are mid model call and the third waits for capacity,
-// and each worker's family message is queued on the busy coordinator. Every
-// chat must finish, and no result, message or child may be lost or doubled.
+// workers, two workers are mid model call and the third waits for capacity.
+// Each worker's family message ends the coordinator's wait, so the
+// coordinator reads it and waits again. Every chat must finish, and no
+// result, message or child may be lost or doubled.
 func TestChatFamilySurvivesRestart(t *testing.T) {
 	t.Parallel()
 
@@ -62,8 +63,8 @@ func TestChatFamilySurvivesRestart(t *testing.T) {
 		startedMu sync.Mutex
 		started   = map[string]bool{}
 		// waitsCommitted holds each worker's family message until the
-		// coordinator committed its wait_agent batch, so the messages stay
-		// queued instead of joining the coordinator's next model call.
+		// coordinator committed its first wait_agent batch, so the messages
+		// arrive while the coordinator waits.
 		waitsCommitted = make(chan struct{})
 	)
 	coordinatorID := func(ctx context.Context) (uuid.UUID, error) {
@@ -126,17 +127,9 @@ func TestChatFamilySurvivesRestart(t *testing.T) {
 			}
 			return text("RESULT-" + name)
 		case strings.Contains(userText, familyRestartCoordinator):
-			switch {
-			case len(toolResults) == 0:
-				var calls [][2]string
-				for i := 1; i <= 3; i++ {
-					calls = append(calls, [2]string{"spawn_agent", fmt.Sprintf(`{"type":"general","prompt":"WORKER-%d","title":"worker-%d"}`, i, i)})
-				}
-				return chattest.OpenAIStreamingResponse(familyRestartToolCalls(calls...))
-			case len(toolResults) == 3:
-				var calls [][2]string
-				ids := make([]string, 0, 3)
-				for _, result := range toolResults {
+			var ids []string
+			if len(toolResults) >= 3 {
+				for _, result := range toolResults[:3] {
 					var spawned struct {
 						ChatID string `json:"chat_id"`
 					}
@@ -145,14 +138,39 @@ func TestChatFamilySurvivesRestart(t *testing.T) {
 					}
 					ids = append(ids, spawned.ChatID)
 				}
-				for _, id := range ids {
-					calls = append(calls, [2]string{"wait_agent", fmt.Sprintf(`{"chat_id":%q}`, id)})
+			}
+			switch {
+			case len(toolResults) == 0:
+				var calls [][2]string
+				for i := 1; i <= 3; i++ {
+					calls = append(calls, [2]string{"spawn_agent", fmt.Sprintf(`{"type":"general","prompt":"WORKER-%d","title":"worker-%d"}`, i, i)})
 				}
 				return chattest.OpenAIStreamingResponse(familyRestartToolCalls(calls...))
+			case len(toolResults) < 3:
+				return text("unexpected spawn results")
 			default:
+				// A wait that a family message ended has no report, so the
+				// coordinator waits again for each worker without one.
+				done := map[string]bool{}
 				var seen []string
 				for _, result := range toolResults[3:] {
+					var wait struct {
+						ChatID string  `json:"chat_id"`
+						Report *string `json:"report"`
+					}
+					if json.Unmarshal([]byte(result), &wait) == nil && wait.Report != nil {
+						done[wait.ChatID] = true
+					}
 					seen = append(seen, familyRestartResultPattern.FindAllString(result, -1)...)
+				}
+				var calls [][2]string
+				for _, id := range ids {
+					if !done[id] {
+						calls = append(calls, [2]string{"wait_agent", fmt.Sprintf(`{"chat_id":%q}`, id)})
+					}
+				}
+				if len(calls) > 0 {
+					return chattest.OpenAIStreamingResponse(familyRestartToolCalls(calls...))
 				}
 				slices.Sort(seen)
 				return text("coordinator saw " + strings.Join(slices.Compact(seen), " "))
@@ -258,10 +276,19 @@ func TestChatFamilySurvivesRestart(t *testing.T) {
 			t.Fatalf("workers did not block: %v", ctx.Err())
 		}
 	}
-	require.Zero(t, familyRestartCount(t, chatMessages(ctx, t, db, coordinator.ID), "HELLO-"), "family messages must stay queued")
-	queued, err := db.GetChatQueuedMessages(ctx, coordinator.ID)
-	require.NoError(t, err)
-	require.Len(t, queued, 2, "each running worker's family message is queued")
+	// A family message ends the coordinator's wait, so both messages reach
+	// its model before the restart, once each, and it waits for the three
+	// workers again.
+	testutil.Eventually(ctx, t, func(ctx context.Context) bool {
+		messages := chatMessages(ctx, t, db, coordinator.ID)
+		queued, err := db.GetChatQueuedMessages(ctx, coordinator.ID)
+		calls := familyRestartParts(t, messages, codersdk.ChatMessagePartTypeToolCall, "wait_agent")
+		results := familyRestartParts(t, messages, codersdk.ChatMessagePartTypeToolResult, "wait_agent")
+		return err == nil && len(queued) == 0 && familyRestartCount(t, messages, "HELLO-") == 2 && len(calls) == len(results)+3
+	}, testutil.IntervalFast)
+	for _, name := range blockedWorkers {
+		require.Equal(t, 1, familyRestartCount(t, chatMessages(ctx, t, db, coordinator.ID), "HELLO-"+name), name)
+	}
 	for _, worker := range familyRestartChild(ctx, t, db, coordinator.ID, 3) {
 		name := familyRestartWorkerPattern.FindString(familyRestartPrompt(ctx, t, db, worker.ID))
 		if name == "" || slices.Contains(blockedWorkers, name) {
@@ -328,10 +355,19 @@ func TestChatFamilySurvivesRestart(t *testing.T) {
 	require.Len(t, rootWaits, 1)
 	require.Contains(t, rootWaits[0], "coordinator saw RESULT-WORKER-1 RESULT-WORKER-2 RESULT-WORKER-3")
 
-	// The coordinator got each worker's result and family message once.
+	// The coordinator got each worker's result and family message once. Every
+	// other wait ended for a family message.
 	coordinatorMessages := chatMessages(ctx, t, db, coordinator.ID)
 	waits := familyRestartParts(t, coordinatorMessages, codersdk.ChatMessagePartTypeToolResult, "wait_agent")
-	require.Len(t, waits, 3)
+	for _, wait := range waits {
+		if !familyRestartResultPattern.MatchString(wait) {
+			var early struct {
+				FamilyMessagePending bool `json:"family_message_pending"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(wait), &early), wait)
+			require.True(t, early.FamilyMessagePending, wait)
+		}
+	}
 	for i := 1; i <= 3; i++ {
 		name := fmt.Sprintf("WORKER-%d", i)
 		require.Equal(t, 1, familyRestartCount(t, coordinatorMessages, "HELLO-"+name), name)
