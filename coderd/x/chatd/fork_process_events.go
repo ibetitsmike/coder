@@ -405,7 +405,11 @@ func processLinesCooling(wakeup forkdb.ChatWakeup, watch forkdb.ChatWakeupWatch,
 // processFiredText returns the message for what fired the process watch
 // watch of wakeup, whose event is event, and whether it ends the watch, or
 // "" when the pass at now delivers nothing for it. An exit or a loss ends
-// the watch. The final poll delivers no output lines, and a late final poll
+// the watch and folds in the matching lines the payload held when it fired,
+// which a failed send, a cool-down or a busy chat held back. Such a folded
+// batch is not a message of its own: it does not append the last-message
+// text of the lines, and the final poll delivers it, since the lines were
+// collected before the event that ends the watch. A late final poll
 // (lateFinalPoll) leaves out an exit or a loss after the expiry, unless an
 // earlier send of it failed.
 func processFiredText(wakeup forkdb.ChatWakeup, watch forkdb.ChatWakeupWatch, event wakeupEvent, now time.Time, lateFinalPoll bool) (string, bool) {
@@ -423,12 +427,20 @@ func processFiredText(wakeup forkdb.ChatWakeup, watch forkdb.ChatWakeupWatch, ev
 		if cutOff(fired.Exit.At.Add(time.Second)) {
 			return "", false
 		}
-		return processExitText(event, fired.Exit.Code, fired.Exit.Tail), true
+		text := processExitText(event, fired.Exit.Code, fired.Exit.Tail)
+		if folded := processFoldedLinesText(event, fired.Matched, fired.Lines, true); folded != "" {
+			text += "\n\n" + folded
+		}
+		return text, true
 	case fired.Lost != nil:
 		if cutOff(fired.Lost.At) {
 			return "", false
 		}
-		return processLostText(event, fired.Lost.Reason), true
+		text := processLostText(event, fired.Lost.Reason)
+		if folded := processFoldedLinesText(event, fired.Matched, fired.Lines, false); folded != "" {
+			text += "\n\n" + folded
+		}
+		return text, true
 	case fired.Matched > 0 && !eventsFinalPoll(wakeup, now):
 		text := processLinesText(event, fired.Matched, fired.Lines)
 		if int(watch.Deliveries)+1 >= event.OutputMaxEvents {
@@ -437,6 +449,35 @@ func processFiredText(wakeup forkdb.ChatWakeup, watch forkdb.ChatWakeupWatch, ev
 		return text, false
 	}
 	return "", false
+}
+
+// processFoldedLinesText returns the part of an exit or loss message that
+// carries the matching lines the payload held when the exit or loss merged
+// in, or "" without any. It is one delivery either way, so the folded batch
+// respects the per-watch output_max_events the same way the lines messages
+// that led to it did: FireChatProcessWatches takes lines only below the
+// count, so a payload that holds lines brings at most one more delivery.
+func processFoldedLinesText(event wakeupEvent, matched int, lines string, exited bool) string {
+	if matched <= 0 {
+		return ""
+	}
+	noun := "lines"
+	if matched == 1 {
+		noun = "line"
+	}
+	when := "Before the watch was lost, it"
+	if exited {
+		when = "Before it exited, it"
+	}
+	text := fmt.Sprintf("%s printed %d new %s matching `%s`.", when, matched, noun, event.OutputPattern)
+	if tail, shown := processOutputTail(lines); shown > 0 {
+		label := "Matching lines"
+		if shown < matched {
+			label = fmt.Sprintf("Last %d matching lines", shown)
+		}
+		text += fmt.Sprintf("\n\n%s:\n```\n%s\n```", label, tail)
+	}
+	return text
 }
 
 // processLinesText returns the message for matched output lines of the
