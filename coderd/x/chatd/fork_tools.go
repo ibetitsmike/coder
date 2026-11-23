@@ -146,5 +146,10 @@ func (p *Server) appendForkTools(ctx context.Context, tools []fantasy.AgentTool,
 			return nil, err
 		}
 	}
+	// The family message wait wraps every other wait_agent wrapper, so a
+	// family message also ends a wait for a child's question.
+	if p.experiments.Enabled(codersdk.ExperimentForkFamilyMessages) {
+		tools = p.withFamilyMessageWait(tools, chat)
+	}
 	return tools, nil
 }
