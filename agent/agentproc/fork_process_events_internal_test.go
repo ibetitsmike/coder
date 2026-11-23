@@ -639,9 +639,9 @@ func TestForkRaw(t *testing.T) {
 }
 
 // A poll over CR LF output reports each line once without its trailing CR:
-// the sequence of cursors of one watch, so a line that a poll saw is not
-// reported again, lines that arrive later come alone, and a line that is
-// still open holds for the next poll.
+// the sequence of cursors of one watch over an output that only grows, so
+// a line that a poll saw is not reported again, an open line holds for the
+// next poll, and its completion is reported once.
 func TestForkNewLinesCRLF(t *testing.T) {
 	t.Parallel()
 	_, end := forkNewLines("READY\r\nb\r\n", "", 10, 0)
@@ -649,10 +649,18 @@ func TestForkNewLinesCRLF(t *testing.T) {
 	lines, end := forkNewLines("READY\r\nb\r\nlast\r\n", "", 16, end)
 	require.Equal(t, []string{"last"}, lines)
 	require.Equal(t, 16, end)
-	// A line that is still open holds its bytes for the next poll.
-	lines, end = forkNewLines("READY\r\nb\r\nopen\r", "", 15, end)
+	// A poll over the same output reports nothing new.
+	lines, end = forkNewLines("READY\r\nb\r\nlast\r\n", "", 16, end)
 	require.Empty(t, lines)
 	require.Equal(t, 16, end)
+	// A line that is still open holds its bytes for the next poll.
+	lines, end = forkNewLines("READY\r\nb\r\nlast\r\nopen\r", "", 21, end)
+	require.Empty(t, lines)
+	require.Equal(t, 16, end)
+	// Its completion is reported once, without the CR.
+	lines, end = forkNewLines("READY\r\nb\r\nlast\r\nopen\r\n", "", 22, end)
+	require.Equal(t, []string{"open"}, lines)
+	require.Equal(t, 22, end)
 }
 
 // The matching path of an output watch reports CR LF lines without the
