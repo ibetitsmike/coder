@@ -5,6 +5,7 @@ import { API } from "#/api/api";
 import * as forkSavedWorkflowsApi from "#/api/forkSavedWorkflows";
 import type {
 	Experiment,
+	ForkSavedWorkflowMetadata,
 	Organization as TypesGenOrganization,
 } from "#/api/typesGenerated";
 import { toast } from "#/components/Toaster/toast";
@@ -16,6 +17,8 @@ import {
 	mockApiError,
 } from "#/testHelpers/entities";
 import {
+	MockForkDeleteOnlySavedWorkflowMetadata,
+	MockForkEditableOrganizationSavedWorkflowMetadata,
 	MockForkOrganizationSavedWorkflowMetadata,
 	MockForkSavedWorkflowMetadata,
 	MockForkSharedSavedWorkflowMetadata,
@@ -32,11 +35,15 @@ const renderPage = ({
 		MockOrganization3,
 		MockDefaultOrganization,
 	],
+	userWorkflows = [MockForkSavedWorkflowMetadata],
+	organizationWorkflows = [MockForkOrganizationSavedWorkflowMetadata],
 	route = "/agents/settings/workflows",
 }: {
 	experiments?: Experiment[];
 	organizationIds?: string[];
 	organizations?: TypesGenOrganization[];
+	userWorkflows?: ForkSavedWorkflowMetadata[];
+	organizationWorkflows?: ForkSavedWorkflowMetadata[];
 	route?: string;
 } = {}) => {
 	vi.spyOn(API, "getExperiments").mockResolvedValue(experiments);
@@ -48,10 +55,10 @@ const renderPage = ({
 	vi.spyOn(API, "getOrganizations").mockResolvedValue(organizations);
 	const listUser = vi
 		.spyOn(forkSavedWorkflowsApi, "getUserSavedWorkflows")
-		.mockResolvedValue([MockForkSavedWorkflowMetadata]);
+		.mockResolvedValue(userWorkflows);
 	const listOrganization = vi
 		.spyOn(forkSavedWorkflowsApi, "getOrganizationSavedWorkflows")
-		.mockResolvedValue([MockForkOrganizationSavedWorkflowMetadata]);
+		.mockResolvedValue(organizationWorkflows);
 	const { router } = renderWithAuth(<ForkSavedWorkflowsPage />, {
 		path: "/agents/settings/workflows",
 		route,
@@ -117,6 +124,60 @@ describe("ForkSavedWorkflowsPage", () => {
 				name: `More actions for ${MockForkOrganizationSavedWorkflowMetadata.name}`,
 			}),
 		).toBeNull();
+	});
+
+	it("deletes an organization workflow another member made when the server allows it", async () => {
+		const user = userEvent.setup();
+		renderPage({
+			organizationWorkflows: [
+				MockForkEditableOrganizationSavedWorkflowMetadata,
+			],
+		});
+		const remove = vi
+			.spyOn(forkSavedWorkflowsApi, "deleteOrganizationSavedWorkflow")
+			.mockResolvedValue();
+
+		await user.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkEditableOrganizationSavedWorkflowMetadata.name}`,
+			}),
+		);
+		await user.click(await screen.findByRole("menuitem", { name: "Delete…" }));
+		await user.click(await screen.findByRole("button", { name: "Delete" }));
+
+		await waitFor(() =>
+			expect(remove).toHaveBeenCalledWith(
+				MockDefaultOrganization.id,
+				MockForkEditableOrganizationSavedWorkflowMetadata.name,
+				{
+					expect_id: MockForkEditableOrganizationSavedWorkflowMetadata.id,
+				},
+			),
+		);
+	});
+
+	it("deletes a personal workflow the caller can delete but not edit or share", async () => {
+		const user = userEvent.setup();
+		renderPage({ userWorkflows: [MockForkDeleteOnlySavedWorkflowMetadata] });
+		const remove = vi
+			.spyOn(forkSavedWorkflowsApi, "deleteUserSavedWorkflow")
+			.mockResolvedValue();
+
+		await user.click(
+			await screen.findByRole("button", {
+				name: `More actions for ${MockForkDeleteOnlySavedWorkflowMetadata.name}`,
+			}),
+		);
+		await user.click(await screen.findByRole("menuitem", { name: "Delete…" }));
+		await user.click(await screen.findByRole("button", { name: "Delete" }));
+
+		await waitFor(() =>
+			expect(remove).toHaveBeenCalledWith(
+				MockDefaultOrganization.id,
+				MockForkDeleteOnlySavedWorkflowMetadata.name,
+				{ expect_id: MockForkDeleteOnlySavedWorkflowMetadata.id },
+			),
+		);
 	});
 
 	it("shows an organization workflow read-only in its detail dialog", async () => {

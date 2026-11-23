@@ -32,6 +32,8 @@ In **Settings** under Agents, the **Workflows** page lists your personal workflo
 **Create workflow** in the dialog stores it, and **Delete…** in a row's menu removes it.
 At the limit of 100, the create button stays but is inert and explains the limit.
 Selecting a workflow's name opens a read-only view of its script, args schema, and phases.
+On this page, a row's menu offers only the actions the server allows you on that workflow, so a workflow you can only read has no menu.
+An organization workflow you shared loses its **Edit** and **Delete…** items when an admin takes your edit and delete away.
 
 The editor protects its save against a deleted or replaced workflow.
 It records the ID of the workflow it loaded, and the save is rejected when the stored workflow has another ID.

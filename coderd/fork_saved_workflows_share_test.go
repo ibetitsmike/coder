@@ -74,13 +74,16 @@ func TestForkShareUserSavedWorkflow(t *testing.T) {
 		_ = requireSDKError(t, err, http.StatusNotFound)
 
 		// A second member reads it but cannot change or delete it.
+		require.Equal(t, codersdk.ForkSavedWorkflowPermissions{Update: true, Delete: true}, shared.Permissions)
+		asReader := shared.ForkSavedWorkflowMetadata
+		asReader.Permissions = codersdk.ForkSavedWorkflowPermissions{}
 		list, err := reader.ForkOrganizationSavedWorkflows(ctx, orgID)
 		require.NoError(t, err)
 		require.Len(t, list, 1)
-		requireSavedWorkflowMetadata(t, shared.ForkSavedWorkflowMetadata, list[0])
+		requireSavedWorkflowMetadata(t, asReader, list[0])
 		got, err := reader.ForkOrganizationSavedWorkflow(ctx, orgID, "triage")
 		require.NoError(t, err)
-		requireSavedWorkflowMetadata(t, shared.ForkSavedWorkflowMetadata, got.ForkSavedWorkflowMetadata)
+		requireSavedWorkflowMetadata(t, asReader, got.ForkSavedWorkflowMetadata)
 		require.Equal(t, shared.Script, got.Script)
 		_, err = reader.UpdateForkOrganizationSavedWorkflow(ctx, orgID, "triage", codersdk.UpdateForkSavedWorkflowRequest{Description: ptr.Ref("hijacked")})
 		_ = requireSDKError(t, err, http.StatusForbidden)
@@ -175,7 +178,9 @@ func TestForkShareUserSavedWorkflow(t *testing.T) {
 		require.Equal(t, personal, got, "a failed share rolls back the move")
 		org, err := author.ForkOrganizationSavedWorkflow(ctx, orgID, "release")
 		require.NoError(t, err)
-		require.Equal(t, existing, org)
+		asAuthor := existing
+		asAuthor.Permissions = codersdk.ForkSavedWorkflowPermissions{}
+		require.Equal(t, asAuthor, org)
 	})
 
 	t.Run("ExpectID", func(t *testing.T) {

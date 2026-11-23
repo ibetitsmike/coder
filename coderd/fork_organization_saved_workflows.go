@@ -45,11 +45,13 @@ func (api *API) forkOrganizationSavedWorkflows(rw http.ResponseWriter, r *http.R
 	}
 	metadata := make([]codersdk.ForkSavedWorkflowMetadata, 0, len(rows))
 	for _, row := range rows {
-		metadata = append(metadata, convertForkSavedWorkflowMetadata(forkdb.SavedWorkflow{
+		workflow := forkdb.SavedWorkflow{
 			ID: row.ID, OrganizationID: row.OrganizationID, CreatedBy: row.CreatedBy,
 			Name: row.Name, Description: row.Description, ArgsSchema: row.ArgsSchema, Phases: row.Phases,
+			GroupAcl: row.GroupAcl, UserAcl: row.UserAcl,
 			CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
-		}))
+		}
+		metadata = append(metadata, convertForkSavedWorkflowMetadata(workflow, api.forkSavedWorkflowPermissions(r, workflow)))
 	}
 	httpapi.Write(ctx, rw, http.StatusOK, metadata)
 }
@@ -95,7 +97,7 @@ func (api *API) postForkOrganizationSavedWorkflow(rw http.ResponseWriter, r *htt
 		writeForkSavedWorkflowWriteError(ctx, rw, err)
 		return
 	}
-	httpapi.Write(ctx, rw, http.StatusCreated, convertForkSavedWorkflow(row))
+	httpapi.Write(ctx, rw, http.StatusCreated, api.convertForkSavedWorkflow(r, row))
 }
 
 // @Summary Get an organization saved workflow
@@ -113,7 +115,7 @@ func (api *API) forkOrganizationSavedWorkflow(rw http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	httpapi.Write(r.Context(), rw, http.StatusOK, convertForkSavedWorkflow(row))
+	httpapi.Write(r.Context(), rw, http.StatusOK, api.convertForkSavedWorkflow(r, row))
 }
 
 // @Summary Update an organization saved workflow
@@ -189,7 +191,7 @@ func (api *API) patchForkOrganizationSavedWorkflow(rw http.ResponseWriter, r *ht
 	}) {
 		return
 	}
-	httpapi.Write(ctx, rw, http.StatusOK, convertForkSavedWorkflow(row))
+	httpapi.Write(ctx, rw, http.StatusOK, api.convertForkSavedWorkflow(r, row))
 }
 
 // @Summary Delete an organization saved workflow

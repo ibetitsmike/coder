@@ -198,13 +198,15 @@ export const ForkSavedWorkflowsTableView: React.FC<
 	const rowHasActions = (workflow: ForkSavedWorkflowMetadata) => {
 		const { update, delete: canDelete } = accessOf(workflow);
 		return (
-			update || canDelete || Boolean(onShare) || Boolean(onManagePermissions)
+			update ||
+			canDelete ||
+			(Boolean(onShare) && workflow.permissions.share) ||
+			Boolean(onManagePermissions)
 		);
 	};
 	const hasRowActions =
 		access.update ||
 		access.delete ||
-		Boolean(onShare) ||
 		Boolean(onManagePermissions) ||
 		workflows.some(rowHasActions);
 
@@ -455,7 +457,7 @@ const SavedWorkflowRow: React.FC<SavedWorkflowRowProps> = ({
 								Edit
 							</DropdownMenuItem>
 						)}
-						{onShare && (
+						{onShare && workflow.permissions.share && (
 							<DropdownMenuItem onClick={() => onShare(workflow)}>
 								Share with organization&hellip;
 							</DropdownMenuItem>

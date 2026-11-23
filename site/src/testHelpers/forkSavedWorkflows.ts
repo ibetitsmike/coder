@@ -28,7 +28,26 @@ export const MockForkSavedWorkflowMetadata: ForkSavedWorkflowMetadata = {
 	phases: ["review", "summarize"],
 	created_at: MOCK_TIMESTAMP,
 	updated_at: MOCK_TIMESTAMP,
+	permissions: { update: true, delete: true, share: true },
 };
+
+/** A personal workflow the server grants no rights on. */
+export const MockForkLockedSavedWorkflowMetadata: ForkSavedWorkflowMetadata = {
+	...MockForkSavedWorkflowMetadata,
+	id: "saved-workflow-locked",
+	name: "locked-workflow",
+	description: "The server returned no rights for this one.",
+	permissions: { update: false, delete: false, share: false },
+};
+
+/** A personal workflow the caller can delete but not edit or share. */
+export const MockForkDeleteOnlySavedWorkflowMetadata: ForkSavedWorkflowMetadata =
+	{
+		...MockForkSavedWorkflowMetadata,
+		id: "saved-workflow-delete-only",
+		name: "delete-only-workflow",
+		permissions: { update: false, delete: true, share: false },
+	};
 
 export const MockForkSavedWorkflow: ForkSavedWorkflow = {
 	...MockForkSavedWorkflowMetadata,
@@ -46,6 +65,8 @@ export const MockForkOrganizationSavedWorkflowMetadata: ForkSavedWorkflowMetadat
 		created_by: undefined,
 		args_schema: undefined,
 		phases: [],
+		// The server grants no rights on this fixture by default.
+		permissions: { update: false, delete: false, share: false },
 	};
 
 /** MockForkSavedWorkflowMetadata after MockUserMember shared it. */
@@ -54,4 +75,14 @@ export const MockForkSharedSavedWorkflowMetadata: ForkSavedWorkflowMetadata = {
 	id: "saved-workflow-shared",
 	user_id: undefined,
 	created_by: MockUserMember.id,
+	// Sharing grants the author edit and delete, not access management.
+	permissions: { update: true, delete: true, share: false },
 };
+
+/** An organization workflow another member made that the caller may edit and delete. */
+export const MockForkEditableOrganizationSavedWorkflowMetadata: ForkSavedWorkflowMetadata =
+	{
+		...MockForkOrganizationSavedWorkflowMetadata,
+		created_by: MockUserOwner.id,
+		permissions: { update: true, delete: true, share: false },
+	};

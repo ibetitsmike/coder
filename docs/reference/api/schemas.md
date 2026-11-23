@@ -11386,6 +11386,11 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
   "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
   "name": "string",
   "organization_id": "7c60d51f-b44e-4682-87d6-449835ea4de6",
+  "permissions": {
+    "delete": true,
+    "share": true,
+    "update": true
+  },
   "phases": [
     "string"
   ],
@@ -11397,19 +11402,20 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 
 ### Properties
 
-| Name              | Type            | Required | Restrictions | Description                                                                            |
-|-------------------|-----------------|----------|--------------|----------------------------------------------------------------------------------------|
-| `args_schema`     | object          | false    |              | Args schema is an optional JSON Schema object for the args of a run.                   |
-| `created_at`      | string          | false    |              |                                                                                        |
-| `created_by`      | string          | false    |              | Created by is the user who saved the workflow. It is empty when that user was deleted. |
-| `description`     | string          | false    |              |                                                                                        |
-| `id`              | string          | false    |              |                                                                                        |
-| `name`            | string          | false    |              | Name is what run_workflow takes to run the workflow.                                   |
-| `organization_id` | string          | false    |              |                                                                                        |
-| `phases`          | array of string | false    |              | Phases are the declared phase names of the workflow, in order.                         |
-| `script`          | string          | false    |              |                                                                                        |
-| `updated_at`      | string          | false    |              |                                                                                        |
-| `user_id`         | string          | false    |              | User ID is the owner of a personal workflow. It is empty on an organization workflow.  |
+| Name              | Type                                                                           | Required | Restrictions | Description                                                                                                                     |
+|-------------------|--------------------------------------------------------------------------------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------------|
+| `args_schema`     | object                                                                         | false    |              | Args schema is an optional JSON Schema object for the args of a run.                                                            |
+| `created_at`      | string                                                                         | false    |              |                                                                                                                                 |
+| `created_by`      | string                                                                         | false    |              | Created by is the user who saved the workflow. It is empty when that user was deleted.                                          |
+| `description`     | string                                                                         | false    |              |                                                                                                                                 |
+| `id`              | string                                                                         | false    |              |                                                                                                                                 |
+| `name`            | string                                                                         | false    |              | Name is what run_workflow takes to run the workflow.                                                                            |
+| `organization_id` | string                                                                         | false    |              |                                                                                                                                 |
+| `permissions`     | [codersdk.ForkSavedWorkflowPermissions](#codersdkforksavedworkflowpermissions) | false    |              | Permissions are the actions the caller may take on the workflow, so two callers can get different values for the same workflow. |
+| `phases`          | array of string                                                                | false    |              | Phases are the declared phase names of the workflow, in order.                                                                  |
+| `script`          | string                                                                         | false    |              |                                                                                                                                 |
+| `updated_at`      | string                                                                         | false    |              |                                                                                                                                 |
+| `user_id`         | string                                                                         | false    |              | User ID is the owner of a personal workflow. It is empty on an organization workflow.                                           |
 
 ## codersdk.ForkSavedWorkflowMetadata
 
@@ -11422,6 +11428,11 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
   "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
   "name": "string",
   "organization_id": "7c60d51f-b44e-4682-87d6-449835ea4de6",
+  "permissions": {
+    "delete": true,
+    "share": true,
+    "update": true
+  },
   "phases": [
     "string"
   ],
@@ -11432,18 +11443,37 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 
 ### Properties
 
-| Name              | Type            | Required | Restrictions | Description                                                                            |
-|-------------------|-----------------|----------|--------------|----------------------------------------------------------------------------------------|
-| `args_schema`     | object          | false    |              | Args schema is an optional JSON Schema object for the args of a run.                   |
-| `created_at`      | string          | false    |              |                                                                                        |
-| `created_by`      | string          | false    |              | Created by is the user who saved the workflow. It is empty when that user was deleted. |
-| `description`     | string          | false    |              |                                                                                        |
-| `id`              | string          | false    |              |                                                                                        |
-| `name`            | string          | false    |              | Name is what run_workflow takes to run the workflow.                                   |
-| `organization_id` | string          | false    |              |                                                                                        |
-| `phases`          | array of string | false    |              | Phases are the declared phase names of the workflow, in order.                         |
-| `updated_at`      | string          | false    |              |                                                                                        |
-| `user_id`         | string          | false    |              | User ID is the owner of a personal workflow. It is empty on an organization workflow.  |
+| Name              | Type                                                                           | Required | Restrictions | Description                                                                                                                     |
+|-------------------|--------------------------------------------------------------------------------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------------|
+| `args_schema`     | object                                                                         | false    |              | Args schema is an optional JSON Schema object for the args of a run.                                                            |
+| `created_at`      | string                                                                         | false    |              |                                                                                                                                 |
+| `created_by`      | string                                                                         | false    |              | Created by is the user who saved the workflow. It is empty when that user was deleted.                                          |
+| `description`     | string                                                                         | false    |              |                                                                                                                                 |
+| `id`              | string                                                                         | false    |              |                                                                                                                                 |
+| `name`            | string                                                                         | false    |              | Name is what run_workflow takes to run the workflow.                                                                            |
+| `organization_id` | string                                                                         | false    |              |                                                                                                                                 |
+| `permissions`     | [codersdk.ForkSavedWorkflowPermissions](#codersdkforksavedworkflowpermissions) | false    |              | Permissions are the actions the caller may take on the workflow, so two callers can get different values for the same workflow. |
+| `phases`          | array of string                                                                | false    |              | Phases are the declared phase names of the workflow, in order.                                                                  |
+| `updated_at`      | string                                                                         | false    |              |                                                                                                                                 |
+| `user_id`         | string                                                                         | false    |              | User ID is the owner of a personal workflow. It is empty on an organization workflow.                                           |
+
+## codersdk.ForkSavedWorkflowPermissions
+
+```json
+{
+  "delete": true,
+  "share": true,
+  "update": true
+}
+```
+
+### Properties
+
+| Name     | Type    | Required | Restrictions | Description |
+|----------|---------|----------|--------------|-------------|
+| `delete` | boolean | false    |              |             |
+| `share`  | boolean | false    |              |             |
+| `update` | boolean | false    |              |             |
 
 ## codersdk.ForkSubagentLimitValues
 
