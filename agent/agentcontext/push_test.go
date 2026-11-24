@@ -316,10 +316,13 @@ func TestRunPush_InvalidWaitsForChange(t *testing.T) {
 	require.NoError(t, err)
 	testutil.RequireReceive(ctx, t, p.signal)
 
+	// The successful push settles the fork's capability negotiation
+	// with one more (generation-zero) push; the change-carrying retry
+	// is requests[1].
 	requests := p.snapshot()
-	require.Len(t, requests, 2)
+	require.GreaterOrEqual(t, len(requests), 2)
 	require.Greater(t, requests[1].Version, requests[0].Version)
-	require.True(t, requests[1].Initial, "Initial must hold until a push succeeds")
+	require.True(t, requests[1].Initial, "Initial must hold until a generation-zero push succeeds")
 
 	cancel()
 	require.ErrorIs(t, <-pushDone, context.Canceled)
