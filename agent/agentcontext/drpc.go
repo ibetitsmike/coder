@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"golang.org/x/xerrors"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/structpb"
 	"storj.io/drpc/drpcerr"
 
@@ -43,8 +44,11 @@ func (p *DRPCPusher) PushContextState(ctx context.Context, req *PushRequest) (*P
 	}
 	resp, err := p.forkHashRows.push(ctx, p.client, pushRequestToProto(req)) // fork: hash-only rows
 	if err != nil {
-		if drpcerr.Code(err) == drpcerr.Unimplemented {
+		switch drpcerr.Code(err) {
+		case drpcerr.Unimplemented:
 			return nil, ErrPushUnimplemented
+		case uint64(codes.InvalidArgument):
+			return nil, xerrors.Errorf("%s: %w", err.Error(), ErrPushInvalid)
 		}
 		return nil, err
 	}
