@@ -271,11 +271,14 @@ func TestRunPush_RetryCarriesNewestSnapshot(t *testing.T) {
 	mClock.Advance(time.Second).MustWait(ctx)
 	testutil.RequireReceive(ctx, t, p.signal)
 
+	// A fresh Manager leads with a capability probe, so the successful
+	// retry settles the negotiation with one more (generation-zero)
+	// push; the retry itself is requests[1].
 	requests := p.snapshot()
-	require.Len(t, requests, 2)
+	require.GreaterOrEqual(t, len(requests), 2)
 	require.Greater(t, requests[1].Version, requests[0].Version, "retry must carry the newer snapshot")
 	require.NotEqual(t, requests[0].AggregateHash, requests[1].AggregateHash)
-	require.True(t, requests[1].Initial, "Initial must hold until a push succeeds")
+	require.True(t, requests[1].Initial, "Initial must hold until a generation-zero push succeeds")
 
 	cancel()
 	require.ErrorIs(t, <-pushDone, context.Canceled)
@@ -348,8 +351,13 @@ func TestRunPush_ChangeDuringOutstandingPush(t *testing.T) {
 	require.NoError(t, err)
 	close(p.release)
 
+	// The outstanding probe push settles the negotiation when it
+	// returns, and the settled successor re-resolves the current state,
+	// so the push carrying the v2 change is the probe's settled
+	// successor. Fork behavior: it keeps Initial=true because coderd
+	// persisted nothing for the probe.
 	last := waitForPush(ctx, t, p, v2.AggregateHash)
-	require.False(t, last.Initial)
+	require.True(t, last.Initial)
 
 	cancel()
 	require.ErrorIs(t, <-pushDone, context.Canceled)
