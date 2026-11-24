@@ -49,8 +49,8 @@ func newUpConfig(opts []UpOption) upConfig {
 	return cfg
 }
 
-// WithLogger logs applied nodes and lock retries.
-func WithLogger(logger slog.Logger) UpOption {
+// WithChatdLogger logs applied nodes and lock retries.
+func WithChatdLogger(logger slog.Logger) UpOption {
 	return func(c *upConfig) { c.logger = logger }
 }
 
@@ -76,18 +76,24 @@ func UpAll(db *sql.DB, opts ...UpOption) error {
 
 // ServerMigrate is the migrate step of coder server. It runs the startup
 // migrations, then runs the background nodes in a goroutine that stops with
-// ctx.
-func ServerMigrate(ctx context.Context, logger slog.Logger) func(*sql.DB) error {
-	return func(db *sql.DB) error {
+// ctx. It keeps upstream's new Option contract: ConnectToPostgres passes
+// Options (at least WithLogger), and the chatd graph logs with that logger
+// when one is given.
+func ServerMigrate(ctx context.Context, logger slog.Logger) func(*sql.DB, ...Option) error {
+	return func(db *sql.DB, opts ...Option) error {
+		chatdLogger := logger
+		if o := newUpOptions(opts...); o.logger != nil {
+			chatdLogger = *o.logger
+		}
 		g, err := LoadGraph()
 		if err != nil {
 			return xerrors.Errorf("load chatd graph: %w", err)
 		}
-		if err := UpGraph(db, g, WithLogger(logger), DeferBackground()); err != nil {
+		if err := UpGraph(db, g, WithChatdLogger(chatdLogger), DeferBackground()); err != nil {
 			return err
 		}
 		go func() {
-			err := RunBackground(ctx, db, g, WithLogger(logger))
+			err := RunBackground(ctx, db, g, WithChatdLogger(chatdLogger))
 			if err != nil && ctx.Err() == nil {
 				logger.Error(ctx, "background chatd migrations failed, they run again on the next start", slog.Error(err))
 			}
@@ -135,12 +141,16 @@ func UpGraph(db *sql.DB, g *chatdmig.Graph, opts ...UpOption) (retErr error) {
 
 	core := g.CoreFS(migrations, cfg.lock.SetLocal())
 	var m *migrate.Migrate
+	// Reporting never changes how migrations run; the zero-options
+	// reporter logs nothing, matching Up's default.
+	reporter := newReporter(db, upOptions{})
+	defer reporter.cancel()
 	openMigrate := func() error {
 		if m != nil {
 			return nil
 		}
 		var err error
-		if _, m, err = setup(db, core); err != nil {
+		if _, m, err = setup(db, core, reporter); err != nil {
 			return xerrors.Errorf("migrate setup: %w", err)
 		}
 		return nil

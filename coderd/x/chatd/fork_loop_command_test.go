@@ -3,7 +3,6 @@ package chatd_test
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"testing"
 
@@ -35,12 +34,11 @@ func TestLoopCommandPromptHook(t *testing.T) {
 		LastModelConfigID: model.ID,
 	})
 	var received agenthooks.Request
-	consumer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	consumer := newHookConsumer(t, func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&received))
 		_, err := w.Write([]byte(`{"permission":{"decision":"allow","input_override":{"prompt":"check CI quietly"}}}`))
 		require.NoError(t, err)
-	}))
-	t.Cleanup(consumer.Close)
+	})
 	server := newTestServer(t, db, ps, uuid.New(), func(cfg *chatd.Config) {
 		cfg.HookDispatcher = newHookDispatcher(t, db, consumer)
 		cfg.Experiments = append(slices.Clone(codersdk.ExperimentsKnown), codersdk.ExperimentForkChatWakeups)

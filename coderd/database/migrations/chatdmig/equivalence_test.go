@@ -84,7 +84,7 @@ func TestUpgradeMatchesFresh(t *testing.T) {
 		t.Run(fmt.Sprint(from), func(t *testing.T) {
 			t.Parallel()
 			oldURL, oldDB := createDB(t, admin)
-			require.NoError(t, migrations.UpWithFS(oldDB, upstreamUpTo(t, from)))
+			require.NoError(t, migrations.Up(oldDB, migrations.WithFS(upstreamUpTo(t, from))))
 			require.NoError(t, migrations.UpAll(oldDB))
 			require.NoError(t, migrations.EnsureCleanAll(oldDB))
 			requireSameBlocks(t, fresh, dumpBlocks(t, oldURL, false))
@@ -311,7 +311,7 @@ func TestRoutingMatchesUpstream(t *testing.T) {
 	require.Equal(t, routed, versions)
 
 	oldURL, oldDB := createDB(t, admin)
-	require.NoError(t, migrations.UpWithFS(oldDB, upstreamUpTo(t, deployedVersion-10)))
+	require.NoError(t, migrations.Up(oldDB, migrations.WithFS(upstreamUpTo(t, deployedVersion-10))))
 	require.NoError(t, migrations.UpGraph(oldDB, g))
 	requireSameBlocks(t, dumpBlocks(t, freshURL, false), dumpBlocks(t, oldURL, false))
 }
