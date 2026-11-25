@@ -601,7 +601,7 @@ require (
 )
 
 require (
-	github.com/coder/gpgkms v0.2.0 // indirect
+	github.com/coder/gpgkms v0.2.1 // indirect
 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/go-openapi/swag/pools v0.29.2 // indirect
