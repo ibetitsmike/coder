@@ -46,6 +46,7 @@ import (
 	"github.com/coder/coder/v2/aibridge/mcp"
 	"github.com/coder/coder/v2/aibridge/provider"
 	"github.com/coder/coder/v2/aibridge/recorder"
+	"github.com/coder/coder/v2/aibridge/sse"
 )
 
 func TestMain(m *testing.M) {
@@ -109,7 +110,7 @@ func TestAnthropicMessages(t *testing.T) {
 
 				// Response-specific checks.
 				if tc.streaming {
-					sp := aibridge.NewSSEParser()
+					sp := sse.NewParser()
 					require.NoError(t, sp.Parse(resp.Body))
 
 					// Ensure the message starts and completes, at a minimum.
@@ -472,7 +473,7 @@ func TestAnthropicMessagesModelThoughts(t *testing.T) {
 			require.Equal(t, http.StatusOK, resp.StatusCode)
 
 			if tc.streaming {
-				sp := aibridge.NewSSEParser()
+				sp := sse.NewParser()
 				require.NoError(t, sp.Parse(resp.Body))
 				assert.Contains(t, sp.AllEvents(), "message_start")
 				assert.Contains(t, sp.AllEvents(), "message_stop")
@@ -817,7 +818,7 @@ func TestAWSBedrockIntegration(t *testing.T) {
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 
 		// The re-emitted client SSE proves the binary frames were decoded.
-		sp := aibridge.NewSSEParser()
+		sp := sse.NewParser()
 		require.NoError(t, sp.Parse(resp.Body))
 		assert.Contains(t, sp.AllEvents(), "message_start")
 		assert.Contains(t, sp.AllEvents(), "message_stop")
@@ -1320,7 +1321,7 @@ func TestOpenAIChatCompletions(t *testing.T) {
 
 				// Response-specific checks.
 				if tc.streaming {
-					sp := aibridge.NewSSEParser()
+					sp := sse.NewParser()
 					require.NoError(t, sp.Parse(resp.Body))
 
 					// OpenAI sends all events under the same type.
@@ -1367,7 +1368,7 @@ func TestOpenAIChatCompletions(t *testing.T) {
 		)
 		defer resp.Body.Close()
 
-		sp := aibridge.NewSSEParser()
+		sp := sse.NewParser()
 		require.NoError(t, sp.Parse(resp.Body))
 
 		var finalUsage gjson.Result
@@ -1729,6 +1730,7 @@ func TestSessionIDTracking(t *testing.T) {
 
 	testCases := []struct {
 		name              string
+		proxyMode         bool
 		fixture           []byte
 		header            http.Header
 		metadataSessionID string
@@ -1749,6 +1751,18 @@ func TestSessionIDTracking(t *testing.T) {
 		// Session in body.
 		{
 			name:            "claude_code",
+			fixture:         fixtures.AntSimple,
+			expectedClient:  aibclient.ClaudeCode,
+			expectSessionID: "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+			header: http.Header{
+				"User-Agent": []string{"claude-cli/2.0.67 (external, cli)"},
+			},
+			metadataSessionID: "user_abc123_account_456_session_f47ac10b-58cc-4372-a567-0e02b2c3d479",
+		},
+		// Session in body, proxy mode.
+		{
+			name:            "claude_code_proxy",
+			proxyMode:       true,
 			fixture:         fixtures.AntSimple,
 			expectedClient:  aibclient.ClaudeCode,
 			expectSessionID: "f47ac10b-58cc-4372-a567-0e02b2c3d479",
@@ -1787,7 +1801,11 @@ func TestSessionIDTracking(t *testing.T) {
 
 			fix := fixtures.Parse(t, tc.fixture)
 			upstream := testutil.NewMockUpstream(ctx, t, testutil.NewFixtureResponse(fix))
-			bridgeServer := newBridgeTestServer(ctx, t, upstream.URL, withProvider(config.ProviderAnthropic))
+			opts := []bridgeOption{withProvider(config.ProviderAnthropic)}
+			if tc.proxyMode {
+				opts = append(opts, withProxyMode())
+			}
+			bridgeServer := newBridgeTestServer(ctx, t, upstream.URL, opts...)
 
 			reqBody := fix.Request()
 			if tc.metadataSessionID != "" {
@@ -1804,6 +1822,7 @@ func TestSessionIDTracking(t *testing.T) {
 			// Drain the body to let the stream complete.
 			_, err = io.ReadAll(resp.Body)
 			require.NoError(t, err)
+			bridgeServer.awaitRecordings(t)
 
 			interceptions := bridgeServer.Recorder.RecordedInterceptions()
 			require.Len(t, interceptions, 1, "expected exactly one interception")
@@ -2366,7 +2385,7 @@ func TestErrorHandling(t *testing.T) {
 					// Server responds first with 200 OK then starts streaming.
 					require.Equal(t, http.StatusOK, resp.StatusCode)
 
-					sp := aibridge.NewSSEParser()
+					sp := sse.NewParser()
 					require.NoError(t, sp.Parse(resp.Body))
 					require.Len(t, sp.EventsByType("error"), 1)
 					require.Contains(t, sp.EventsByType("error")[0].Data, "Overloaded")
@@ -2380,7 +2399,7 @@ func TestErrorHandling(t *testing.T) {
 					// Server responds first with 200 OK then starts streaming.
 					require.Equal(t, http.StatusOK, resp.StatusCode)
 
-					sp := aibridge.NewSSEParser()
+					sp := sse.NewParser()
 					require.NoError(t, sp.Parse(resp.Body))
 					// OpenAI sends all events under the same type.
 					messageEvents := sp.MessageEvents()
