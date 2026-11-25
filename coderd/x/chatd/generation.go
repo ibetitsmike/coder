@@ -59,6 +59,9 @@ type generationPrepareInput struct {
 		debug *generationDebug,
 		summaries []mcpclient.ConnectSummary,
 	)
+	// RecordStageModel receives the turn model as soon as it resolves,
+	// so a preparation that fails later still attributes its turn span.
+	RecordStageModel func(chatloop.StageModel)
 }
 
 // generationCompaction contains compaction inputs prepared for generation.
@@ -643,6 +646,9 @@ func (s *taskStarter) runGenerationStep(
 		Chat:                      chat,
 		Messages:                  messages,
 		RecordMCPConnectSummaries: input.DebugTurn.RecordMCPConnectSummaries,
+		RecordStageModel: func(model chatloop.StageModel) {
+			input.TurnSpan.SetProvider(input.TurnToken, model)
+		},
 	}
 	synced, promptRows, err := s.syncForkContext(ctx, machine, input, chat, messages)
 	if err != nil {
@@ -1363,6 +1369,8 @@ func (s *taskStarter) generateCompaction(
 		attribute.String(chatloop.AttrCompactionSource, string(source)),
 	)
 	compactionSpan.SetModel(compactionModel)
+	compactionOpts.Stages = s.server.stages
+	compactionOpts.StageModel = compactionModel
 	outcome, err := s.server.forkGenerateCompaction(compactionCtx, prepared, compactionOpts)
 	compactionSpan.End(err)
 	if err != nil {

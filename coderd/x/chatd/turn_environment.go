@@ -234,6 +234,9 @@ func (p *Server) buildTurnEnvironment(
 	if err != nil {
 		return turnEnvironment{}, err
 	}
+	if input.RecordStageModel != nil {
+		input.RecordStageModel(resolved.stageModel())
+	}
 	modelConfig := resolved.dbConfig
 
 	var computerUseProvider codersdk.ChatComputerUseProvider
