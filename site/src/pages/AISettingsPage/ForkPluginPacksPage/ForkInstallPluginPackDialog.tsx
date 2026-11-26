@@ -86,7 +86,6 @@ export const ForkInstallPluginPackDialog: React.FC<
 						placeholder="pstack"
 						required
 						disabled={isInstalling}
-						autoFocus
 					/>
 					<FormField
 						field={getFieldHelpers("source_url")}

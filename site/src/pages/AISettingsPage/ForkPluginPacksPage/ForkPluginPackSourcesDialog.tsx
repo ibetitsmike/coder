@@ -95,7 +95,6 @@ const SourcesForm: React.FC<SourcesFormProps> = ({
 						rows={6}
 						placeholder="github.com"
 						disabled={isSaving}
-						autoFocus
 					/>
 				)}
 			/>

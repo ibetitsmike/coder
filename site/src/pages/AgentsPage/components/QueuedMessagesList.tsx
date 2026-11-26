@@ -1,7 +1,6 @@
 import { cn } from "cn";
 import {
 	ArrowUpIcon,
-	CornerDownLeftIcon,
 	InfoIcon,
 	PaperclipIcon,
 	PencilIcon,
@@ -38,7 +37,7 @@ type QueuedMessagesListProps = {
 	// The queued row this composer edits, or null. It gets no Edit action; a
 	// row under edit elsewhere keeps Edit so this client can take it over.
 	composerQueuedMessageID: number | null;
-	showEnterToSendHint?: boolean;
+	sendShortcutHint?: React.ReactNode;
 	className?: string;
 };
 
@@ -221,7 +220,7 @@ export const QueuedMessagesList: React.FC<QueuedMessagesListProps> = ({
 	isChatPaused = false,
 	queuedMessageUnderEditID,
 	composerQueuedMessageID,
-	showEnterToSendHint,
+	sendShortcutHint,
 	className,
 }) => {
 	const underEditIndex = messages.findIndex(
@@ -292,7 +291,7 @@ export const QueuedMessagesList: React.FC<QueuedMessagesListProps> = ({
 								<QueuedMessageRow
 									key={item.id}
 									item={item}
-									showEnterToSendHint={isFirst && Boolean(showEnterToSendHint)}
+									sendShortcutHint={isFirst ? sendShortcutHint : undefined}
 									showActions={
 										hoveredID === item.id || (isFirst && hoveredID === null)
 									}
@@ -365,7 +364,7 @@ const QueuedMessageGroup: React.FC<QueuedMessageGroupProps> = ({
 
 type QueuedMessageRowProps = {
 	item: QueuedMessageItem;
-	showEnterToSendHint: boolean;
+	sendShortcutHint: React.ReactNode;
 	showActions: boolean;
 	// Applies to every action of the row.
 	disabledReason: string | undefined;
@@ -381,7 +380,7 @@ type QueuedMessageRowProps = {
 
 const QueuedMessageRow: React.FC<QueuedMessageRowProps> = ({
 	item,
-	showEnterToSendHint,
+	sendShortcutHint,
 	showActions,
 	disabledReason,
 	isChatPaused,
@@ -448,15 +447,14 @@ const QueuedMessageRow: React.FC<QueuedMessageRowProps> = ({
 					</TooltipContent>
 				</Tooltip>
 			)}
-			{showEnterToSendHint && onPromote && (
+			{sendShortcutHint && onPromote && (
 				<span
 					className={cn(
 						"hidden shrink-0 items-center gap-1 text-xs text-content-secondary transition-opacity sm:flex",
 						showActions ? "opacity-100" : "opacity-0",
 					)}
 				>
-					<CornerDownLeftIcon className="size-3" aria-hidden="true" />
-					<span className="sr-only">Enter</span>
+					{sendShortcutHint}
 					to send
 				</span>
 			)}
