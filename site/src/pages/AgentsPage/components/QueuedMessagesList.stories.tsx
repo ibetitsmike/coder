@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
 import type { ChatQueuedMessage } from "#/api/typesGenerated";
+import { Kbd } from "#/components/Kbd/Kbd";
 import {
 	MockChatQueuedMessage,
 	MockChatQueuedMessageUnderEdit,
@@ -27,7 +28,7 @@ const meta: Meta<typeof QueuedMessagesList> = {
 		onEndEdit: fn(),
 		queuedMessageUnderEditID: null,
 		composerQueuedMessageID: null,
-		showEnterToSendHint: true,
+		sendShortcutHint: <Kbd>Enter</Kbd>,
 	},
 };
 
@@ -245,7 +246,7 @@ export const AttachmentsOnly: Story = {
 // Steer rows offer no Send now, and a steer head gets no Enter-to-send hint.
 export const GroupedByLane: Story = {
 	args: {
-		showEnterToSendHint: false,
+		sendShortcutHint: undefined,
 		messages: [
 			{
 				...buildMessage(1, textContent("Also check the error logs")),
@@ -304,7 +305,7 @@ export const RowUnderEditWithWaitingTail: Story = {
 export const WaitingBehindHeadUnderEdit: Story = {
 	args: {
 		queuedMessageUnderEditID: 1,
-		showEnterToSendHint: false,
+		sendShortcutHint: undefined,
 		messages: [
 			{
 				...MockChatQueuedMessageUnderEdit,
@@ -325,7 +326,7 @@ export const WaitingBehindHeadUnderEdit: Story = {
 export const SteerRowUnderEditHoldsLane: Story = {
 	args: {
 		queuedMessageUnderEditID: 2,
-		showEnterToSendHint: false,
+		sendShortcutHint: undefined,
 		messages: [
 			{
 				...buildMessage(1, textContent("Also check the error logs")),
@@ -353,7 +354,7 @@ export const HeadUnderEdit: Story = {
 	args: {
 		queuedMessageUnderEditID: 1,
 		isChatPaused: true,
-		showEnterToSendHint: false,
+		sendShortcutHint: undefined,
 		messages: [
 			{
 				...MockChatQueuedMessageUnderEdit,
@@ -373,7 +374,7 @@ export const PausedEditBehindHead: Story = {
 	args: {
 		queuedMessageUnderEditID: 1,
 		isChatPaused: true,
-		showEnterToSendHint: false,
+		sendShortcutHint: undefined,
 		messages: [
 			{
 				...MockChatQueuedMessageUnderEdit,
