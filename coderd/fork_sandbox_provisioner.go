@@ -9,7 +9,6 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/httpapi"
 	"github.com/coder/coder/v2/codersdk"
 )
@@ -19,7 +18,7 @@ import (
 // experiment. When it is off, the request fails with 400 and the function
 // returns false.
 func (api *API) forkSandboxProvisionerAllowed(ctx context.Context, rw http.ResponseWriter, provisioner codersdk.ProvisionerType) bool {
-	if provisioner != codersdk.ProvisionerType(forkdb.ProvisionerTypeSandbox) ||
+	if provisioner != codersdk.ProvisionerTypeSandbox ||
 		api.Experiments.Enabled(codersdk.ExperimentForkSandboxProvisioner) {
 		return true
 	}

@@ -10427,9 +10427,13 @@ export interface ProvisionerTiming {
 }
 
 // From codersdk/organizations.go
-export type ProvisionerType = "echo" | "terraform";
+export type ProvisionerType = "echo" | "sandbox" | "terraform";
 
-export const ProvisionerTypes: ProvisionerType[] = ["echo", "terraform"];
+export const ProvisionerTypes: ProvisionerType[] = [
+	"echo",
+	"sandbox",
+	"terraform",
+];
 
 // From codersdk/workspaceproxy.go
 /**
