@@ -27,6 +27,7 @@ import (
 	"github.com/coder/coder/v2/coderd/coderdtest"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
+	"github.com/coder/coder/v2/coderd/database/dbfake"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
 	"github.com/coder/coder/v2/coderd/database/dbmock"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
@@ -559,6 +560,47 @@ func TestForkQuerier(t *testing.T) {
 			arg := testutil.Fake(t, faker, forkdb.UpdateChatAPNsDeviceEnvironmentParams{})
 			fdb.EXPECT().UpdateChatAPNsDeviceEnvironment(gomock.Any(), arg).Return(nil).AnyTimes()
 			check.Args(arg).Asserts(rbac.ResourceWebpushSubscription, policy.ActionCreate).Returns()
+		},
+		"InsertSandboxOperation": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			ws := testutil.Fake(t, faker, database.Workspace{})
+			build := testutil.Fake(t, faker, database.WorkspaceBuild{WorkspaceID: ws.ID})
+			op := testutil.Fake(t, faker, forkdb.SandboxOperation{WorkspaceID: ws.ID, WorkspaceBuildID: build.ID})
+			arg := forkdb.InsertSandboxOperationParams{ID: op.ID, WorkspaceBuildID: build.ID}
+			db.EXPECT().GetWorkspaceBuildByID(gomock.Any(), build.ID).Return(build, nil).AnyTimes()
+			db.EXPECT().GetWorkspaceByID(gomock.Any(), ws.ID).Return(ws, nil).AnyTimes()
+			fdb.EXPECT().InsertSandboxOperation(gomock.Any(), arg).Return(op, nil).AnyTimes()
+			check.Args(arg).Asserts(ws, policy.ActionUpdate).Returns(op)
+		},
+		"GetSandboxOperation": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			ws := testutil.Fake(t, faker, database.Workspace{})
+			op := testutil.Fake(t, faker, forkdb.SandboxOperation{WorkspaceID: ws.ID})
+			fdb.EXPECT().GetSandboxOperation(gomock.Any(), op.ID).Return(op, nil).AnyTimes()
+			db.EXPECT().GetWorkspaceByID(gomock.Any(), ws.ID).Return(ws, nil).AnyTimes()
+			check.Args(op.ID).Asserts(ws, policy.ActionRead).Returns(op)
+		},
+		"SupersedeSandboxOperations": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			ws := testutil.Fake(t, faker, database.Workspace{})
+			op := testutil.Fake(t, faker, forkdb.SandboxOperation{WorkspaceID: ws.ID})
+			arg := forkdb.SupersedeSandboxOperationsParams{WorkspaceID: ws.ID, Generation: 2}
+			db.EXPECT().GetWorkspaceByID(gomock.Any(), ws.ID).Return(ws, nil).AnyTimes()
+			fdb.EXPECT().SupersedeSandboxOperations(gomock.Any(), arg).Return([]forkdb.SandboxOperation{op}, nil).AnyTimes()
+			check.Args(arg).Asserts(ws, policy.ActionUpdate).Returns([]forkdb.SandboxOperation{op})
+		},
+		"ClaimSandboxOperation": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			ws := testutil.Fake(t, faker, database.Workspace{})
+			op := testutil.Fake(t, faker, forkdb.SandboxOperation{WorkspaceID: ws.ID})
+			arg := forkdb.ClaimSandboxOperationParams{ID: op.ID, WorkspaceID: ws.ID}
+			db.EXPECT().GetWorkspaceByID(gomock.Any(), ws.ID).Return(ws, nil).AnyTimes()
+			fdb.EXPECT().ClaimSandboxOperation(gomock.Any(), arg).Return(op, nil).AnyTimes()
+			check.Args(arg).Asserts(ws, policy.ActionUpdate).Returns(op)
+		},
+		"CompleteSandboxOperation": func(t *testing.T, db *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+			ws := testutil.Fake(t, faker, database.Workspace{})
+			op := testutil.Fake(t, faker, forkdb.SandboxOperation{WorkspaceID: ws.ID})
+			arg := forkdb.CompleteSandboxOperationParams{ID: op.ID, WorkspaceID: ws.ID, Status: forkdb.SandboxOperationStatusDone}
+			db.EXPECT().GetWorkspaceByID(gomock.Any(), ws.ID).Return(ws, nil).AnyTimes()
+			fdb.EXPECT().CompleteSandboxOperation(gomock.Any(), arg).Return(op, nil).AnyTimes()
+			check.Args(arg).Asserts(ws, policy.ActionUpdate).Returns(op)
 		},
 		"InsertPluginPack": func(t *testing.T, _ *dbmock.MockStore, fdb *forkdbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 			pack := testutil.Fake(t, faker, forkdb.PluginPack{})
@@ -1720,6 +1762,65 @@ func TestSavedWorkflowRBAC(t *testing.T) {
 	require.NoError(t, err, "a direct grant")
 	_, err = fdb.DeleteOrganizationSavedWorkflowByName(admin, forkdb.DeleteOrganizationSavedWorkflowByNameParams{OrganizationID: org.ID, Name: "shared"})
 	require.NoError(t, err)
+}
+
+// TestSandboxOperationRBAC proves with real roles that a caller of workspace
+// A cannot touch the operation of B: naming B is not authorized, naming A
+// finds no row.
+func TestSandboxOperationRBAC(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	store, _ := dbtestutil.NewDB(t)
+	db := dbauthz.New(store, rbac.NewAuthorizer(prometheus.NewRegistry()), slogtest.Make(t, &slogtest.Options{
+		IgnoreErrors: true,
+	}), coderdtest.AccessControlStorePointer())
+	fdb, err := forkdb.From(db)
+	require.NoError(t, err)
+
+	org := dbgen.Organization(t, store, database.Organization{})
+	workspaceOf := func() (rbac.Subject, database.WorkspaceTable, database.WorkspaceBuild) {
+		user := dbgen.User(t, store, database.User{})
+		_ = dbgen.OrganizationMember(t, store, database.OrganizationMember{OrganizationID: org.ID, UserID: user.ID})
+		resp := dbfake.WorkspaceBuild(t, store, database.WorkspaceTable{OrganizationID: org.ID, OwnerID: user.ID}).Do()
+		return rbac.Subject{
+			ID:     user.ID.String(),
+			Roles:  must(rolestore.Expand(ctx, store, []rbac.RoleIdentifier{rbac.RoleMember(), rbac.ScopedRoleOrgMember(org.ID), rbac.ScopedRoleOrgWorkspaceAccess(org.ID)})),
+			Groups: []string{org.ID.String()},
+			Scope:  rbac.ExpandableScope(rbac.ScopeAll),
+		}, resp.Workspace, resp.Build
+	}
+	subjectA, wsA, buildA := workspaceOf()
+	subjectB, wsB, buildB := workspaceOf()
+	asA := dbauthz.As(ctx, subjectA)
+	asB := dbauthz.As(ctx, subjectB)
+
+	_, err = fdb.InsertSandboxOperation(asA, forkdb.InsertSandboxOperationParams{ID: uuid.New(), WorkspaceBuildID: buildB.ID})
+	require.True(t, dbauthz.IsNotAuthorizedError(err), "A files an intent for B's build: %v", err)
+	_, err = fdb.InsertSandboxOperation(asA, forkdb.InsertSandboxOperationParams{ID: uuid.New(), WorkspaceBuildID: buildA.ID})
+	require.NoError(t, err)
+	opB, err := fdb.InsertSandboxOperation(asB, forkdb.InsertSandboxOperationParams{ID: uuid.New(), WorkspaceBuildID: buildB.ID})
+	require.NoError(t, err)
+
+	_, err = fdb.GetSandboxOperation(asA, opB.ID)
+	require.True(t, dbauthz.IsNotAuthorizedError(err), "A reads B's operation: %v", err)
+	_, err = fdb.ClaimSandboxOperation(asA, forkdb.ClaimSandboxOperationParams{ID: opB.ID, WorkspaceID: wsB.ID})
+	require.True(t, dbauthz.IsNotAuthorizedError(err), "A claims naming B: %v", err)
+	_, err = fdb.ClaimSandboxOperation(asA, forkdb.ClaimSandboxOperationParams{ID: opB.ID, WorkspaceID: wsA.ID})
+	require.ErrorIs(t, err, sql.ErrNoRows, "A claims B's operation naming A")
+	_, err = fdb.SupersedeSandboxOperations(asA, forkdb.SupersedeSandboxOperationsParams{WorkspaceID: wsB.ID, Generation: opB.Generation + 1})
+	require.True(t, dbauthz.IsNotAuthorizedError(err), "A supersedes B's operations: %v", err)
+
+	claimed, err := fdb.ClaimSandboxOperation(asB, forkdb.ClaimSandboxOperationParams{ID: opB.ID, WorkspaceID: wsB.ID})
+	require.NoError(t, err)
+	require.Equal(t, forkdb.SandboxOperationStatusClaimed, claimed.Status)
+	_, err = fdb.CompleteSandboxOperation(asA, forkdb.CompleteSandboxOperationParams{ID: opB.ID, WorkspaceID: wsA.ID, Status: forkdb.SandboxOperationStatusDone})
+	require.ErrorIs(t, err, sql.ErrNoRows, "A completes B's operation naming A")
+
+	// The built-in provisioner daemon acts on every workspace.
+	done, err := fdb.CompleteSandboxOperation(dbauthz.AsProvisionerd(ctx), forkdb.CompleteSandboxOperationParams{ID: opB.ID, WorkspaceID: wsB.ID, Status: forkdb.SandboxOperationStatusDone})
+	require.NoError(t, err)
+	require.Equal(t, forkdb.SandboxOperationStatusDone, done.Status)
 }
 
 func pluginPackObject(pack forkdb.PluginPack) rbac.Object {
