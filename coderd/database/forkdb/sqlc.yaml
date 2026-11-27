@@ -49,6 +49,7 @@ sql:
       - "../migrations/chatdmig/nodes/01a1e891-6025-7d4e-b4bc-bf9b42beabf2_workflow_run_owner.up.sql"
       - "../migrations/chatdmig/nodes/01a1e891-a2d2-7cfc-9764-2d4c44131e5b_workflow_runs_running_index.up.sql"
       - "../migrations/chatdmig/nodes/01a20017-5e6c-7762-b6ba-8071925ea4bc_chat_apns_devices.up.sql"
+      - "../migrations/chatdmig/nodes/01a21f0f-c938-7cef-8dc8-cf9802b5fa40_sandbox_operations.up.sql"
     queries: "./queries"
     engine: "postgresql"
     gen:
@@ -77,6 +78,10 @@ sql:
             go_type:
               import: "github.com/coder/coder/v2/coderd/database"
               type: "NullChatStatus"
+          - db_type: "workspace_transition"
+            go_type:
+              import: "github.com/coder/coder/v2/coderd/database"
+              type: "WorkspaceTransition"
           # GetDescendantChatsByRootIDs embeds chats_expanded, so its
           # columns take the types of database.Chat.
           - column: "chats_expanded.last_reasoning_effort"

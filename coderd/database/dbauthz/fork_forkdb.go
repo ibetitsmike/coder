@@ -1625,3 +1625,60 @@ func (f *forkQuerier) UpdateChatAPNsDeviceEnvironment(ctx context.Context, arg f
 	}
 	return f.db.UpdateChatAPNsDeviceEnvironment(ctx, arg)
 }
+
+// authorizeWorkspaceID authorizes action on a workspace by ID. The sandbox
+// operation queries bind the workspace ID they act on, so authorizing that ID
+// covers the rows they touch.
+func (f *forkQuerier) authorizeWorkspaceID(ctx context.Context, action policy.Action, workspaceID uuid.UUID) error {
+	ws, err := f.q.db.GetWorkspaceByID(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	return f.q.authorizeContext(ctx, action, ws)
+}
+
+// InsertSandboxOperation takes the workspace from the build row, so it
+// authorizes an update of the workspace that owns the build.
+func (f *forkQuerier) InsertSandboxOperation(ctx context.Context, arg forkdb.InsertSandboxOperationParams) (forkdb.SandboxOperation, error) {
+	build, err := f.q.db.GetWorkspaceBuildByID(ctx, arg.WorkspaceBuildID)
+	if err != nil {
+		return forkdb.SandboxOperation{}, err
+	}
+	if err := f.authorizeWorkspaceID(ctx, policy.ActionUpdate, build.WorkspaceID); err != nil {
+		return forkdb.SandboxOperation{}, err
+	}
+	return f.db.InsertSandboxOperation(ctx, arg)
+}
+
+// GetSandboxOperation authorizes a read of the workspace that owns the row.
+func (f *forkQuerier) GetSandboxOperation(ctx context.Context, id uuid.UUID) (forkdb.SandboxOperation, error) {
+	op, err := f.db.GetSandboxOperation(ctx, id)
+	if err != nil {
+		return forkdb.SandboxOperation{}, err
+	}
+	if err := f.authorizeWorkspaceID(ctx, policy.ActionRead, op.WorkspaceID); err != nil {
+		return forkdb.SandboxOperation{}, err
+	}
+	return op, nil
+}
+
+func (f *forkQuerier) SupersedeSandboxOperations(ctx context.Context, arg forkdb.SupersedeSandboxOperationsParams) ([]forkdb.SandboxOperation, error) {
+	if err := f.authorizeWorkspaceID(ctx, policy.ActionUpdate, arg.WorkspaceID); err != nil {
+		return nil, err
+	}
+	return f.db.SupersedeSandboxOperations(ctx, arg)
+}
+
+func (f *forkQuerier) ClaimSandboxOperation(ctx context.Context, arg forkdb.ClaimSandboxOperationParams) (forkdb.SandboxOperation, error) {
+	if err := f.authorizeWorkspaceID(ctx, policy.ActionUpdate, arg.WorkspaceID); err != nil {
+		return forkdb.SandboxOperation{}, err
+	}
+	return f.db.ClaimSandboxOperation(ctx, arg)
+}
+
+func (f *forkQuerier) CompleteSandboxOperation(ctx context.Context, arg forkdb.CompleteSandboxOperationParams) (forkdb.SandboxOperation, error) {
+	if err := f.authorizeWorkspaceID(ctx, policy.ActionUpdate, arg.WorkspaceID); err != nil {
+		return forkdb.SandboxOperation{}, err
+	}
+	return f.db.CompleteSandboxOperation(ctx, arg)
+}

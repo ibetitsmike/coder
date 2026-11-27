@@ -605,6 +605,17 @@ type PluginUserLink struct {
 	CreatedAt    time.Time     `db:"created_at" json:"created_at"`
 }
 
+type SandboxOperation struct {
+	ID               uuid.UUID                    `db:"id" json:"id"`
+	WorkspaceID      uuid.UUID                    `db:"workspace_id" json:"workspace_id"`
+	WorkspaceBuildID uuid.UUID                    `db:"workspace_build_id" json:"workspace_build_id"`
+	Transition       database.WorkspaceTransition `db:"transition" json:"transition"`
+	Generation       int64                        `db:"generation" json:"generation"`
+	Status           string                       `db:"status" json:"status"`
+	CreatedAt        time.Time                    `db:"created_at" json:"created_at"`
+	UpdatedAt        time.Time                    `db:"updated_at" json:"updated_at"`
+}
+
 // Saved Starlark workflows of the fork-workflows experiment. A row is in the organization tier when user_id is NULL and in the user tier when user_id is set. Only users save workflows; agents run them by name.
 type SavedWorkflow struct {
 	ID             uuid.UUID `db:"id" json:"id"`
