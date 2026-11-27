@@ -23,7 +23,6 @@ import (
 func TestForkPluginPackEnablement(t *testing.T) {
 	t.Parallel()
 
-	ctx := testutil.Context(t, testutil.WaitLong)
 	db, ps := dbtestutil.NewDB(t)
 	client := coderdtest.New(t, &coderdtest.Options{
 		Database: db,
@@ -43,6 +42,7 @@ func TestForkPluginPackEnablement(t *testing.T) {
 
 	t.Run("Available", func(t *testing.T) {
 		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
 		// A member lists the organization's packs without reading them.
 		packs, err := member.ForkAvailablePluginPacks(ctx, orgID)
 		require.NoError(t, err)
@@ -60,6 +60,7 @@ func TestForkPluginPackEnablement(t *testing.T) {
 
 	t.Run("Project", func(t *testing.T) {
 		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
 		project := dbgen.ChatProject(t, db, database.ChatProject{OrganizationID: orgID, OwnerID: memberUser.ID})
 
 		// The member cannot read the pack but can enable it on their own
@@ -85,6 +86,7 @@ func TestForkPluginPackEnablement(t *testing.T) {
 
 	t.Run("Chat", func(t *testing.T) {
 		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
 		model := dbgen.ChatModelConfig(t, db, database.ChatModelConfig{OrganizationID: orgID})
 		chat := dbgen.Chat(t, db, database.Chat{OrganizationID: orgID, OwnerID: memberUser.ID, LastModelConfigID: model.ID})
 
@@ -106,6 +108,7 @@ func TestForkPluginPackEnablement(t *testing.T) {
 
 	t.Run("ChatExcluded", func(t *testing.T) {
 		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
 		model := dbgen.ChatModelConfig(t, db, database.ChatModelConfig{OrganizationID: orgID})
 		chat := dbgen.Chat(t, db, database.Chat{OrganizationID: orgID, OwnerID: memberUser.ID, LastModelConfigID: model.ID})
 
