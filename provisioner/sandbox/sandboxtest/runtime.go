@@ -20,6 +20,7 @@ import (
 type FakeRuntime struct {
 	mu         sync.Mutex
 	containers map[string]sandbox.Container
+	creates    []sandbox.CreateRequest
 	order      []string
 	failures   map[string]error
 }
@@ -56,6 +57,13 @@ func (f *FakeRuntime) Containers() map[string]sandbox.Container {
 	return maps.Clone(f.containers)
 }
 
+// Creates returns the requests of the creates that succeeded, in order.
+func (f *FakeRuntime) Creates() []sandbox.CreateRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.creates)
+}
+
 func (f *FakeRuntime) record(method string) error {
 	f.order = append(f.order, method)
 	err, ok := f.failures[method]
@@ -82,6 +90,7 @@ func (f *FakeRuntime) Create(_ context.Context, req sandbox.CreateRequest) (sand
 		CreatedAt: time.Now(),
 	}
 	f.containers[req.ID] = c
+	f.creates = append(f.creates, req)
 	return c, nil
 }
 
