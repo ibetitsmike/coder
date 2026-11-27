@@ -25,6 +25,7 @@ var ForkExperiments = Experiments{
 	ExperimentForkContextCache,
 	ExperimentForkContextHashRows,
 	ExperimentForkAPNsPush,
+	ExperimentForkSandboxProvisioner,
 }
 
 // ExperimentForkChatTodos enables the todo_write and todo_read chat tools and
@@ -92,6 +93,11 @@ const ExperimentForkContextHashRows Experiment = "fork-context-hash-rows"
 // iOS app over APNs too, and serves the routes that register its devices.
 // It needs the --chat-apns-* key options.
 const ExperimentForkAPNsPush Experiment = "fork-apns-push"
+
+// ExperimentForkSandboxProvisioner enables the experimental native sandbox
+// provisioner: template versions with the sandbox provisioner type and the
+// built-in sandbox daemon.
+const ExperimentForkSandboxProvisioner Experiment = "fork-sandbox-provisioner"
 
 // forkExperimentDisplayNames names the fork experiments whose title-cased
 // names read wrong, such as "Html".

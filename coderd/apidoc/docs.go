@@ -30084,7 +30084,8 @@ const docTemplate = `{
                     "type": "string",
                     "enum": [
                         "terraform",
-                        "echo"
+                        "echo",
+                        "sandbox"
                     ]
                 },
                 "storage_method": {
@@ -31358,7 +31359,8 @@ const docTemplate = `{
                 "fork-view-image",
                 "fork-context-cache",
                 "fork-context-hash-rows",
-                "fork-apns-push"
+                "fork-apns-push",
+                "fork-sandbox-provisioner"
             ],
             "x-enum-comments": {
                 "ExperimentAIGatewayReverseProxy": "Uses stateless reverse proxy routing when MCP injection is not configured.",
@@ -31415,6 +31417,7 @@ const docTemplate = `{
                 "",
                 "",
                 "",
+                "",
                 ""
             ],
             "x-enum-varnames": [
@@ -31451,7 +31454,8 @@ const docTemplate = `{
                 "ExperimentForkViewImage",
                 "ExperimentForkContextCache",
                 "ExperimentForkContextHashRows",
-                "ExperimentForkAPNsPush"
+                "ExperimentForkAPNsPush",
+                "ExperimentForkSandboxProvisioner"
             ]
         },
         "codersdk.ExperimentRule": {
