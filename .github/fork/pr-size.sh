@@ -8,8 +8,10 @@
 #   pr-size.sh <base-sha> <head-sha>
 #
 # Writes to $GITHUB_STEP_SUMMARY when it is set and emits a ::warning:: over
-# the limit unless FORK_PR_SYNC is true. Sync PRs merge upstream and are
-# reported without the limit.
+# the limit. A sync PR, one that merges new upstream coder/coder commits or
+# runs with FORK_PR_SYNC=true, is reported without the limit. The upstream
+# check does not rely on the sync label, which gh adds after the opened
+# event.
 set -euo pipefail
 
 limit=500
@@ -23,6 +25,25 @@ fi
 base=$(git merge-base "$1" "$2")
 head=$2
 summary=${GITHUB_STEP_SUMMARY:-/dev/stdout}
+
+# A sync PR brings upstream commits that the base does not have yet. A PR
+# branch that is behind the base has an older upstream merge base, which the
+# base already contains.
+sync=${FORK_PR_SYNC:-false}
+if [[ "$sync" != true ]] &&
+	git fetch --quiet --no-tags --filter=blob:none https://github.com/coder/coder.git main 2>/dev/null; then
+	upstream_base=$(git merge-base "$head" FETCH_HEAD || true)
+	if [[ -n "$upstream_base" ]] && ! git merge-base --is-ancestor "$upstream_base" "$base"; then
+		sync=true
+	fi
+fi
+
+# Write the diff to a file first so that a failing git diff, for example a
+# blob the blobless clone cannot fetch, fails the script instead of
+# reporting a partial count.
+numstat=$(mktemp)
+trap 'rm -f "$numstat"' EXIT
+git diff -z --numstat -M "$base" "$head" >"$numstat"
 
 total=0
 skipped=0
@@ -46,15 +67,15 @@ while IFS=$'\t' read -r -d '' add del path; do
 	total=$((total + n))
 	files=$((files + 1))
 	rows+=("$(printf '%d\t%s' "$n" "$path")")
-done < <(git diff -z --numstat -M "$base" "$head")
+done <"$numstat"
 
 {
 	echo "## PR size"
 	echo
 	echo "**${total}** non-generated changed lines in ${files} files (limit ${limit}), merge base \`${base:0:10}\`. Generated files add ${skipped} more lines."
-	if [[ "${FORK_PR_SYNC:-}" == true ]]; then
+	if [[ "$sync" == true ]]; then
 		echo
-		echo "This is a sync PR, so the limit does not apply."
+		echo "This PR merges upstream commits, so the limit does not apply."
 	elif ((total > limit)); then
 		echo
 		echo "Over the limit. The merge needs a stated reason."
@@ -72,6 +93,6 @@ done < <(git diff -z --numstat -M "$base" "$head")
 } >>"$summary"
 
 echo "non-generated changed lines: $total (generated: $skipped)"
-if [[ "${FORK_PR_SYNC:-}" != true ]] && ((total > limit)); then
+if [[ "$sync" != true ]] && ((total > limit)); then
 	echo "::warning title=PR size::${total} non-generated changed lines, over the ${limit} line limit. The merge needs a stated reason."
 fi
