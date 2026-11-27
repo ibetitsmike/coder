@@ -369,11 +369,18 @@ schedule registers stays active until the next hourly pass.
 |--------------|----------------------------------------------------------------------------------------------------------|
 | `graph`      | `chatdmig check`, the unit tests of this package and `scripts/check-scopes`.                             |
 | `schema`     | Upstream's migrations and the routed graph give the same schema, apart from the schema name. An upgrade from 634 (the first deployed version), from the split, or from a database without one fork node equals a fresh database. Fork nodes only add chatd objects and enum values. Lock timeouts, retries and the node options work on a real database. |
-| `chat-tests` | `./coderd/x/...`, `./coderd/database/...`, `./enterprise/dbcrypt/...`, the chat, skill, MCP and plugin tests of `./coderd` and `./enterprise/coderd`, `TestExpPlugins` of `./cli`, and the swagger annotation tests of `./coderd/coderdtest` and `./enterprise/coderd/coderdenttest`. |
-| `agent-sdk`  | `./agent/agentcontext/...`, `./agent/agentgit/...` and `./codersdk/`.                                    |
-| `site`       | `tsc` of `site` and the unit tests of `site/src/pages/AgentsPage`.                                       |
+| `chat-tests` | `./coderd/x/...`, `./coderd/database/...`, `./enterprise/dbcrypt/...`, the chat, skill, MCP, plugin and fork tests of `./coderd` and `./enterprise/coderd`, and the swagger annotation tests of `./coderd/coderdtest` and `./enterprise/coderd/coderdenttest`. |
+| `agent-sdk`  | `./agent/agentcontext/...`, `./agent/agentgit/...`, `./agent/x/agentmcp/...` and `./codersdk/`.          |
+| `fork-tests` | The fork tests of every other Go package.                                                                |
+| `site`       | `tsc` of `site`, the unit tests of `site/src/pages/AgentsPage` and the fork's other unit test files.     |
 | `build`      | `go build ./enterprise/cmd/coder`.                                                                       |
 | `forkdb`     | `forkdb/generate.sh` leaves no diff.                                                                     |
+
+A fork test is a top-level test in a test file that differs between the merge
+base with upstream `main` and `HEAD`, whatever the test or the file is named.
+`.github/fork/fork-tests.sh` finds them, so a fork test in a new package or
+site directory runs without a workflow change. The storybook tests of the
+fork's stories do not run in fork-ci.
 
 Run the schema tests locally against a Postgres role that can create
 databases. `pg_dump` must be at least the server's version:
