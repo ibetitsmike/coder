@@ -21,7 +21,7 @@ WHERE op.id = $1
 		SELECT MAX(wb.build_number) FROM workspace_builds AS wb
 		WHERE wb.workspace_id = $2
 	)
-RETURNING op.id, op.workspace_id, op.workspace_build_id, op.transition, op.generation, op.status, op.created_at, op.updated_at
+RETURNING op.id, op.organization_id, op.workspace_id, op.workspace_build_id, op.transition, op.generation, op.status, op.created_at, op.updated_at
 `
 
 type ClaimSandboxOperationParams struct {
@@ -29,14 +29,14 @@ type ClaimSandboxOperationParams struct {
 	WorkspaceID uuid.UUID `db:"workspace_id" json:"workspace_id"`
 }
 
-// Claims an intent of the newest build of the workspace. The workspace
-// ID is bound, so a caller authorized for one workspace cannot claim the
-// operation of another. A stale generation or a second claim returns no row.
+// Claims an intent of the newest build of the bound workspace. A stale
+// generation, another workspace or a second claim returns no row.
 func (q *Queries) ClaimSandboxOperation(ctx context.Context, arg ClaimSandboxOperationParams) (SandboxOperation, error) {
 	row := q.db.QueryRowContext(ctx, claimSandboxOperation, arg.ID, arg.WorkspaceID)
 	var i SandboxOperation
 	err := row.Scan(
 		&i.ID,
+		&i.OrganizationID,
 		&i.WorkspaceID,
 		&i.WorkspaceBuildID,
 		&i.Transition,
@@ -49,6 +49,21 @@ func (q *Queries) ClaimSandboxOperation(ctx context.Context, arg ClaimSandboxOpe
 }
 
 const completeSandboxOperation = `-- name: CompleteSandboxOperation :one
+WITH reconciled AS (
+	UPDATE sandbox_operations AS old
+	SET status = 'reconciled', updated_at = now()
+	WHERE $1::text = 'done'
+		AND old.workspace_id = $3
+		AND old.status = 'superseded'
+		AND old.generation < (
+			SELECT cur.generation FROM sandbox_operations AS cur
+			WHERE cur.id = $2 AND cur.workspace_id = $3 AND cur.status = 'claimed'
+				AND cur.generation = (
+					SELECT MAX(wb.build_number) FROM workspace_builds AS wb
+					WHERE wb.workspace_id = $3
+				)
+		)
+)
 UPDATE sandbox_operations AS op
 SET status = $1::text, updated_at = now()
 WHERE op.id = $2
@@ -59,7 +74,7 @@ WHERE op.id = $2
 		SELECT MAX(wb.build_number) FROM workspace_builds AS wb
 		WHERE wb.workspace_id = $3
 	)
-RETURNING op.id, op.workspace_id, op.workspace_build_id, op.transition, op.generation, op.status, op.created_at, op.updated_at
+RETURNING op.id, op.organization_id, op.workspace_id, op.workspace_build_id, op.transition, op.generation, op.status, op.created_at, op.updated_at
 `
 
 type CompleteSandboxOperationParams struct {
@@ -68,14 +83,14 @@ type CompleteSandboxOperationParams struct {
 	WorkspaceID uuid.UUID `db:"workspace_id" json:"workspace_id"`
 }
 
-// Finishes a claimed operation as done or failed. It returns no row when the
-// operation is not claimed, belongs to another workspace, or a newer
-// build of the workspace exists, so a fenced worker cannot finish.
+// Finishes a claimed operation of the newest build as done or failed, else
+// returns no row. Done marks older superseded operations reconciled.
 func (q *Queries) CompleteSandboxOperation(ctx context.Context, arg CompleteSandboxOperationParams) (SandboxOperation, error) {
 	row := q.db.QueryRowContext(ctx, completeSandboxOperation, arg.Status, arg.ID, arg.WorkspaceID)
 	var i SandboxOperation
 	err := row.Scan(
 		&i.ID,
+		&i.OrganizationID,
 		&i.WorkspaceID,
 		&i.WorkspaceBuildID,
 		&i.Transition,
@@ -88,7 +103,7 @@ func (q *Queries) CompleteSandboxOperation(ctx context.Context, arg CompleteSand
 }
 
 const getSandboxOperation = `-- name: GetSandboxOperation :one
-SELECT id, workspace_id, workspace_build_id, transition, generation, status, created_at, updated_at FROM sandbox_operations WHERE id = $1
+SELECT id, organization_id, workspace_id, workspace_build_id, transition, generation, status, created_at, updated_at FROM sandbox_operations WHERE id = $1
 `
 
 func (q *Queries) GetSandboxOperation(ctx context.Context, id uuid.UUID) (SandboxOperation, error) {
@@ -96,6 +111,7 @@ func (q *Queries) GetSandboxOperation(ctx context.Context, id uuid.UUID) (Sandbo
 	var i SandboxOperation
 	err := row.Scan(
 		&i.ID,
+		&i.OrganizationID,
 		&i.WorkspaceID,
 		&i.WorkspaceBuildID,
 		&i.Transition,
@@ -108,12 +124,13 @@ func (q *Queries) GetSandboxOperation(ctx context.Context, id uuid.UUID) (Sandbo
 }
 
 const insertSandboxOperation = `-- name: InsertSandboxOperation :one
-INSERT INTO sandbox_operations (id, workspace_id, workspace_build_id, transition, generation)
-SELECT $1::uuid, wb.workspace_id, wb.id, wb.transition, wb.build_number
+INSERT INTO sandbox_operations (id, organization_id, workspace_id, workspace_build_id, transition, generation)
+SELECT $1::uuid, w.organization_id, wb.workspace_id, wb.id, wb.transition, wb.build_number
 FROM workspace_builds AS wb
+JOIN workspaces AS w ON w.id = wb.workspace_id
 WHERE wb.id = $2::uuid
 ON CONFLICT (workspace_build_id) DO UPDATE SET updated_at = sandbox_operations.updated_at
-RETURNING id, workspace_id, workspace_build_id, transition, generation, status, created_at, updated_at
+RETURNING id, organization_id, workspace_id, workspace_build_id, transition, generation, status, created_at, updated_at
 `
 
 type InsertSandboxOperationParams struct {
@@ -121,14 +138,14 @@ type InsertSandboxOperationParams struct {
 	WorkspaceBuildID uuid.UUID `db:"workspace_build_id" json:"workspace_build_id"`
 }
 
-// Writes the intent of one build. The workspace, transition and generation
-// come from the build row, so a caller cannot file an intent under another
-// workspace. A second insert for the same build returns the existing row.
+// Writes the intent of one build, derived from the build and workspace rows.
+// A second insert for the same build returns the existing row.
 func (q *Queries) InsertSandboxOperation(ctx context.Context, arg InsertSandboxOperationParams) (SandboxOperation, error) {
 	row := q.db.QueryRowContext(ctx, insertSandboxOperation, arg.ID, arg.WorkspaceBuildID)
 	var i SandboxOperation
 	err := row.Scan(
 		&i.ID,
+		&i.OrganizationID,
 		&i.WorkspaceID,
 		&i.WorkspaceBuildID,
 		&i.Transition,
@@ -145,8 +162,8 @@ UPDATE sandbox_operations
 SET status = 'superseded', updated_at = now()
 WHERE workspace_id = $1
 	AND generation < $2
-	AND status IN ('intent', 'claimed')
-RETURNING id, workspace_id, workspace_build_id, transition, generation, status, created_at, updated_at
+	AND status IN ('intent', 'claimed', 'superseded')
+RETURNING id, organization_id, workspace_id, workspace_build_id, transition, generation, status, created_at, updated_at
 `
 
 type SupersedeSandboxOperationsParams struct {
@@ -154,9 +171,8 @@ type SupersedeSandboxOperationsParams struct {
 	Generation  int64     `db:"generation" json:"generation"`
 }
 
-// Marks the unfinished operations of older generations of a workspace as
-// superseded and returns them. The caller learns which builds a crashed or
-// fenced worker left unfinished.
+// Supersedes the unfinished operations of older generations and returns them.
+// They stay in the result until a newer generation completes as done.
 func (q *Queries) SupersedeSandboxOperations(ctx context.Context, arg SupersedeSandboxOperationsParams) ([]SandboxOperation, error) {
 	rows, err := q.db.QueryContext(ctx, supersedeSandboxOperations, arg.WorkspaceID, arg.Generation)
 	if err != nil {
@@ -168,6 +184,7 @@ func (q *Queries) SupersedeSandboxOperations(ctx context.Context, arg SupersedeS
 		var i SandboxOperation
 		if err := rows.Scan(
 			&i.ID,
+			&i.OrganizationID,
 			&i.WorkspaceID,
 			&i.WorkspaceBuildID,
 			&i.Transition,

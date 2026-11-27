@@ -607,6 +607,7 @@ type PluginUserLink struct {
 
 type SandboxOperation struct {
 	ID               uuid.UUID                    `db:"id" json:"id"`
+	OrganizationID   uuid.UUID                    `db:"organization_id" json:"organization_id"`
 	WorkspaceID      uuid.UUID                    `db:"workspace_id" json:"workspace_id"`
 	WorkspaceBuildID uuid.UUID                    `db:"workspace_build_id" json:"workspace_build_id"`
 	Transition       database.WorkspaceTransition `db:"transition" json:"transition"`

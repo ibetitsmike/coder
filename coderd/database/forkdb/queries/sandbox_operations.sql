@@ -1,10 +1,10 @@
 -- name: InsertSandboxOperation :one
--- Writes the intent of one build. The workspace, transition and generation
--- come from the build row, so a caller cannot file an intent under another
--- workspace. A second insert for the same build returns the existing row.
-INSERT INTO sandbox_operations (id, workspace_id, workspace_build_id, transition, generation)
-SELECT @id::uuid, wb.workspace_id, wb.id, wb.transition, wb.build_number
+-- Writes the intent of one build, derived from the build and workspace rows.
+-- A second insert for the same build returns the existing row.
+INSERT INTO sandbox_operations (id, organization_id, workspace_id, workspace_build_id, transition, generation)
+SELECT @id::uuid, w.organization_id, wb.workspace_id, wb.id, wb.transition, wb.build_number
 FROM workspace_builds AS wb
+JOIN workspaces AS w ON w.id = wb.workspace_id
 WHERE wb.id = @workspace_build_id::uuid
 ON CONFLICT (workspace_build_id) DO UPDATE SET updated_at = sandbox_operations.updated_at
 RETURNING *;
@@ -13,20 +13,18 @@ RETURNING *;
 SELECT * FROM sandbox_operations WHERE id = @id;
 
 -- name: SupersedeSandboxOperations :many
--- Marks the unfinished operations of older generations of a workspace as
--- superseded and returns them. The caller learns which builds a crashed or
--- fenced worker left unfinished.
+-- Supersedes the unfinished operations of older generations and returns them.
+-- They stay in the result until a newer generation completes as done.
 UPDATE sandbox_operations
 SET status = 'superseded', updated_at = now()
 WHERE workspace_id = @workspace_id
 	AND generation < @generation
-	AND status IN ('intent', 'claimed')
+	AND status IN ('intent', 'claimed', 'superseded')
 RETURNING *;
 
 -- name: ClaimSandboxOperation :one
--- Claims an intent of the newest build of the workspace. The workspace
--- ID is bound, so a caller authorized for one workspace cannot claim the
--- operation of another. A stale generation or a second claim returns no row.
+-- Claims an intent of the newest build of the bound workspace. A stale
+-- generation, another workspace or a second claim returns no row.
 UPDATE sandbox_operations AS op
 SET status = 'claimed', updated_at = now()
 WHERE op.id = @id
@@ -39,9 +37,23 @@ WHERE op.id = @id
 RETURNING op.*;
 
 -- name: CompleteSandboxOperation :one
--- Finishes a claimed operation as done or failed. It returns no row when the
--- operation is not claimed, belongs to another workspace, or a newer
--- build of the workspace exists, so a fenced worker cannot finish.
+-- Finishes a claimed operation of the newest build as done or failed, else
+-- returns no row. Done marks older superseded operations reconciled.
+WITH reconciled AS (
+	UPDATE sandbox_operations AS old
+	SET status = 'reconciled', updated_at = now()
+	WHERE sqlc.arg(status)::text = 'done'
+		AND old.workspace_id = @workspace_id
+		AND old.status = 'superseded'
+		AND old.generation < (
+			SELECT cur.generation FROM sandbox_operations AS cur
+			WHERE cur.id = @id AND cur.workspace_id = @workspace_id AND cur.status = 'claimed'
+				AND cur.generation = (
+					SELECT MAX(wb.build_number) FROM workspace_builds AS wb
+					WHERE wb.workspace_id = @workspace_id
+				)
+		)
+)
 UPDATE sandbox_operations AS op
 SET status = sqlc.arg(status)::text, updated_at = now()
 WHERE op.id = @id

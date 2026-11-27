@@ -1627,8 +1627,7 @@ func (f *forkQuerier) UpdateChatAPNsDeviceEnvironment(ctx context.Context, arg f
 }
 
 // authorizeWorkspaceID authorizes action on a workspace by ID. The sandbox
-// operation queries bind the workspace ID they act on, so authorizing that ID
-// covers the rows they touch.
+// operation queries bind that ID, so it covers the rows they touch.
 func (f *forkQuerier) authorizeWorkspaceID(ctx context.Context, action policy.Action, workspaceID uuid.UUID) error {
 	ws, err := f.q.db.GetWorkspaceByID(ctx, workspaceID)
 	if err != nil {
@@ -1637,8 +1636,7 @@ func (f *forkQuerier) authorizeWorkspaceID(ctx context.Context, action policy.Ac
 	return f.q.authorizeContext(ctx, action, ws)
 }
 
-// InsertSandboxOperation takes the workspace from the build row, so it
-// authorizes an update of the workspace that owns the build.
+// InsertSandboxOperation authorizes the workspace that owns the build.
 func (f *forkQuerier) InsertSandboxOperation(ctx context.Context, arg forkdb.InsertSandboxOperationParams) (forkdb.SandboxOperation, error) {
 	build, err := f.q.db.GetWorkspaceBuildByID(ctx, arg.WorkspaceBuildID)
 	if err != nil {

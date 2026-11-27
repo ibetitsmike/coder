@@ -15,8 +15,7 @@ import (
 	"github.com/coder/coder/v2/testutil"
 )
 
-// sandboxWorkspace seeds a workspace with its first build and returns the
-// workspace and that build.
+// sandboxWorkspace seeds a workspace with its first build.
 func sandboxWorkspace(t *testing.T, db database.Store) (database.WorkspaceTable, database.WorkspaceBuild) {
 	t.Helper()
 	user := dbgen.User(t, db, database.User{})
@@ -49,20 +48,12 @@ func TestSandboxOperations(t *testing.T) {
 
 		op := dbgen.SandboxOperation(t, db, build.ID)
 		require.Equal(t, ws.ID, op.WorkspaceID)
+		require.Equal(t, ws.OrganizationID, op.OrganizationID)
 		require.Equal(t, build.ID, op.WorkspaceBuildID)
 		require.Equal(t, int64(3), op.Generation)
 		require.Equal(t, database.WorkspaceTransitionStop, op.Transition)
 		require.Equal(t, forkdb.SandboxOperationStatusIntent, op.Status)
-	})
-
-	t.Run("InsertReturnsExistingRow", func(t *testing.T) {
-		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
-		_, build := sandboxWorkspace(t, db)
-
-		first := dbgen.SandboxOperation(t, db, build.ID)
-		second := dbgen.SandboxOperation(t, db, build.ID)
-		require.Equal(t, first.ID, second.ID, "a replayed build reuses its intent")
+		require.Equal(t, op.ID, dbgen.SandboxOperation(t, db, build.ID).ID, "a replayed build reuses its intent")
 	})
 
 	t.Run("InsertUnknownBuild", func(t *testing.T) {
@@ -71,10 +62,7 @@ func TestSandboxOperations(t *testing.T) {
 		ctx := testutil.Context(t, testutil.WaitShort)
 		fdb := mustFrom(t, db)
 
-		_, err := fdb.InsertSandboxOperation(ctx, forkdb.InsertSandboxOperationParams{
-			ID:               uuid.New(),
-			WorkspaceBuildID: uuid.New(),
-		})
+		_, err := fdb.InsertSandboxOperation(ctx, forkdb.InsertSandboxOperationParams{ID: uuid.New(), WorkspaceBuildID: uuid.New()})
 		require.ErrorIs(t, err, sql.ErrNoRows)
 	})
 
@@ -102,35 +90,6 @@ func TestSandboxOperations(t *testing.T) {
 
 		_, err = fdb.CompleteSandboxOperation(ctx, forkdb.CompleteSandboxOperationParams{ID: op.ID, WorkspaceID: ws.ID, Status: forkdb.SandboxOperationStatusFailed})
 		require.ErrorIs(t, err, sql.ErrNoRows, "a second complete must fail")
-	})
-
-	// A caller authorized for workspace A passes A's ID. It must not claim
-	// or complete the operation of workspace B, even when both are at the
-	// same generation.
-	t.Run("OtherWorkspaceCannotClaimOrComplete", func(t *testing.T) {
-		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
-		ctx := testutil.Context(t, testutil.WaitShort)
-		fdb := mustFrom(t, db)
-		wsA, buildA := sandboxWorkspace(t, db)
-		wsB, buildB := sandboxWorkspace(t, db)
-		opA := dbgen.SandboxOperation(t, db, buildA.ID)
-		opB := dbgen.SandboxOperation(t, db, buildB.ID)
-		require.Equal(t, opA.Generation, opB.Generation)
-
-		_, err := fdb.ClaimSandboxOperation(ctx, forkdb.ClaimSandboxOperationParams{ID: opB.ID, WorkspaceID: wsA.ID})
-		require.ErrorIs(t, err, sql.ErrNoRows)
-		got, err := fdb.GetSandboxOperation(ctx, opB.ID)
-		require.NoError(t, err)
-		require.Equal(t, forkdb.SandboxOperationStatusIntent, got.Status, "B's operation stays unclaimed")
-
-		_, err = fdb.ClaimSandboxOperation(ctx, forkdb.ClaimSandboxOperationParams{ID: opB.ID, WorkspaceID: wsB.ID})
-		require.NoError(t, err)
-		_, err = fdb.CompleteSandboxOperation(ctx, forkdb.CompleteSandboxOperationParams{ID: opB.ID, WorkspaceID: wsA.ID, Status: forkdb.SandboxOperationStatusDone})
-		require.ErrorIs(t, err, sql.ErrNoRows)
-		got, err = fdb.GetSandboxOperation(ctx, opB.ID)
-		require.NoError(t, err)
-		require.Equal(t, forkdb.SandboxOperationStatusClaimed, got.Status, "B's operation stays claimed")
 	})
 
 	// The newest build row fences, even before its worker writes an intent.
@@ -186,9 +145,22 @@ func TestSandboxOperations(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, forkdb.SandboxOperationStatusClaimed, claimed.Status)
 
+		// A recovery worker that crashes before it finishes leaves the
+		// superseded rows to the next call.
 		again, err := fdb.SupersedeSandboxOperations(ctx, forkdb.SupersedeSandboxOperationsParams{WorkspaceID: ws.ID, Generation: op3.Generation})
 		require.NoError(t, err)
-		require.Empty(t, again, "finished rows are not superseded twice")
+		require.ElementsMatch(t, []string{op1.ID.String(), op2.ID.String()}, operationIDs(again))
+
+		_, err = fdb.CompleteSandboxOperation(ctx, forkdb.CompleteSandboxOperationParams{ID: op3.ID, WorkspaceID: ws.ID, Status: forkdb.SandboxOperationStatusDone})
+		require.NoError(t, err)
+		for _, id := range []uuid.UUID{op1.ID, op2.ID} {
+			got, err := fdb.GetSandboxOperation(ctx, id)
+			require.NoError(t, err)
+			require.Equal(t, forkdb.SandboxOperationStatusReconciled, got.Status)
+		}
+		again, err = fdb.SupersedeSandboxOperations(ctx, forkdb.SupersedeSandboxOperationsParams{WorkspaceID: ws.ID, Generation: op3.Generation})
+		require.NoError(t, err)
+		require.Empty(t, again, "a done newer generation reconciles the superseded rows")
 	})
 
 	t.Run("SupersedeKeepsFinishedAndOtherWorkspaces", func(t *testing.T) {

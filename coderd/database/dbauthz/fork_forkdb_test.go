@@ -1764,9 +1764,9 @@ func TestSavedWorkflowRBAC(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestSandboxOperationRBAC proves with real roles that a caller authorized
-// for workspace A cannot touch the sandbox operation of workspace B: naming
-// B is not authorized, and naming A finds no row.
+// TestSandboxOperationRBAC proves with real roles that a caller of workspace
+// A cannot touch the operation of B: naming B is not authorized, naming A
+// finds no row.
 func TestSandboxOperationRBAC(t *testing.T) {
 	t.Parallel()
 
