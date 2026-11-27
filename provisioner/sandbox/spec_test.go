@@ -114,6 +114,25 @@ agent:
 		require.Contains(t, err.Error(), "agent.os")
 	})
 
+	t.Run("BadAgentName", func(t *testing.T) {
+		t.Parallel()
+		for _, name := range []string{"dev_1", "-main", "dev--1", "main-"} {
+			_, err := sandbox.ParseSpec([]byte("version: 1\ncontainer:\n  image: alpine\nagent:\n  name: \"" + name + "\"\n"))
+			var errs sandbox.ParseErrors
+			require.ErrorAs(t, err, &errs, name)
+			require.Len(t, errs, 1, name)
+			require.Equal(t, "agent.name", errs[0].Field, name)
+		}
+	})
+
+	t.Run("MoreThanOneDocument", func(t *testing.T) {
+		t.Parallel()
+		for _, tail := range []string{"---\nbogus: 1\n", "...\nbogus: [\n"} {
+			_, err := sandbox.ParseSpec([]byte("version: 1\ncontainer:\n  image: alpine\nagent:\n  name: main\n" + tail))
+			require.ErrorContains(t, err, "exactly one yaml document", tail)
+		}
+	})
+
 	t.Run("BadYAML", func(t *testing.T) {
 		t.Parallel()
 		_, err := sandbox.ParseSpec([]byte("version: [1,\n"))

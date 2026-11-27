@@ -4,12 +4,16 @@ package sandbox
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/coder/coder/v2/provisioner"
 )
 
 // SpecVersion is the only sandbox.yaml version this parser accepts.
@@ -90,6 +94,11 @@ func ParseSpec(data []byte) (*Spec, error) {
 	if err := dec.Decode(&spec); err != nil {
 		return nil, ParseErrors{{Field: "", Issue: fmt.Sprintf("is not valid yaml: %s", err)}}
 	}
+	// A second document would otherwise go unread and unvalidated.
+	var extra yaml.Node
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return nil, ParseErrors{{Field: "", Issue: "must hold exactly one yaml document"}}
+	}
 
 	var errs ParseErrors
 	if spec.Version != SpecVersion {
@@ -115,6 +124,11 @@ func ParseSpec(data []byte) (*Spec, error) {
 	}
 	if spec.Agent.Name == "" {
 		errs = append(errs, ParseError{Field: "agent.name", Issue: "is required"})
+	} else if !provisioner.AgentNameRegex.MatchString(spec.Agent.Name) {
+		errs = append(errs, ParseError{
+			Field: "agent.name",
+			Issue: fmt.Sprintf("is %q, want letters, digits and single hyphens between them", spec.Agent.Name),
+		})
 	}
 	if spec.Agent.Arch == "" {
 		spec.Agent.Arch = "amd64"
