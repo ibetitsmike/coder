@@ -65,9 +65,12 @@ jobs:
       contents: read
     timeout-minutes: 60
     steps:
+      # fork-tests.sh needs the history to find the merge base with upstream.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
+          filter: blob:none
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -77,10 +80,13 @@ jobs:
       # The upstream test is flaky under fork-ci timing (#61); upstream CI covers it.
       - name: Chat and database packages
         run: go test -count=1 -skip '^TestRunnerManager_HeartbeatDoesNotReviveStaleLease$' ./coderd/x/... ./coderd/database/... ./enterprise/dbcrypt/...
+      # go test splits -run on top-level |, so the alternatives are grouped
+      # for (?i) to apply to all of them (#286). The fork's own tests in these
+      # packages run whatever they are named (#168).
       - name: Chat API tests
-        run: go test -count=1 -run '(?i)chat|skill|mcp|plugin' ./coderd ./enterprise/coderd
-      - name: Plugin CLI tests
-        run: go test -count=1 -run TestExpPlugins ./cli
+        run: |
+          fork_tests=$(./.github/fork/fork-tests.sh go-pattern coderd enterprise/coderd)
+          go test -count=1 -run "(?i)(chat|skill|mcp|plugin)|${fork_tests}" ./coderd ./enterprise/coderd
       - name: Swagger annotation tests
         run: go test -count=1 -run 'EndpointsDocumented|TestSwagger' ./coderd/coderdtest ./enterprise/coderd/coderdenttest
       - name: Check API docs for drift
@@ -101,15 +107,40 @@ jobs:
       - name: Agent context, agent git and SDK packages
         run: go test -count=1 ./agent/agentcontext/... ./agent/agentgit/... ./agent/x/agentmcp/... ./codersdk/
 
+  # The fork's Go tests in packages that no other job covers, found by
+  # .github/fork/fork-tests.sh.
+  fork-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    steps:
+      # fork-tests.sh needs the history to find the merge base with upstream.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          filter: blob:none
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Start Postgres
+        run: ./.github/fork/start-postgres.sh
+      - name: Fork tests in other packages
+        run: ./.github/fork/fork-tests.sh go-run
+
   site:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     timeout-minutes: 30
     steps:
+      # fork-tests.sh needs the history to find the merge base with upstream.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
+          filter: blob:none
       - name: Set up mise tools
         uses: ./.github/actions/setup-mise
         with:
@@ -119,8 +150,12 @@ jobs:
       - name: Type check
         run: pnpm run lint:types
         working-directory: site
-      - name: Agents page unit tests
-        run: pnpm test:ci src/pages/AgentsPage
+      - name: Agents page and fork unit tests
+        run: |
+          fork_tests=$(../.github/fork/fork-tests.sh site-files)
+          test -n "$fork_tests"
+          mapfile -t fork_tests <<<"$fork_tests"
+          pnpm test:ci src/pages/AgentsPage "${fork_tests[@]}"
         working-directory: site
 
   build:
