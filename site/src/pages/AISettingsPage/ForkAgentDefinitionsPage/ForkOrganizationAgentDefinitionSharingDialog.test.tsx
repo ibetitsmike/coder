@@ -70,6 +70,11 @@ describe("ForkOrganizationAgentDefinitionSharingDialog", () => {
 			}),
 		);
 		await user.click(screen.getByRole("button", { name: "Add member" }));
+		// "Add member" is a form action, so the draft update commits in a
+		// transition. Wait for the added row so Save includes it.
+		await screen.findByRole("button", {
+			name: `Remove ${MockUserOwner.username}`,
+		});
 		await user.click(screen.getByRole("button", { name: "Save permissions" }));
 
 		await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));

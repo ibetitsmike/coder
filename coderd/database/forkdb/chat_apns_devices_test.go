@@ -1,6 +1,7 @@
 package forkdb_test
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"testing"
@@ -22,7 +23,6 @@ func TestUpsertChatAPNsDeviceKeepsTheNewest(t *testing.T) {
 
 	db, _ := dbtestutil.NewDB(t)
 	fdb := mustFrom(t, db)
-	ctx := testutil.Context(t, testutil.WaitShort)
 
 	userA := dbgen.User(t, db, database.User{})
 	userB := dbgen.User(t, db, database.User{})
@@ -33,7 +33,7 @@ func TestUpsertChatAPNsDeviceKeepsTheNewest(t *testing.T) {
 	}
 
 	base := dbtime.Now().Add(-time.Hour)
-	upsert := func(t *testing.T, userID uuid.UUID, token string, at time.Time) {
+	upsert := func(ctx context.Context, t *testing.T, userID uuid.UUID, token string, at time.Time) {
 		t.Helper()
 		err := fdb.UpsertChatAPNsDevice(ctx, forkdb.UpsertChatAPNsDeviceParams{
 			DeviceToken: token,
@@ -45,7 +45,7 @@ func TestUpsertChatAPNsDeviceKeepsTheNewest(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	tokens := func(t *testing.T, userID uuid.UUID) []string {
+	tokens := func(ctx context.Context, t *testing.T, userID uuid.UUID) []string {
 		t.Helper()
 		devices, err := fdb.GetChatAPNsDevicesByUserID(ctx, userID)
 		require.NoError(t, err)
@@ -61,35 +61,38 @@ func TestUpsertChatAPNsDeviceKeepsTheNewest(t *testing.T) {
 
 	t.Run("KeepsOnlyTheNewestMaxDevices", func(t *testing.T) {
 		t.Parallel()
+		// The subtest starts after the parent returns and a parallel slot
+		// frees up, so its deadline starts here, not in the parent.
+		ctx := testutil.Context(t, testutil.WaitShort)
 
 		// User B first, so its rows must survive user A's registrations.
-		upsert(t, userB.ID, fakeToken(101), base.Add(2*time.Minute))
-		upsert(t, userB.ID, fakeToken(102), base.Add(3*time.Minute))
+		upsert(ctx, t, userB.ID, fakeToken(101), base.Add(2*time.Minute))
+		upsert(ctx, t, userB.ID, fakeToken(102), base.Add(3*time.Minute))
 
 		for i := 0; i < 4; i++ {
-			upsert(t, userA.ID, fakeToken(i), base.Add(time.Duration(i+1)*time.Minute))
+			upsert(ctx, t, userA.ID, fakeToken(i), base.Add(time.Duration(i+1)*time.Minute))
 		}
 
 		// 0 is the oldest, so it went. 1, 2, 3 stay.
 		require.Equal(t, []string{fakeToken(1), fakeToken(2), fakeToken(3)},
-			tokens(t, userA.ID))
+			tokens(ctx, t, userA.ID))
 
 		// User B's rows are untouched.
 		require.Equal(t, []string{fakeToken(101), fakeToken(102)},
-			tokens(t, userB.ID))
+			tokens(ctx, t, userB.ID))
 
 		// Re-register the oldest remaining token with a newer time, then add
 		// a new token. The re-registered token 1 stays, and the next oldest,
 		// 2, goes.
-		upsert(t, userA.ID, fakeToken(1), base.Add(9*time.Minute))
-		upsert(t, userA.ID, fakeToken(4), base.Add(10*time.Minute))
+		upsert(ctx, t, userA.ID, fakeToken(1), base.Add(9*time.Minute))
+		upsert(ctx, t, userA.ID, fakeToken(4), base.Add(10*time.Minute))
 		require.Equal(t, []string{fakeToken(1), fakeToken(3), fakeToken(4)},
-			tokens(t, userA.ID))
+			tokens(ctx, t, userA.ID))
 		// A token moving from B to A must not delete B's other row. A's set
 		// was 1, 3, 4, so the oldest, 3, drops and 102 joins.
-		upsert(t, userA.ID, fakeToken(102), base.Add(11*time.Minute))
+		upsert(ctx, t, userA.ID, fakeToken(102), base.Add(11*time.Minute))
 		require.Equal(t, []string{fakeToken(1), fakeToken(4), fakeToken(102)},
-			tokens(t, userA.ID))
-		require.Equal(t, []string{fakeToken(101)}, tokens(t, userB.ID))
+			tokens(ctx, t, userA.ID))
+		require.Equal(t, []string{fakeToken(101)}, tokens(ctx, t, userB.ID))
 	})
 }
