@@ -32,10 +32,11 @@ var ErrNotOwned = xerrors.New("the container was not created by the sandbox runt
 // runtime maps it to the host gateway, as the Docker template does.
 const hostGateway = "host.docker.internal"
 
-// containerURL rewrites a loopback host in raw to hostGateway. Loopback in a
-// container is the container itself, so an agent could not reach a coderd
-// whose access URL names localhost or 127.0.0.1.
-func containerURL(raw string) string {
+// ContainerURL rewrites a loopback host in raw to the host gateway name, and
+// keeps the port and path. Loopback in a container is the container itself,
+// so an agent could not reach a coderd whose access URL names localhost or
+// 127.0.0.1.
+func ContainerURL(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return raw
@@ -98,7 +99,7 @@ func (r *Runtime) Create(ctx context.Context, req sandbox.CreateRequest) (sandbo
 	env := make([]string, 0, len(req.Env))
 	for k, v := range req.Env {
 		if k == sandbox.EnvAgentURL {
-			v = containerURL(v)
+			v = ContainerURL(v)
 		}
 		env = append(env, k+"="+v)
 	}

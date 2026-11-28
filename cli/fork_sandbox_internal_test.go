@@ -120,6 +120,46 @@ func TestForkSandboxProvisioners(t *testing.T) {
 	}
 }
 
+// TestForkSandboxAccessHost checks that the access URL redirect lets through
+// the host a Docker sandbox container reaches a loopback access URL on.
+func TestForkSandboxAccessHost(t *testing.T) {
+	t.Parallel()
+
+	served := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	for _, tc := range []struct {
+		name       string
+		experiment bool
+		runtime    string
+		accessURL  string
+		host       string
+		want       int
+	}{
+		{name: "ContainerHost", experiment: true, runtime: codersdk.SandboxRuntimeDocker, accessURL: "http://127.0.0.1:3000", host: "host.docker.internal:3000", want: http.StatusOK},
+		{name: "OtherPort", experiment: true, runtime: codersdk.SandboxRuntimeDocker, accessURL: "http://127.0.0.1:3000", host: "host.docker.internal:4000", want: http.StatusTemporaryRedirect},
+		{name: "HTTPSWithoutTLS", experiment: true, runtime: codersdk.SandboxRuntimeDocker, accessURL: "https://localhost:3443", host: "host.docker.internal:3443", want: http.StatusTemporaryRedirect},
+		{name: "ExperimentOff", runtime: codersdk.SandboxRuntimeDocker, accessURL: "http://127.0.0.1:3000", host: "host.docker.internal:3000", want: http.StatusTemporaryRedirect},
+		{name: "NoDockerRuntime", experiment: true, accessURL: "http://127.0.0.1:3000", host: "host.docker.internal:3000", want: http.StatusTemporaryRedirect},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			accessURL, err := url.Parse(tc.accessURL)
+			require.NoError(t, err)
+			dv := &codersdk.DeploymentValues{}
+			dv.Sandbox.Runtime = serpent.String(tc.runtime)
+			api := &coderd.API{Options: &coderd.Options{AccessURL: accessURL, DeploymentValues: dv}}
+			if tc.experiment {
+				api.Experiments = codersdk.Experiments{codersdk.ExperimentForkSandboxProvisioner}
+			}
+			handler := forkSandboxAccessHost(api, served, redirectToAccessURL(served, accessURL, false, nil))
+			req := httptest.NewRequest(http.MethodGet, "/api/v2/buildinfo", nil)
+			req.Host = tc.host
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			require.Equal(t, tc.want, rec.Code)
+		})
+	}
+}
+
 // TestSandboxProvisionerEndToEnd runs a sandbox template and workspace
 // through coderd, the provisionerd runner, the engine, the operation log in
 // the database and the fake runtime.

@@ -10,7 +10,10 @@ package cli
 import (
 	"context"
 	"io"
+	"net/http"
+	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -177,4 +180,27 @@ func serveSandboxProvisioner(
 	}()
 	connector[string(codersdk.ProvisionerTypeSandbox)] = sdkproto.NewDRPCProvisionerClient(client)
 	return append(slices.Clone(types), codersdk.ProvisionerTypeSandbox), connector, nil
+}
+
+// forkSandboxAccessHost lets requests from Docker sandbox containers past the
+// access URL redirect. For a loopback access URL the Docker runtime points
+// the agent at the host gateway, and a redirect back to loopback would send
+// the agent to the container itself. Other requests go to redirecting.
+func forkSandboxAccessHost(api *coderd.API, direct, redirecting http.Handler) http.Handler {
+	if !api.Experiments.Enabled(codersdk.ExperimentForkSandboxProvisioner) ||
+		api.DeploymentValues.Sandbox.Runtime.Value() != codersdk.SandboxRuntimeDocker {
+		return redirecting
+	}
+	accessURL := api.AccessURL
+	u, err := url.Parse(dockerruntime.ContainerURL(accessURL.String()))
+	if err != nil || u.Host == accessURL.Host {
+		return redirecting
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.Host, u.Host) && (accessURL.Scheme != "https" || r.TLS != nil) {
+			direct.ServeHTTP(w, r)
+			return
+		}
+		redirecting.ServeHTTP(w, r)
+	})
 }
