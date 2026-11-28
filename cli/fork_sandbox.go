@@ -9,8 +9,10 @@ package cli
 
 import (
 	"context"
+	"io"
 	"slices"
 	"sync"
+	"time"
 
 	"golang.org/x/xerrors"
 
@@ -19,27 +21,38 @@ import (
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/drpcsdk"
 	"github.com/coder/coder/v2/provisioner/sandbox"
+	"github.com/coder/coder/v2/provisioner/sandbox/dockerruntime"
 	"github.com/coder/coder/v2/provisioner/sandbox/sandboxdb"
 	"github.com/coder/coder/v2/provisionerd"
 	"github.com/coder/coder/v2/provisionersdk"
 	sdkproto "github.com/coder/coder/v2/provisionersdk/proto"
 )
 
-// errNoSandboxRuntime reports that this build has no container runtime for
-// the sandbox provisioner yet.
-var errNoSandboxRuntime = xerrors.New("no sandbox container runtime is available in this build")
+// errNoSandboxRuntime reports that no deployment option selects a container
+// runtime for the sandbox provisioner.
+var errNoSandboxRuntime = xerrors.New("no sandbox container runtime is selected, set --sandbox-runtime")
 
-// sandboxRuntime returns the container runtime of the sandbox provisioner.
-// The test FakeRuntime is never a default, so until a runtime adapter lands
-// it returns errNoSandboxRuntime.
-func sandboxRuntime() (sandbox.Runtime, error) {
-	return nil, errNoSandboxRuntime
+// sandboxRuntime returns the container runtime that the deployment selects.
+// The test FakeRuntime is never a default: without --sandbox-runtime it
+// returns errNoSandboxRuntime.
+func sandboxRuntime(ctx context.Context, cfg codersdk.ForkSandboxConfig) (sandbox.Runtime, error) {
+	switch cfg.Runtime.Value() {
+	case "":
+		return nil, errNoSandboxRuntime
+	case codersdk.SandboxRuntimeDocker:
+		// A daemon that does not answer must not hold up the server start.
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		return dockerruntime.New(ctx, cfg.DockerHost.Value())
+	default:
+		return nil, xerrors.Errorf("unknown sandbox runtime %q", cfg.Runtime.Value())
+	}
 }
 
 // forkSandboxProvisioners adds the sandbox provisioner to the built-in
 // daemon when the fork-sandbox-provisioner experiment is enabled and a
-// container runtime exists. No production runtime exists yet, so with the
-// experiment on it logs a warning and returns its inputs unchanged.
+// container runtime is selected. Otherwise it logs why and returns its
+// inputs unchanged.
 func forkSandboxProvisioners(
 	ctx context.Context,
 	api *coderd.API,
@@ -54,12 +67,15 @@ func forkSandboxProvisioners(
 	if !api.Experiments.Enabled(codersdk.ExperimentForkSandboxProvisioner) {
 		return types, connector
 	}
-	runtime, err := sandboxRuntime()
+	runtime, err := sandboxRuntime(ctx, api.DeploymentValues.Sandbox)
 	if err == nil {
 		var served []codersdk.ProvisionerType
 		served, connector, err = serveSandboxProvisioner(ctx, api, runtime, logger, workDir, types, connector, errCh, wg, cancel)
 		if err == nil {
 			return served, connector
+		}
+		if c, ok := runtime.(io.Closer); ok {
+			_ = c.Close()
 		}
 	}
 	logger.Warn(ctx, "the sandbox provisioner is not registered", slog.Error(err))
@@ -95,6 +111,9 @@ func serveSandboxProvisioner(
 		<-ctx.Done()
 		_ = client.Close()
 		_ = server.Close()
+		if c, ok := runtime.(io.Closer); ok {
+			_ = c.Close()
+		}
 	}()
 	wg.Add(1)
 	go func() {

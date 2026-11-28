@@ -2353,3 +2353,23 @@ The Apple Developer team ID that owns the APNs auth key in --chat-apns-key-file.
 | YAML        | <code>chat.apnsTopic</code>         |
 
 The bundle ID of the iOS app that receives the chat pushes. The app must belong to the team of the APNs key.
+
+### --sandbox-runtime
+
+| Property    | Value                               |
+|-------------|-------------------------------------|
+| Type        | <code>string</code>                 |
+| Environment | <code>$CODER_SANDBOX_RUNTIME</code> |
+| YAML        | <code>sandbox.runtime</code>        |
+
+The container runtime of the sandbox provisioner when the fork-sandbox-provisioner experiment is enabled. "docker" uses a Docker daemon. Empty registers no sandbox provisioner.
+
+### --sandbox-docker-host
+
+| Property    | Value                                   |
+|-------------|-----------------------------------------|
+| Type        | <code>string</code>                     |
+| Environment | <code>$CODER_SANDBOX_DOCKER_HOST</code> |
+| YAML        | <code>sandbox.dockerHost</code>         |
+
+The Docker daemon address of the docker sandbox runtime, for example unix:///var/run/docker.sock. Empty uses DOCKER_HOST or the local socket.

@@ -9408,6 +9408,10 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
       "connection_logs": 0,
       "workspace_agent_logs": 0
     },
+    "sandbox": {
+      "docker_host": "string",
+      "runtime": "string"
+    },
     "scim_api_key": "string",
     "scim_use_legacy": true,
     "session_lifetime": {
@@ -10059,6 +10063,10 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
     "connection_logs": 0,
     "workspace_agent_logs": 0
   },
+  "sandbox": {
+    "docker_host": "string",
+    "runtime": "string"
+  },
   "scim_api_key": "string",
   "scim_use_legacy": true,
   "session_lifetime": {
@@ -10226,6 +10234,7 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
 | `rate_limit`                                   | [codersdk.RateLimitConfig](#codersdkratelimitconfig)                                                 | false    |              |                                                                           |
 | `redirect_to_access_url`                       | boolean                                                                                              | false    |              |                                                                           |
 | `retention`                                    | [codersdk.RetentionConfig](#codersdkretentionconfig)                                                 | false    |              |                                                                           |
+| `sandbox`                                      | [codersdk.ForkSandboxConfig](#codersdkforksandboxconfig)                                             | false    |              |                                                                           |
 | `scim_api_key`                                 | string                                                                                               | false    |              |                                                                           |
 | `scim_use_legacy`                              | boolean                                                                                              | false    |              |                                                                           |
 | `session_lifetime`                             | [codersdk.SessionLifetime](#codersdksessionlifetime)                                                 | false    |              |                                                                           |
@@ -11440,6 +11449,22 @@ Git clone makes use of this by parsing the URL from: 'Username for "https://gith
 | Name    | Type            | Required | Restrictions | Description |
 |---------|-----------------|----------|--------------|-------------|
 | `hosts` | array of string | false    |              |             |
+
+## codersdk.ForkSandboxConfig
+
+```json
+{
+  "docker_host": "string",
+  "runtime": "string"
+}
+```
+
+### Properties
+
+| Name          | Type   | Required | Restrictions | Description                                                                                                 |
+|---------------|--------|----------|--------------|-------------------------------------------------------------------------------------------------------------|
+| `docker_host` | string | false    |              | Docker host is the Docker daemon address of the docker runtime. Empty uses DOCKER_HOST or the local socket. |
+| `runtime`     | string | false    |              | Runtime selects the container runtime. Empty registers no sandbox provisioner.                              |
 
 ## codersdk.ForkSavedWorkflow
 

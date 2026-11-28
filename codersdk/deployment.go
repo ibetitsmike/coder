@@ -795,6 +795,7 @@ type DeploymentValues struct {
 	AI                      AIConfig              `json:"ai,omitempty"`
 	StatsCollection         StatsCollectionConfig `json:"stats_collection,omitempty" typescript:",notnull"`
 	TemplateBuilder         TemplateBuilderConfig `json:"template_builder,omitempty"`
+	Sandbox                 ForkSandboxConfig     `json:"sandbox,omitempty" typescript:",notnull"`
 
 	Config      serpent.YAMLConfigPath `json:"config,omitempty" typescript:",notnull"`
 	WriteConfig serpent.Bool           `json:"write_config,omitempty" typescript:",notnull"`
@@ -5043,7 +5044,7 @@ Write out the current server config as YAML to stdout.`,
 		},
 	}
 
-	return append(opts, c.forkChatOptions(&deploymentGroupChat)...)
+	return append(opts, c.forkOptions(&deploymentGroupChat)...)
 }
 
 type AIBridgeConfig struct {

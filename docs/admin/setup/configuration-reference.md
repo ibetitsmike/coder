@@ -2397,6 +2397,30 @@ Set to 0 to disable automatic deletion.
 - YAML key: `retention.workspace_agent_logs`
 - Default value: `7d`
 
+## Sandbox
+
+Configure the sandbox provisioner of the fork-sandbox-provisioner experiment.
+
+### Docker host
+
+The Docker daemon address of the docker sandbox runtime, for example unix:///var/run/docker.sock.
+Empty uses DOCKER_HOST or the local socket.
+
+- Type: `string`
+- Environment variable: `CODER_SANDBOX_DOCKER_HOST`
+- CLI flag: [`--sandbox-docker-host`](../../reference/cli/server/index.md#--sandbox-docker-host)
+- YAML key: `sandbox.dockerHost`
+
+### Runtime
+
+The container runtime of the sandbox provisioner when the fork-sandbox-provisioner experiment is enabled. "docker" uses a Docker daemon.
+Empty registers no sandbox provisioner.
+
+- Type: `string`
+- Environment variable: `CODER_SANDBOX_RUNTIME`
+- CLI flag: [`--sandbox-runtime`](../../reference/cli/server/index.md#--sandbox-runtime)
+- YAML key: `sandbox.runtime`
+
 ## Telemetry
 
 Telemetry is critical to our ability to improve Coder.

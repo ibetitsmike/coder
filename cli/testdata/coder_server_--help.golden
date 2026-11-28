@@ -1008,6 +1008,19 @@ that data type.
           Logs from the latest build are always retained. Set to 0 to disable
           automatic deletion.
 
+SANDBOX OPTIONS: 
+Configure the sandbox provisioner of the fork-sandbox-provisioner experiment.
+
+      --sandbox-docker-host string, $CODER_SANDBOX_DOCKER_HOST
+          The Docker daemon address of the docker sandbox runtime, for example
+          unix:///var/run/docker.sock. Empty uses DOCKER_HOST or the local
+          socket.
+
+      --sandbox-runtime string, $CODER_SANDBOX_RUNTIME
+          The container runtime of the sandbox provisioner when the
+          fork-sandbox-provisioner experiment is enabled. "docker" uses a Docker
+          daemon. Empty registers no sandbox provisioner.
+
 TELEMETRY OPTIONS: 
 Telemetry is critical to our ability to improve Coder. We strip all personal
 information before sending data to our servers. Only disable telemetry when
