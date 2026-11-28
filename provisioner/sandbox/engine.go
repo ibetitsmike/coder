@@ -134,7 +134,8 @@ func (*Engine) Parse(sess *provisionersdk.Session, _ *proto.ParseRequest, _ <-ch
 }
 
 // Plan carries the previous build's state into the session, where Apply
-// and Graph read it.
+// and Graph read it. A stop or destroy leaves no container, so it costs
+// nothing.
 func (*Engine) Plan(sess *provisionersdk.Session, req *proto.PlanRequest, _ <-chan struct{}) *proto.PlanComplete {
 	spec, err := readSpec(sess)
 	if err != nil {
@@ -142,6 +143,10 @@ func (*Engine) Plan(sess *provisionersdk.Session, req *proto.PlanRequest, _ <-ch
 	}
 	if err := writeState(sess, req.GetState()); err != nil {
 		return &proto.PlanComplete{Error: "write session state: " + err.Error()}
+	}
+	switch req.GetMetadata().GetWorkspaceTransition() {
+	case proto.WorkspaceTransition_STOP, proto.WorkspaceTransition_DESTROY:
+		return &proto.PlanComplete{}
 	}
 	return &proto.PlanComplete{DailyCost: specDailyCost(spec)}
 }
@@ -170,9 +175,14 @@ func (*Engine) Graph(sess *provisionersdk.Session, req *proto.GraphRequest, _ <-
 		}
 		token = state.AgentToken
 	}
+	// A template import has no workspace name.
+	name := req.GetMetadata().GetWorkspaceName()
+	if name == "" {
+		name = "sandbox"
+	}
 	return &proto.GraphComplete{
 		Resources: []*proto.Resource{{
-			Name:      req.GetMetadata().GetWorkspaceName(),
+			Name:      name,
 			Type:      "sandbox_container",
 			DailyCost: specDailyCost(spec),
 			Agents: []*proto.Agent{{
