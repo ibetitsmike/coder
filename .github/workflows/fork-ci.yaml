@@ -150,6 +150,14 @@ jobs:
       - name: Type check
         run: pnpm run lint:types
         working-directory: site
+      # Upstream's make lint runs oxlint. No upstream job runs the design
+      # system rules (#317).
+      - name: Oxlint
+        run: pnpm run lint:oxlint
+        working-directory: site
+      - name: Design system lint
+        run: pnpm run lint:design-system
+        working-directory: site
       - name: Agents page and fork unit tests
         run: |
           fork_tests=$(../.github/fork/fork-tests.sh site-files)
