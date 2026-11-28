@@ -232,6 +232,11 @@ jobs:
           go-version-file: go.mod
       - name: Build coder
         run: go build -o /dev/null ./enterprise/cmd/coder
+      # Autodeploy also builds the slim agent binary with the tags of
+      # scripts/build_go.sh --slim. Code that pulls coderd into a slim build
+      # fails there (#465).
+      - name: Build slim coder
+        run: go build -tags slim,ts_omit_aws,ts_omit_bird,ts_omit_tap,ts_omit_kube -o /dev/null ./enterprise/cmd/coder
 
   forkdb:
     runs-on: ubuntu-latest
