@@ -114,6 +114,29 @@ func TestEngineApply(t *testing.T) {
 		require.Equal(t, []string{"Create", "Start", "Stop", "Status", "Start", "Status"}, h.rt.Calls())
 	})
 
+	t.Run("RecreateKeepsTheRecordedToken", func(t *testing.T) {
+		t.Parallel()
+
+		h := newHarness()
+		start, g := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, nil)
+		first := token(t, g)
+		require.NoError(t, h.rt.Remove(context.Background(), sandbox.ContainerName(h.ws)))
+
+		again, g := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, start.GetState())
+		require.Empty(t, again.GetError())
+		require.Equal(t, first, token(t, g))
+		creates := h.rt.Creates()
+		require.Len(t, creates, 2)
+		require.Equal(t, first, creates[1].Env[sandbox.EnvAgentToken])
+
+		// A replay from the older state, as after a lost job state, resumes
+		// the recreated container with the token it runs with.
+		replay, g := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, start.GetState())
+		require.Empty(t, replay.GetError())
+		require.Equal(t, first, token(t, g))
+		require.Len(t, h.rt.Creates(), 2)
+	})
+
 	t.Run("SupersededBuildDoesNotTouchTheRuntime", func(t *testing.T) {
 		t.Parallel()
 

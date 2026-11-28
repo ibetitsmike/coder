@@ -289,13 +289,18 @@ func (e *Engine) applyStart(ctx context.Context, spec *Spec, metadata *proto.Met
 		case !errors.Is(err, ErrNotFound):
 			return state, xerrors.Errorf("read container: %w", err)
 		}
-		// The container is gone. Create a fresh one.
+		// The container is gone. Create a fresh one with the recorded token, so
+		// a replay of this build from the same state resumes a container whose
+		// token matches the state.
 	}
 
 	next := stateBlob{
 		ContainerID: ContainerName(workspaceID),
 		BuildID:     metadata.GetWorkspaceBuildId(),
-		AgentToken:  uuid.NewString(),
+		AgentToken:  state.AgentToken,
+	}
+	if next.AgentToken == "" {
+		next.AgentToken = uuid.NewString()
 	}
 	env := maps.Clone(spec.Container.Env)
 	if env == nil {
