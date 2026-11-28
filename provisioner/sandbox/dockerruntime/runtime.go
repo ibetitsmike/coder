@@ -34,10 +34,15 @@ type Runtime struct {
 
 var _ sandbox.Runtime = (*Runtime)(nil)
 
-// New connects to the Docker daemon that the DOCKER_HOST environment
-// selects, or the local socket, and checks that it answers.
-func New(ctx context.Context) (*Runtime, error) {
-	c, err := client.New(client.FromEnv, client.WithAPIVersionNegotiation())
+// New connects to the Docker daemon at host, or, when host is empty, the one
+// that the DOCKER_HOST environment selects or the local socket, and checks
+// that it answers.
+func New(ctx context.Context, host string) (*Runtime, error) {
+	opts := []client.Opt{client.FromEnv, client.WithAPIVersionNegotiation()}
+	if host != "" {
+		opts = append(opts, client.WithHost(host))
+	}
+	c, err := client.New(opts...)
 	if err != nil {
 		return nil, xerrors.Errorf("docker client: %w", err)
 	}

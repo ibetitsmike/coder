@@ -585,6 +585,10 @@ curl -X GET http://coder-server:8080/api/v2/deployment/config \
       "connection_logs": 0,
       "workspace_agent_logs": 0
     },
+    "sandbox": {
+      "docker_host": "string",
+      "runtime": "string"
+    },
     "scim_api_key": "string",
     "scim_use_legacy": true,
     "session_lifetime": {

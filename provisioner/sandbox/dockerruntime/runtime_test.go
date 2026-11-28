@@ -27,7 +27,7 @@ func newRuntime(t *testing.T) *dockerruntime.Runtime {
 	if os.Getenv("FORK_SANDBOX_DOCKER_TEST") != "1" {
 		t.Skip("set FORK_SANDBOX_DOCKER_TEST=1 to run against a Docker daemon")
 	}
-	rt, err := dockerruntime.New(testutil.Context(t, testutil.WaitLong))
+	rt, err := dockerruntime.New(testutil.Context(t, testutil.WaitLong), "")
 	require.NoError(t, err, "FORK_SANDBOX_DOCKER_TEST=1 needs a Docker daemon")
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt

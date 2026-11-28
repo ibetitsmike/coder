@@ -23,6 +23,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database/db2sdk"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/dynamicparameters"
 	"github.com/coder/coder/v2/coderd/files"
 	"github.com/coder/coder/v2/coderd/httpapi"
@@ -358,7 +359,7 @@ func (b *Builder) recordBuildMetrics(job *database.ProvisionerJob, err error) {
 	if b.buildMetrics == nil {
 		return
 	}
-	if job == nil || !job.Provisioner.Valid() {
+	if job == nil || !forkdb.ValidProvisionerType(job.Provisioner) {
 		return
 	}
 

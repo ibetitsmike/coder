@@ -35,6 +35,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
+	"github.com/coder/coder/v2/coderd/database/forkdb"
 	"github.com/coder/coder/v2/coderd/database/pubsub"
 	"github.com/coder/coder/v2/coderd/externalauth"
 	"github.com/coder/coder/v2/coderd/notifications"
@@ -1009,7 +1010,7 @@ func (s *server) acquireProtoJob(ctx context.Context, job database.ProvisionerJo
 	}
 
 	// Record the time the job spent waiting in the queue.
-	if s.metrics != nil && job.StartedAt.Valid && job.Provisioner.Valid() {
+	if s.metrics != nil && job.StartedAt.Valid && forkdb.ValidProvisionerType(job.Provisioner) {
 		// These timestamps lose their monotonic clock component after a Postgres
 		// round-trip, so the subtraction is based purely on wall-clock time. Floor at
 		// 1ms as a defensive measure against clock adjustments producing a negative
