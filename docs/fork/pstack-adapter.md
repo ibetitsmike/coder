@@ -971,4 +971,4 @@ If the user wants `poteto-mode` to stay on, tell them that with the experiment t
 
 ## Evidence
 
-The code cites that back this page are on their own page, [pstack adapter evidence](pstack-adapter-evidence.md).
+The code cites that back this page are on their own page, [pstack adapter evidence](https://github.com/ibetitsmike/coder/blob/main/docs/fork/pstack-adapter-evidence.md).
