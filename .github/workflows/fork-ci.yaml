@@ -158,6 +158,30 @@ jobs:
           pnpm test:ci src/pages/AgentsPage "${fork_tests[@]}"
         working-directory: site
 
+  # Reports the PR's non-generated changed lines against the 500 line limit
+  # (#171). It never fails: the lead's merge step enforces the limit.
+  pr-size:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      # pr-size.sh needs the history to find the merge base with the base
+      # branch. git diff fetches the blobs it needs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          filter: blob:none
+      - name: Report PR size
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          FORK_PR_SYNC: ${{ contains(github.event.pull_request.labels.*.name, 'sync') }}
+        run: ./.github/fork/pr-size.sh "$BASE_SHA" "$HEAD_SHA"
+
   build:
     runs-on: ubuntu-latest
     permissions:
