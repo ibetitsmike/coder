@@ -182,8 +182,8 @@ jobs:
           FORK_PR_SYNC: ${{ contains(github.event.pull_request.labels.*.name, 'sync') }}
         run: ./.github/fork/pr-size.sh "$BASE_SHA" "$HEAD_SHA"
 
-  # Fails on formatting drift, the same files make fmt formats (#407). It does
-  # not lint.
+  # Fails on formatting drift, the same files make fmt formats (#407). It runs
+  # no Go or site linter. check-docs also runs markdownlint, as upstream CI does.
   fmt:
     runs-on: ubuntu-latest
     permissions:

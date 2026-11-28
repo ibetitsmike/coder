@@ -5,7 +5,8 @@
 set -euo pipefail
 
 # The same files as make fmt/go: FIND_EXCLUSIONS in the Makefile, minus
-# files with a "Code generated ... DO NOT EDIT." header.
+# files with a "Code generated ... DO NOT EDIT." header. gci also formats
+# stdin when stdin is not a terminal, so its stdin is /dev/null.
 files=()
 while IFS= read -r -d '' f; do
 	files+=("$f")
@@ -22,7 +23,7 @@ if [ -n "$unformatted" ]; then
 	echo "$unformatted"
 	status=1
 fi
-imports=$(go tool github.com/daixiang0/gci diff -s standard -s default -s "Prefix(github.com/coder,cdr.dev/)" "${files[@]}")
+imports=$(go tool github.com/daixiang0/gci diff -s standard -s default -s "Prefix(github.com/coder,cdr.dev/)" "${files[@]}" </dev/null)
 if [ -n "$imports" ]; then
 	echo "gci would change these imports:"
 	echo "$imports"
