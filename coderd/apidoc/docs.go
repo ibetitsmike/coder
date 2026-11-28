@@ -31016,6 +31016,9 @@ const docTemplate = `{
                 "retention": {
                     "$ref": "#/definitions/codersdk.RetentionConfig"
                 },
+                "sandbox": {
+                    "$ref": "#/definitions/codersdk.ForkSandboxConfig"
+                },
                 "scim_api_key": {
                     "type": "string"
                 },
@@ -32175,6 +32178,19 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "codersdk.ForkSandboxConfig": {
+            "type": "object",
+            "properties": {
+                "docker_host": {
+                    "description": "DockerHost is the Docker daemon address of the docker runtime. Empty\nuses DOCKER_HOST or the local socket.",
+                    "type": "string"
+                },
+                "runtime": {
+                    "description": "Runtime selects the container runtime. Empty registers no sandbox\nprovisioner.",
+                    "type": "string"
                 }
             }
         },

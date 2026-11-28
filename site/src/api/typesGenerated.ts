@@ -6068,6 +6068,7 @@ export interface DeploymentValues {
 	readonly ai?: AIConfig;
 	readonly stats_collection?: StatsCollectionConfig;
 	readonly template_builder?: TemplateBuilderConfig;
+	readonly sandbox?: ForkSandboxConfig;
 	readonly config?: string;
 	readonly write_config?: boolean;
 	/**
@@ -7097,6 +7098,24 @@ export interface ForkPluginPackFile {
  */
 export interface ForkPluginPackSources {
 	readonly hosts: readonly string[];
+}
+
+// From codersdk/fork_sandbox_config.go
+/**
+ * ForkSandboxConfig is the deployment configuration of the sandbox
+ * provisioner.
+ */
+export interface ForkSandboxConfig {
+	/**
+	 * Runtime selects the container runtime. Empty registers no sandbox
+	 * provisioner.
+	 */
+	readonly runtime: string;
+	/**
+	 * DockerHost is the Docker daemon address of the docker runtime. Empty
+	 * uses DOCKER_HOST or the local socket.
+	 */
+	readonly docker_host: string;
 }
 
 // From codersdk/fork_saved_workflows.go
@@ -11158,6 +11177,13 @@ export interface STUNReport {
 	readonly CanSTUN: boolean;
 	readonly Error: string | null;
 }
+
+// From codersdk/fork_sandbox_config.go
+/**
+ * SandboxRuntimeDocker selects the Docker Engine runtime of the sandbox
+ * provisioner.
+ */
+export const SandboxRuntimeDocker = "docker";
 
 // From codersdk/usersecretsimport.go
 export type SecretsFileFormat = "env" | "json" | "yaml";

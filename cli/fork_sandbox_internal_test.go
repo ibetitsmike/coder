@@ -6,24 +6,32 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 
-	"cdr.dev/slog/v3/sloggers/slogtest"
 	"github.com/coder/coder/v2/coderd"
 	"github.com/coder/coder/v2/coderd/coderdtest"
+	"github.com/coder/coder/v2/coderd/coderdtest/promhelp"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
+	"github.com/coder/coder/v2/coderd/provisionerdserver"
+	"github.com/coder/coder/v2/coderd/wsbuilder"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/provisioner/sandbox"
 	"github.com/coder/coder/v2/provisioner/sandbox/sandboxtest"
 	"github.com/coder/coder/v2/provisionerd"
 	"github.com/coder/coder/v2/provisionerd/proto"
 	"github.com/coder/coder/v2/testutil"
+	"github.com/coder/serpent"
 )
 
 const sandboxSpec = `version: 1
@@ -37,18 +45,69 @@ func TestForkSandboxProvisioners(t *testing.T) {
 	t.Parallel()
 
 	// The test FakeRuntime is never the default.
-	_, err := sandboxRuntime()
+	_, err := sandboxRuntime(context.Background(), codersdk.ForkSandboxConfig{})
 	require.ErrorIs(t, err, errNoSandboxRuntime)
+	_, err = sandboxRuntime(context.Background(), codersdk.ForkSandboxConfig{Runtime: "nope"})
+	require.ErrorContains(t, err, `unknown sandbox runtime "nope"`)
 
-	// Without a runtime the hook leaves the daemon as it is, with the
-	// experiment on or off.
-	for _, experiments := range []codersdk.Experiments{nil, {codersdk.ExperimentForkSandboxProvisioner}} {
-		api := &coderd.API{Experiments: experiments}
-		connector := provisionerd.LocalProvisioners{}
-		types, got := forkSandboxProvisioners(context.Background(), api, slogtest.Make(t, nil), t.TempDir(),
-			[]codersdk.ProvisionerType{codersdk.ProvisionerTypeEcho}, connector, make(chan error, 1), &sync.WaitGroup{}, func() {})
-		require.Equal(t, []codersdk.ProvisionerType{codersdk.ProvisionerTypeEcho}, types)
-		require.Empty(t, got)
+	experiment := []string{string(codersdk.ExperimentForkSandboxProvisioner)}
+	for _, tc := range []struct {
+		name        string
+		experiments []string
+		runtime     string
+		registered  bool
+	}{
+		{name: "ExperimentOff", runtime: codersdk.SandboxRuntimeDocker},
+		{name: "NoRuntime", experiments: experiment},
+		{name: "ExperimentOnWithRuntime", experiments: experiment, runtime: codersdk.SandboxRuntimeDocker, registered: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			// A Docker daemon that only answers pings is enough to register the
+			// docker runtime. It counts the runtimes made against it.
+			var pings atomic.Int64
+			docker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if !strings.HasSuffix(r.URL.Path, "/_ping") {
+					http.NotFound(w, r)
+					return
+				}
+				pings.Add(1)
+				w.Header().Set("Api-Version", "1.47")
+				_, _ = w.Write([]byte("OK"))
+			}))
+			t.Cleanup(docker.Close)
+			dv := coderdtest.DeploymentValues(t)
+			dv.Experiments = tc.experiments
+			dv.Sandbox.Runtime = serpent.String(tc.runtime)
+			dv.Sandbox.DockerHost = serpent.String("tcp://" + docker.Listener.Addr().String())
+			_, closer, api := coderdtest.NewWithAPI(t, &coderdtest.Options{DeploymentValues: dv})
+			t.Cleanup(func() { _ = closer.Close() })
+
+			// The server calls the hook once for each built-in daemon.
+			for range 2 {
+				ctx, cancel := context.WithCancel(context.Background())
+				var wg sync.WaitGroup
+				t.Cleanup(func() {
+					cancel()
+					wg.Wait()
+				})
+				echo := []codersdk.ProvisionerType{codersdk.ProvisionerTypeEcho}
+				types, connector := forkSandboxProvisioners(ctx, api, testutil.Logger(t), t.TempDir(),
+					echo, provisionerd.LocalProvisioners{}, make(chan error, 1), &wg, cancel)
+				if !tc.registered {
+					require.Equal(t, echo, types)
+					require.Empty(t, connector)
+					continue
+				}
+				require.Equal(t, append(echo, codersdk.ProvisionerTypeSandbox), types)
+				require.Contains(t, connector, string(codersdk.ProvisionerTypeSandbox))
+			}
+			if tc.registered {
+				// The daemons share one runtime, and so one set of
+				// per-container locks.
+				require.EqualValues(t, 1, pings.Load())
+			}
+		})
 	}
 }
 
@@ -60,7 +119,16 @@ func TestSandboxProvisionerEndToEnd(t *testing.T) {
 
 	dv := coderdtest.DeploymentValues(t)
 	dv.Experiments = []string{string(codersdk.ExperimentForkSandboxProvisioner)}
-	client, closer, api := coderdtest.NewWithAPI(t, &coderdtest.Options{DeploymentValues: dv})
+	reg := prometheus.NewRegistry()
+	jobMetrics := provisionerdserver.NewMetrics(testutil.Logger(t))
+	require.NoError(t, jobMetrics.Register(reg))
+	buildMetrics, err := wsbuilder.NewMetrics(reg)
+	require.NoError(t, err)
+	client, closer, api := coderdtest.NewWithAPI(t, &coderdtest.Options{
+		DeploymentValues:          dv,
+		ProvisionerdServerMetrics: jobMetrics,
+		WorkspaceBuilderMetrics:   buildMetrics,
+	})
 	t.Cleanup(func() { _ = closer.Close() })
 	user := coderdtest.CreateFirstUser(t, client)
 
@@ -133,6 +201,19 @@ func TestSandboxProvisionerEndToEnd(t *testing.T) {
 	require.Equal(t, creates[0].Env[sandbox.EnvAgentToken], agentToken(t, api, restart.Job.ID).String())
 	build(database.WorkspaceTransitionDelete)
 	require.Empty(t, rt.Containers())
+
+	// The metric sites count sandbox jobs, which upstream's
+	// ProvisionerType.Valid does not know.
+	sandboxType := string(codersdk.ProvisionerTypeSandbox)
+	require.Equal(t, 2, promhelp.CounterValue(t, reg, "coderd_workspace_builds_enqueued_total", prometheus.Labels{
+		"provisioner_type": sandboxType, "build_reason": string(database.BuildReasonInitiator),
+		"transition": string(database.WorkspaceTransitionStart), "status": wsbuilder.BuildStatusSuccess,
+	}))
+	wait := promhelp.HistogramValue(t, reg, "coderd_provisioner_job_queue_wait_seconds", prometheus.Labels{
+		"provisioner_type": sandboxType, "job_type": string(database.ProvisionerJobTypeWorkspaceBuild),
+		"transition": string(database.WorkspaceTransitionStart), "build_reason": string(database.BuildReasonInitiator),
+	})
+	require.Equal(t, uint64(2), wait.GetSampleCount())
 }
 
 // agentToken reads the auth token coderd stored for the one agent of a
