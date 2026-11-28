@@ -30,7 +30,7 @@ func (c *DeploymentValues) forkOptions(chat *serpent.Group) serpent.OptionSet {
 	return append(c.forkChatOptions(chat), serpent.OptionSet{
 		{
 			Name:        "Sandbox Runtime",
-			Description: "The container runtime of the sandbox provisioner when the fork-sandbox-provisioner experiment is enabled. \"docker\" uses a Docker daemon. Empty registers no sandbox provisioner.",
+			Description: "The container runtime of the sandbox provisioner when the fork-sandbox-provisioner experiment is enabled. \"docker\" uses a Docker daemon and supports one coderd replica only, because a build of a workspace can run on any replica. Empty registers no sandbox provisioner.",
 			Flag:        "sandbox-runtime",
 			Env:         "CODER_SANDBOX_RUNTIME",
 			Value:       &c.Sandbox.Runtime,

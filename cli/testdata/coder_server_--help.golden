@@ -1019,7 +1019,9 @@ Configure the sandbox provisioner of the fork-sandbox-provisioner experiment.
       --sandbox-runtime string, $CODER_SANDBOX_RUNTIME
           The container runtime of the sandbox provisioner when the
           fork-sandbox-provisioner experiment is enabled. "docker" uses a Docker
-          daemon. Empty registers no sandbox provisioner.
+          daemon and supports one coderd replica only, because a build of a
+          workspace can run on any replica. Empty registers no sandbox
+          provisioner.
 
 TELEMETRY OPTIONS: 
 Telemetry is critical to our ability to improve Coder. We strip all personal

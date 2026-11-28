@@ -2362,7 +2362,7 @@ The bundle ID of the iOS app that receives the chat pushes. The app must belong 
 | Environment | <code>$CODER_SANDBOX_RUNTIME</code> |
 | YAML        | <code>sandbox.runtime</code>        |
 
-The container runtime of the sandbox provisioner when the fork-sandbox-provisioner experiment is enabled. "docker" uses a Docker daemon. Empty registers no sandbox provisioner.
+The container runtime of the sandbox provisioner when the fork-sandbox-provisioner experiment is enabled. "docker" uses a Docker daemon and supports one coderd replica only, because a build of a workspace can run on any replica. Empty registers no sandbox provisioner.
 
 ### --sandbox-docker-host
 

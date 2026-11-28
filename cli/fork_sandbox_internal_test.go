@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -49,18 +50,6 @@ func TestForkSandboxProvisioners(t *testing.T) {
 	_, err = sandboxRuntime(context.Background(), codersdk.ForkSandboxConfig{Runtime: "nope"})
 	require.ErrorContains(t, err, `unknown sandbox runtime "nope"`)
 
-	// A Docker daemon that only answers pings is enough to register the
-	// docker runtime.
-	docker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/_ping") {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Api-Version", "1.47")
-		_, _ = w.Write([]byte("OK"))
-	}))
-	t.Cleanup(docker.Close)
-
 	experiment := []string{string(codersdk.ExperimentForkSandboxProvisioner)}
 	for _, tc := range []struct {
 		name        string
@@ -74,6 +63,19 @@ func TestForkSandboxProvisioners(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			// A Docker daemon that only answers pings is enough to register the
+			// docker runtime. It counts the runtimes made against it.
+			var pings atomic.Int64
+			docker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if !strings.HasSuffix(r.URL.Path, "/_ping") {
+					http.NotFound(w, r)
+					return
+				}
+				pings.Add(1)
+				w.Header().Set("Api-Version", "1.47")
+				_, _ = w.Write([]byte("OK"))
+			}))
+			t.Cleanup(docker.Close)
 			dv := coderdtest.DeploymentValues(t)
 			dv.Experiments = tc.experiments
 			dv.Sandbox.Runtime = serpent.String(tc.runtime)
@@ -81,22 +83,30 @@ func TestForkSandboxProvisioners(t *testing.T) {
 			_, closer, api := coderdtest.NewWithAPI(t, &coderdtest.Options{DeploymentValues: dv})
 			t.Cleanup(func() { _ = closer.Close() })
 
-			ctx, cancel := context.WithCancel(context.Background())
-			var wg sync.WaitGroup
-			t.Cleanup(func() {
-				cancel()
-				wg.Wait()
-			})
-			echo := []codersdk.ProvisionerType{codersdk.ProvisionerTypeEcho}
-			types, connector := forkSandboxProvisioners(ctx, api, testutil.Logger(t), t.TempDir(),
-				echo, provisionerd.LocalProvisioners{}, make(chan error, 1), &wg, cancel)
-			if !tc.registered {
-				require.Equal(t, echo, types)
-				require.Empty(t, connector)
-				return
+			// The server calls the hook once for each built-in daemon.
+			for range 2 {
+				ctx, cancel := context.WithCancel(context.Background())
+				var wg sync.WaitGroup
+				t.Cleanup(func() {
+					cancel()
+					wg.Wait()
+				})
+				echo := []codersdk.ProvisionerType{codersdk.ProvisionerTypeEcho}
+				types, connector := forkSandboxProvisioners(ctx, api, testutil.Logger(t), t.TempDir(),
+					echo, provisionerd.LocalProvisioners{}, make(chan error, 1), &wg, cancel)
+				if !tc.registered {
+					require.Equal(t, echo, types)
+					require.Empty(t, connector)
+					continue
+				}
+				require.Equal(t, append(echo, codersdk.ProvisionerTypeSandbox), types)
+				require.Contains(t, connector, string(codersdk.ProvisionerTypeSandbox))
 			}
-			require.Equal(t, append(echo, codersdk.ProvisionerTypeSandbox), types)
-			require.Contains(t, connector, string(codersdk.ProvisionerTypeSandbox))
+			if tc.registered {
+				// The daemons share one runtime, and so one set of
+				// per-container locks.
+				require.EqualValues(t, 1, pings.Load())
+			}
 		})
 	}
 }

@@ -2413,7 +2413,7 @@ Empty uses DOCKER_HOST or the local socket.
 
 ### Runtime
 
-The container runtime of the sandbox provisioner when the fork-sandbox-provisioner experiment is enabled. "docker" uses a Docker daemon.
+The container runtime of the sandbox provisioner when the fork-sandbox-provisioner experiment is enabled. "docker" uses a Docker daemon and supports one coderd replica only, because a build of a workspace can run on any replica.
 Empty registers no sandbox provisioner.
 
 - Type: `string`

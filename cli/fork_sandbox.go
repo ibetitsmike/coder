@@ -67,19 +67,66 @@ func forkSandboxProvisioners(
 	if !api.Experiments.Enabled(codersdk.ExperimentForkSandboxProvisioner) {
 		return types, connector
 	}
-	runtime, err := sandboxRuntime(ctx, api.DeploymentValues.Sandbox)
+	runtime, release, err := acquireSandboxRuntime(ctx, api)
 	if err == nil {
 		var served []codersdk.ProvisionerType
 		served, connector, err = serveSandboxProvisioner(ctx, api, runtime, logger, workDir, types, connector, errCh, wg, cancel)
 		if err == nil {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-ctx.Done()
+				release()
+			}()
 			return served, connector
 		}
-		if c, ok := runtime.(io.Closer); ok {
-			_ = c.Close()
-		}
+		release()
 	}
 	logger.Warn(ctx, "the sandbox provisioner is not registered", slog.Error(err))
 	return types, connector
+}
+
+// sandboxRuntimes holds the runtime that the built-in daemons of one API
+// share. The server starts several daemons and any of them can acquire a
+// build of a workspace, so they need one runtime with one set of
+// per-container locks.
+var sandboxRuntimes = struct {
+	sync.Mutex
+	byAPI map[*coderd.API]*sharedRuntime
+}{byAPI: map[*coderd.API]*sharedRuntime{}}
+
+type sharedRuntime struct {
+	runtime sandbox.Runtime
+	users   int
+}
+
+// acquireSandboxRuntime returns the runtime of api and creates it for the
+// first daemon. release closes it after the last daemon released it.
+func acquireSandboxRuntime(ctx context.Context, api *coderd.API) (sandbox.Runtime, func(), error) {
+	sandboxRuntimes.Lock()
+	defer sandboxRuntimes.Unlock()
+	s, ok := sandboxRuntimes.byAPI[api]
+	if !ok {
+		runtime, err := sandboxRuntime(ctx, api.DeploymentValues.Sandbox)
+		if err != nil {
+			return nil, nil, err
+		}
+		s = &sharedRuntime{runtime: runtime}
+		sandboxRuntimes.byAPI[api] = s
+	}
+	s.users++
+	return s.runtime, sync.OnceFunc(func() {
+		sandboxRuntimes.Lock()
+		defer sandboxRuntimes.Unlock()
+		s.users--
+		if s.users > 0 {
+			return
+		}
+		delete(sandboxRuntimes.byAPI, api)
+		if c, ok := s.runtime.(io.Closer); ok {
+			_ = c.Close()
+		}
+	}), nil
 }
 
 // serveSandboxProvisioner serves the sandbox engine over runtime in memory
@@ -111,9 +158,6 @@ func serveSandboxProvisioner(
 		<-ctx.Done()
 		_ = client.Close()
 		_ = server.Close()
-		if c, ok := runtime.(io.Closer); ok {
-			_ = c.Close()
-		}
 	}()
 	wg.Add(1)
 	go func() {

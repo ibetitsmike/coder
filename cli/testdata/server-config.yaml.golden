@@ -1286,8 +1286,9 @@ templateBuilder:
 # Configure the sandbox provisioner of the fork-sandbox-provisioner experiment.
 sandbox:
   # The container runtime of the sandbox provisioner when the
-  # fork-sandbox-provisioner experiment is enabled. "docker" uses a Docker daemon.
-  # Empty registers no sandbox provisioner.
+  # fork-sandbox-provisioner experiment is enabled. "docker" uses a Docker daemon
+  # and supports one coderd replica only, because a build of a workspace can run on
+  # any replica. Empty registers no sandbox provisioner.
   # (default: <unset>, type: string)
   runtime: ""
   # The Docker daemon address of the docker sandbox runtime, for example
