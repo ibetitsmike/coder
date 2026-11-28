@@ -137,6 +137,62 @@ func TestEngineApply(t *testing.T) {
 		require.Len(t, h.rt.Creates(), 2)
 	})
 
+	t.Run("LostJobStateReplaysTheStart", func(t *testing.T) {
+		t.Parallel()
+
+		// The start completed in the log, but its job state never reached
+		// coderd, so the next build has no state and no token.
+		h := newHarness()
+		first := h.ops.NewBuild(h.ws)
+		start, _ := h.build(t, first, proto.WorkspaceTransition_START, nil)
+		require.Empty(t, start.GetError())
+		require.Equal(t, sandboxtest.OperationDone, h.ops.Status(first))
+
+		next := h.ops.NewBuild(h.ws)
+		replay, g := h.build(t, next, proto.WorkspaceTransition_START, nil)
+		require.Empty(t, replay.GetError())
+		creates := h.rt.Creates()
+		require.Len(t, creates, 2)
+		require.Equal(t, creates[1].Env[sandbox.EnvAgentToken], token(t, g))
+		require.Len(t, h.rt.Containers(), 1)
+		require.Equal(t, sandbox.ContainerStateRunning, h.rt.Containers()[sandbox.ContainerName(h.ws)].State)
+		require.Equal(t, sandboxtest.OperationDone, h.ops.Status(next))
+	})
+
+	t.Run("CrashedBuildOrphanIsFoundByName", func(t *testing.T) {
+		t.Parallel()
+
+		for _, tr := range []proto.WorkspaceTransition{proto.WorkspaceTransition_START, proto.WorkspaceTransition_STOP, proto.WorkspaceTransition_DESTROY} {
+			// A crashed build began, created and started its container and
+			// never completed or returned a state.
+			h := newHarness()
+			ctx := context.Background()
+			crashed := h.ops.NewBuild(h.ws)
+			_, err := h.ops.Begin(ctx, h.ws, crashed)
+			require.NoError(t, err)
+			name := sandbox.ContainerName(h.ws)
+			_, err = h.rt.Create(ctx, sandbox.CreateRequest{ID: name, Env: map[string]string{sandbox.EnvAgentToken: "orphan"}})
+			require.NoError(t, err)
+			require.NoError(t, h.rt.Start(ctx, name))
+
+			apply, g := h.build(t, h.ops.NewBuild(h.ws), tr, nil)
+			require.Empty(t, apply.GetError(), tr.String())
+			require.Equal(t, sandboxtest.OperationReconciled, h.ops.Status(crashed), tr.String())
+			switch tr {
+			case proto.WorkspaceTransition_START:
+				creates := h.rt.Creates()
+				require.Len(t, creates, 2)
+				require.NotEqual(t, "orphan", token(t, g))
+				require.Equal(t, creates[1].Env[sandbox.EnvAgentToken], token(t, g))
+				require.Equal(t, sandbox.ContainerStateRunning, h.rt.Containers()[name].State)
+			case proto.WorkspaceTransition_STOP:
+				require.Equal(t, sandbox.ContainerStateStopped, h.rt.Containers()[name].State)
+			default:
+				require.Empty(t, h.rt.Containers())
+			}
+		}
+	})
+
 	t.Run("SupersededBuildDoesNotTouchTheRuntime", func(t *testing.T) {
 		t.Parallel()
 
