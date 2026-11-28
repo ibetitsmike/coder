@@ -597,8 +597,10 @@ func TestForkNewLines(t *testing.T) {
 		},
 		{name: "TruncatedOneLine", head: head, tail: "no line end", total: total, cursor: 7, wantEnd: 7},
 		{name: "CRLF", head: "READY\r\nsecond\r\n", total: 15, wantLines: []string{"READY", "second"}, wantEnd: 15},
-		{name: "MixedLineEnds", head: "lf\nCRLF\r\ncrlf\r\nlf2\n", total: 19,
-			wantLines: []string{"lf", "CRLF", "crlf", "lf2"}, wantEnd: 19},
+		{
+			name: "MixedLineEnds", head: "lf\nCRLF\r\ncrlf\r\nlf2\n", total: 19,
+			wantLines: []string{"lf", "CRLF", "crlf", "lf2"}, wantEnd: 19,
+		},
 		{name: "CRLFPosition", head: "READY\r\n", total: 7, cursor: 7, wantEnd: 7},
 		{
 			// A bare CR does not end a line, so the CR stays in the text.
