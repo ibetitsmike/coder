@@ -28,8 +28,9 @@ Its code cites are on [pstack adapter evidence](https://github.com/ibetitsmike/c
    `ls ~/.coder/agents/*.md | wc -l` then prints at least 2.
 
    With the `fork-agent-definitions` experiment, chats also get them as [custom agent types](custom-agent-types.md).
-7. Download the adapter page and the pages it links: `(set -e; d=$(mktemp -d); u=https://raw.githubusercontent.com/ibetitsmike/coder/main/docs/fork; curl -fsSL -o "$d/pstack-adapter.md" "$u/pstack-adapter.md"; mkdir "$d/pstack"; for p in attachments chat-history chat-transcripts context-windows custom-agent-tool-policy custom-agent-types family-messages install nested-subagents notes notifications pinned-skills questions setup-pstack subagent-limits todo-list view-images wake-ups workflows workspace-isolation worktree-isolation; do curl -fsSL -o "$d/pstack/$p.md" "$u/pstack/$p.md"; done; rm -rf ~/.coder/pstack; mv "$d/pstack" ~/.coder/pstack; mv "$d/pstack-adapter.md" ~/.coder/pstack-adapter.md; rmdir "$d")`.
+7. Download the adapter page and the pages it links: `(set -e; if [ -e ~/.coder/pstack ] && [ ! -f ~/.coder/pstack/install.md ]; then echo 'move ~/.coder/pstack out first' >&2; exit 1; fi; d=$(mktemp -d); u=https://raw.githubusercontent.com/ibetitsmike/coder/main/docs/fork; curl -fsSL -o "$d/pstack-adapter.md" "$u/pstack-adapter.md"; mkdir "$d/pstack"; for p in attachments chat-history chat-transcripts context-windows custom-agent-tool-policy custom-agent-types family-messages install nested-subagents notes notifications pinned-skills questions setup-pstack subagent-limits todo-list view-images wake-ups workflows workspace-isolation worktree-isolation; do curl -fsSL -o "$d/pstack/$p.md" "$u/pstack/$p.md"; done; rm -rf ~/.coder/pstack; mv "$d/pstack" ~/.coder/pstack; mv "$d/pstack-adapter.md" ~/.coder/pstack-adapter.md; rmdir "$d")`.
    The command exits with 0 only when every page downloaded, and it keeps the old copies when one fails.
+   It stops without a change when `~/.coder/pstack` exists but holds no `install.md`, so it never replaces a folder that an earlier setup didn't create.
    `head -1 ~/.coder/pstack-adapter.md` then prints `# pstack on Coder Agents`, and `ls ~/.coder/pstack/*.md | wc -l` prints 21.
 8. If the downloaded page pins another pstack commit than step 3, start over.
 9. If `~/.coder/AGENTS.md` already holds a block between `<!-- pstack-adapter -->` and `<!-- /pstack-adapter -->`, delete that block.
@@ -59,8 +60,8 @@ Its code cites are on [pstack adapter evidence](https://github.com/ibetitsmike/c
 15. Select the skill in the composer's `/` menu, which inserts `/workspace/<name>`.
     A bare `/<name>` loads nothing.
 
-The workspace keeps the copies from steps 5 to 10, so a change to the adapter page on fork `main` doesn't reach it.
-When the adapter page changes, repeat steps 1 to 10, then start a new chat or select **Refresh context** in an open chat.
+The workspace keeps the copies from steps 5 to 10, so a change to the adapter page or a page it links on fork `main` doesn't reach it.
+When the adapter page or a page it links changes, repeat steps 1 to 10, then start a new chat or select **Refresh context** in an open chat.
 Steps 5 and 6 only add and replace files, so before step 3 of a repeat, while `~/pstack-src` is still at the earlier commit, delete the earlier copies: `cd ~/pstack-src/pstack && for n in skills/* agents/*.md; do rm -rf ~/.coder/"$n"; done && rm -rf ~/.coder/skills/deslop ~/.coder/skills/control-ui ~/.coder/skills/control-cli`.
 Otherwise a skill or agent that the new pstack commit removes or renames stays in the workspace.
 
