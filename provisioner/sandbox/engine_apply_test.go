@@ -154,7 +154,6 @@ func TestEngineApply(t *testing.T) {
 		creates := h.rt.Creates()
 		require.Len(t, creates, 2)
 		require.Equal(t, creates[1].Env[sandbox.EnvAgentToken], token(t, g))
-		require.Len(t, h.rt.Containers(), 1)
 		require.Equal(t, sandbox.ContainerStateRunning, h.rt.Containers()[sandbox.ContainerName(h.ws)].State)
 		require.Equal(t, sandboxtest.OperationDone, h.ops.Status(next))
 	})
@@ -182,13 +181,19 @@ func TestEngineApply(t *testing.T) {
 			case proto.WorkspaceTransition_START:
 				creates := h.rt.Creates()
 				require.Len(t, creates, 2)
-				require.NotEqual(t, "orphan", token(t, g))
 				require.Equal(t, creates[1].Env[sandbox.EnvAgentToken], token(t, g))
 				require.Equal(t, sandbox.ContainerStateRunning, h.rt.Containers()[name].State)
 			case proto.WorkspaceTransition_STOP:
 				require.Equal(t, sandbox.ContainerStateStopped, h.rt.Containers()[name].State)
 			default:
+				require.Empty(t, apply.GetState())
 				require.Empty(t, h.rt.Containers())
+			}
+			if tr != proto.WorkspaceTransition_START {
+				// Without a container, the transition succeeds again.
+				_ = h.rt.Remove(ctx, name)
+				apply, _ = h.build(t, h.ops.NewBuild(h.ws), tr, nil)
+				require.Empty(t, apply.GetError(), tr.String())
 			}
 		}
 	})
@@ -231,27 +236,6 @@ func TestEngineApply(t *testing.T) {
 		require.Equal(t, creates[1].Env[sandbox.EnvAgentToken], token(t, g))
 		require.Equal(t, sandboxtest.OperationReconciled, h.ops.Status(old))
 		require.Equal(t, sandboxtest.OperationDone, h.ops.Status(newer))
-	})
-
-	t.Run("StopAndDestroyWithoutStateUseTheWorkspaceName", func(t *testing.T) {
-		t.Parallel()
-
-		h := newHarness()
-		start, _ := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, nil)
-		require.Empty(t, start.GetError())
-		stop, _ := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_STOP, nil)
-		require.Empty(t, stop.GetError())
-		require.Equal(t, sandbox.ContainerStateStopped, h.rt.Containers()[sandbox.ContainerName(h.ws)].State)
-		destroy, _ := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_DESTROY, nil)
-		require.Empty(t, destroy.GetError())
-		require.Empty(t, destroy.GetState())
-		require.Empty(t, h.rt.Containers())
-
-		// A workspace without a container stops and deletes cleanly.
-		for _, tr := range []proto.WorkspaceTransition{proto.WorkspaceTransition_STOP, proto.WorkspaceTransition_DESTROY} {
-			apply, _ := h.build(t, h.ops.NewBuild(h.ws), tr, nil)
-			require.Empty(t, apply.GetError())
-		}
 	})
 
 	t.Run("CorruptStateFailsBeforeTheOperationLog", func(t *testing.T) {

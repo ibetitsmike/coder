@@ -1,7 +1,6 @@
 // This file is fork code: it is the engine of the experimental native
-// sandbox provisioner. It speaks the standard provisionersdk protocol and
-// drives disposable containers through a Runtime, so import, build, stop,
-// and delete keep working through the standard provisionerd runner.
+// sandbox provisioner. It speaks the standard provisionersdk protocol, so a
+// template import runs through the standard provisionerd runner.
 package sandbox
 
 import (
@@ -42,8 +41,7 @@ const stopTimeout = 30 * time.Second
 
 // stateBlob is the provisioner state the engine persists between builds.
 // ContainerID names the container of the workspace and AgentToken is the
-// token the container was created with. The token stays the same while the
-// container lives, because a stopped container keeps its environment.
+// token the container was created with.
 type stateBlob struct {
 	ContainerID string `json:"container_id"`
 	BuildID     string `json:"build_id"`
@@ -151,53 +149,6 @@ func (*Engine) Plan(sess *provisionersdk.Session, req *proto.PlanRequest, _ <-ch
 	return &proto.PlanComplete{DailyCost: specDailyCost(spec)}
 }
 
-// Graph emits one sandbox_container resource with one agent. After an apply
-// the agent carries the token the container was created with. A template
-// import has no container, so it gets a placeholder token. A stop or destroy
-// emits nothing.
-func (*Engine) Graph(sess *provisionersdk.Session, req *proto.GraphRequest, _ <-chan struct{}) *proto.GraphComplete {
-	switch req.GetMetadata().GetWorkspaceTransition() {
-	case proto.WorkspaceTransition_STOP, proto.WorkspaceTransition_DESTROY:
-		return &proto.GraphComplete{}
-	}
-	spec, err := readSpec(sess)
-	if err != nil {
-		return &proto.GraphComplete{Error: err.Error()}
-	}
-	token := uuid.NewString()
-	if req.GetSource() == proto.GraphSource_SOURCE_STATE {
-		state, err := readState(sess)
-		if err != nil {
-			return &proto.GraphComplete{Error: err.Error()}
-		}
-		if state.AgentToken == "" {
-			return &proto.GraphComplete{Error: "the state records no agent token"}
-		}
-		token = state.AgentToken
-	}
-	// A template import has no workspace name.
-	name := req.GetMetadata().GetWorkspaceName()
-	if name == "" {
-		name = "sandbox"
-	}
-	return &proto.GraphComplete{
-		Resources: []*proto.Resource{{
-			Name:      name,
-			Type:      "sandbox_container",
-			DailyCost: specDailyCost(spec),
-			Agents: []*proto.Agent{{
-				Id:              uuid.NewString(),
-				Name:            spec.Agent.Name,
-				Env:             maps.Clone(spec.Container.Env),
-				OperatingSystem: spec.Agent.OS,
-				Architecture:    spec.Agent.Arch,
-				Directory:       spec.Agent.Dir,
-				Auth:            &proto.Agent_Token{Token: token},
-			}},
-		}},
-	}
-}
-
 // Apply records the build in the operation log, drives the runtime through
 // the transition and records the result. A build that a newer build
 // superseded fails before it touches the runtime, or fails without a state
@@ -269,6 +220,53 @@ func (e *Engine) Apply(sess *provisionersdk.Session, req *proto.ApplyRequest, _ 
 		return &proto.ApplyComplete{State: data, Error: applyErr.Error()}
 	}
 	return &proto.ApplyComplete{State: data}
+}
+
+// Graph emits one sandbox_container resource with one agent. After an apply
+// the agent carries the token the container was created with. A template
+// import has no container, so it gets a placeholder token. A stop or destroy
+// emits nothing.
+func (*Engine) Graph(sess *provisionersdk.Session, req *proto.GraphRequest, _ <-chan struct{}) *proto.GraphComplete {
+	switch req.GetMetadata().GetWorkspaceTransition() {
+	case proto.WorkspaceTransition_STOP, proto.WorkspaceTransition_DESTROY:
+		return &proto.GraphComplete{}
+	}
+	spec, err := readSpec(sess)
+	if err != nil {
+		return &proto.GraphComplete{Error: err.Error()}
+	}
+	token := uuid.NewString()
+	if req.GetSource() == proto.GraphSource_SOURCE_STATE {
+		state, err := readState(sess)
+		if err != nil {
+			return &proto.GraphComplete{Error: err.Error()}
+		}
+		if state.AgentToken == "" {
+			return &proto.GraphComplete{Error: "the state records no agent token"}
+		}
+		token = state.AgentToken
+	}
+	// A template import has no workspace name.
+	name := req.GetMetadata().GetWorkspaceName()
+	if name == "" {
+		name = "sandbox"
+	}
+	return &proto.GraphComplete{
+		Resources: []*proto.Resource{{
+			Name:      name,
+			Type:      "sandbox_container",
+			DailyCost: specDailyCost(spec),
+			Agents: []*proto.Agent{{
+				Id:              uuid.NewString(),
+				Name:            spec.Agent.Name,
+				Env:             maps.Clone(spec.Container.Env),
+				OperatingSystem: spec.Agent.OS,
+				Architecture:    spec.Agent.Arch,
+				Directory:       spec.Agent.Dir,
+				Auth:            &proto.Agent_Token{Token: token},
+			}},
+		}},
+	}
 }
 
 // applyStart resumes the recorded container, or creates and starts a new

@@ -43,9 +43,8 @@ func specArchive(t *testing.T, name string) []byte {
 	return buf.Bytes()
 }
 
-// session serves an engine over fakes in memory, configures a session and
-// unpacks the archive, as the provisionerd runner does at the start of every
-// job.
+// session serves the engine in memory, configures a session and unpacks the
+// archive, as the provisionerd runner does at the start of every job.
 func session(t *testing.T, archive []byte) proto.DRPCProvisioner_SessionClient {
 	t.Helper()
 	return serve(t, sandboxtest.NewFakeRuntime(), sandboxtest.NewFakeOperations(), archive)
@@ -204,7 +203,7 @@ func TestEngineImport(t *testing.T) {
 		}
 	})
 
-	t.Run("ApplyWithoutIDsFails", func(t *testing.T) {
+	t.Run("ApplyFailsWithoutState", func(t *testing.T) {
 		t.Parallel()
 
 		s := session(t, specArchive(t, "sandbox.yaml"))
