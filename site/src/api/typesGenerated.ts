@@ -6352,6 +6352,7 @@ export type Experiment =
 	| "fork-nested-subagents"
 	| "fork-pinned-skills"
 	| "fork-plugin-packs"
+	| "fork-sandbox-provisioner"
 	| "fork-subagent-isolation"
 	| "fork-token-budget"
 	| "fork-view-image"
@@ -6449,6 +6450,7 @@ export const Experiments: Experiment[] = [
 	"fork-nested-subagents",
 	"fork-pinned-skills",
 	"fork-plugin-packs",
+	"fork-sandbox-provisioner",
 	"fork-subagent-isolation",
 	"fork-token-budget",
 	"fork-view-image",
@@ -10425,9 +10427,13 @@ export interface ProvisionerTiming {
 }
 
 // From codersdk/organizations.go
-export type ProvisionerType = "echo" | "terraform";
+export type ProvisionerType = "echo" | "sandbox" | "terraform";
 
-export const ProvisionerTypes: ProvisionerType[] = ["echo", "terraform"];
+export const ProvisionerTypes: ProvisionerType[] = [
+	"echo",
+	"sandbox",
+	"terraform",
+];
 
 // From codersdk/workspaceproxy.go
 /**

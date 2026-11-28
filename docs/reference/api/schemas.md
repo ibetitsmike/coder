@@ -8284,10 +8284,10 @@ This is required on creation to enable a user-flow of validating a template work
 
 #### Enumerated Values
 
-| Property         | Value(s)            |
-|------------------|---------------------|
-| `provisioner`    | `echo`, `terraform` |
-| `storage_method` | `file`              |
+| Property         | Value(s)                       |
+|------------------|--------------------------------|
+| `provisioner`    | `echo`, `sandbox`, `terraform` |
+| `storage_method` | `file`                         |
 
 ## codersdk.CreateTestAuditLogRequest
 
@@ -10761,9 +10761,9 @@ CreateWorkspaceRequest provides options for creating a new workspace. Only one o
 
 #### Enumerated Values
 
-| Value(s)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `agent-lifecycle-hooks`, `agent-plugins`, `ai-gateway-reverse-proxy`, `ai-gateway-seat-exclusion`, `chat-acp-subagents`, `chat-automations`, `chat-inline-mcp-servers`, `chat-project-sharing`, `chat-stage-metrics`, `chat-virtual-desktop`, `enable-ai-workspace-debug`, `example`, `fork-agent-definitions`, `fork-apns-push`, `fork-chat-todos`, `fork-chat-wakeups`, `fork-context-cache`, `fork-context-hash-rows`, `fork-family-messages`, `fork-html-attachments`, `fork-nested-subagents`, `fork-pinned-skills`, `fork-plugin-packs`, `fork-subagent-isolation`, `fork-token-budget`, `fork-view-image`, `fork-workflows`, `mcp-server-http`, `no_nats_pubsub`, `notifications`, `plugins`, `workspace-build-updates`, `workspace-capable-licensing`, `workspace-usage` |
+| Value(s)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `agent-lifecycle-hooks`, `agent-plugins`, `ai-gateway-reverse-proxy`, `ai-gateway-seat-exclusion`, `chat-acp-subagents`, `chat-automations`, `chat-inline-mcp-servers`, `chat-project-sharing`, `chat-stage-metrics`, `chat-virtual-desktop`, `enable-ai-workspace-debug`, `example`, `fork-agent-definitions`, `fork-apns-push`, `fork-chat-todos`, `fork-chat-wakeups`, `fork-context-cache`, `fork-context-hash-rows`, `fork-family-messages`, `fork-html-attachments`, `fork-nested-subagents`, `fork-pinned-skills`, `fork-plugin-packs`, `fork-sandbox-provisioner`, `fork-subagent-isolation`, `fork-token-budget`, `fork-view-image`, `fork-workflows`, `mcp-server-http`, `no_nats_pubsub`, `notifications`, `plugins`, `workspace-build-updates`, `workspace-capable-licensing`, `workspace-usage` |
 
 ## codersdk.ExperimentRule
 
