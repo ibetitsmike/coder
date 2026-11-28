@@ -1509,6 +1509,9 @@ func (api *API) postTemplateVersionsByOrganization(rw http.ResponseWriter, r *ht
 	if !httpapi.Read(ctx, rw, r, &req) {
 		return
 	}
+	if !api.forkSandboxProvisionerAllowed(ctx, rw, req.Provisioner) {
+		return
+	}
 
 	dynamicTemplate := true // Default to using dynamic templates
 	if req.TemplateID != uuid.Nil {
