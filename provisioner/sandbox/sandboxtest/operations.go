@@ -86,7 +86,9 @@ func (f *FakeOperations) Begin(_ context.Context, workspaceID, buildID uuid.UUID
 func (f *FakeOperations) Complete(_ context.Context, op sandbox.Operation, applyErr error) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.status[op.BuildID] != OperationClaimed || op.Generation != f.latest[op.WorkspaceID] {
+	claimed := f.builds[op.BuildID]
+	if f.status[op.BuildID] != OperationClaimed || op.ID != claimed.ID || op.WorkspaceID != claimed.WorkspaceID ||
+		op.Generation != f.latest[op.WorkspaceID] {
 		return xerrors.Errorf("complete: %w", sandbox.ErrSuperseded)
 	}
 	if applyErr != nil {

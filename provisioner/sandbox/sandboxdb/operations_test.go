@@ -113,6 +113,11 @@ func TestOperations(t *testing.T) {
 				_, err = h.ops.Begin(ctx, ws, build)
 				require.ErrorIs(t, err, sandbox.ErrSuperseded, "a second worker for the build must not claim")
 
+				lost := op
+				lost.ID = uuid.New()
+				require.ErrorIs(t, h.ops.Complete(ctx, lost, nil), sandbox.ErrSuperseded, "only the claimed operation may complete")
+				require.Equal(t, sandboxtest.OperationClaimed, h.status(op))
+
 				require.NoError(t, h.ops.Complete(ctx, op, errFailed))
 				require.Equal(t, sandboxtest.OperationFailed, h.status(op))
 				require.ErrorIs(t, h.ops.Complete(ctx, op, nil), sandbox.ErrSuperseded)
