@@ -38,6 +38,15 @@ type CreateRequest struct {
 	// default.
 	CPUMillis int64
 	MemoryMiB int64
+	// Volumes are the named volumes to mount. Create makes a missing volume,
+	// and removing the container keeps it.
+	Volumes []VolumeMount
+}
+
+// VolumeMount mounts the named volume at Path in the container.
+type VolumeMount struct {
+	Name string
+	Path string
 }
 
 // Container is one container the runtime created.
@@ -69,10 +78,18 @@ type Runtime interface {
 	// Status reads one container. An unknown ID returns an error that
 	// errors.Is matches with ErrNotFound.
 	Status(ctx context.Context, containerID string) (Container, error)
+	// Volumes lists the names of the volumes the runtime created whose names
+	// start with prefix.
+	Volumes(ctx context.Context, prefix string) ([]string, error)
+	// RemoveVolume deletes a volume. Removing a volume that a container
+	// mounts fails, and removing an unknown name returns an error that
+	// errors.Is matches with ErrNotFound.
+	RemoveVolume(ctx context.Context, name string) error
 }
 
-// ErrNotFound reports that the runtime does not know the container.
-var ErrNotFound = xerrors.New("container not found")
+// ErrNotFound reports that the runtime does not know the container or
+// volume.
+var ErrNotFound = xerrors.New("not found")
 
 // ErrExists reports that the runtime already has a container with that ID.
 var ErrExists = xerrors.New("container already exists")

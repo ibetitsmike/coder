@@ -222,6 +222,46 @@ func TestEngineApply(t *testing.T) {
 		require.Equal(t, first, creates[2].Env[sandbox.EnvAgentToken])
 	})
 
+	t.Run("VolumesOutliveTheContainerUntilDestroy", func(t *testing.T) {
+		t.Parallel()
+
+		h := newHarness(t)
+		ctx := context.Background()
+		env, withVolume := "  env:\n", "  volumes:\n    - {name: home, path: /home/coder}\n  env:\n"
+		h.archive = specArchive(t, "sandbox.yaml", env, withVolume)
+		start, _ := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, nil)
+		stop, _ := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_STOP, start.GetState())
+		again, _ := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, stop.GetState())
+		h.archive = specArchive(t, "sandbox.yaml", env, withVolume, "alpine:3.20", "alpine:3.21")
+		changed, _ := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, again.GetState())
+		require.Empty(t, changed.GetError())
+		home := sandbox.ContainerName(h.ws) + "-home"
+		creates := h.rt.Creates()
+		require.Len(t, creates, 3)
+		require.Equal(t, "docker.io/library/alpine:3.21", creates[2].Image)
+		for _, c := range creates {
+			require.Equal(t, []sandbox.VolumeMount{{Name: home, Path: "/home/coder"}}, c.Volumes)
+		}
+		require.NotContains(t, h.rt.Calls(), "RemoveVolume")
+
+		// A volume that an older spec declared, and the volume of another
+		// workspace, outlive their containers.
+		other := sandbox.ContainerName(uuid.New())
+		for id, vol := range map[string]string{"older": sandbox.ContainerName(h.ws) + "-old", other: other + "-home"} {
+			_, err := h.rt.Create(ctx, sandbox.CreateRequest{ID: id, Volumes: []sandbox.VolumeMount{{Name: vol, Path: "/data"}}})
+			require.NoError(t, err)
+			require.NoError(t, h.rt.Remove(ctx, id))
+		}
+
+		// The destroy removes the running container first, then every volume
+		// of the workspace, and only those.
+		destroy, _ := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_DESTROY, changed.GetState())
+		require.Empty(t, destroy.GetError())
+		left, err := h.rt.Volumes(ctx, "")
+		require.NoError(t, err)
+		require.Equal(t, []string{other + "-home"}, left)
+	})
+
 	t.Run("CancelEndsABlockedRuntimeCall", func(t *testing.T) {
 		t.Parallel()
 

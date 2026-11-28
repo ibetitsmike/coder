@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -42,7 +43,21 @@ type ContainerSpec struct {
 	// default.
 	CPUMillis int64 `yaml:"cpu_millis"`
 	MemoryMiB int64 `yaml:"memory_mib"`
+	// Volumes are named volumes of the workspace. Each one outlives the
+	// container across stops and spec changes, and a delete removes it.
+	Volumes []VolumeSpec `yaml:"volumes"`
 }
+
+// VolumeSpec mounts one volume of the workspace at Path.
+type VolumeSpec struct {
+	Name string `yaml:"name"`
+	Path string `yaml:"path"`
+}
+
+// MaxVolumes bounds the volumes of one spec.
+const MaxVolumes = 8
+
+var volumeNameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
 
 // AgentSpec describes the Coder agent that runs inside the container.
 type AgentSpec struct {
@@ -156,6 +171,7 @@ func ParseSpec(data []byte) (*Spec, error) {
 			Issue: fmt.Sprintf("is %q, want linux", spec.Agent.OS),
 		})
 	}
+	errs = append(errs, validateVolumes(spec.Container.Volumes)...)
 	names := make([]string, 0, len(spec.Container.Env))
 	for name := range spec.Container.Env {
 		names = append(names, name)
@@ -179,4 +195,40 @@ func ParseSpec(data []byte) (*Spec, error) {
 		return nil, errs
 	}
 	return &spec, nil
+}
+
+func validateVolumes(volumes []VolumeSpec) ParseErrors {
+	var errs ParseErrors
+	if len(volumes) > MaxVolumes {
+		errs = append(errs, ParseError{
+			Field: "container.volumes",
+			Issue: fmt.Sprintf("has %d entries, want at most %d", len(volumes), MaxVolumes),
+		})
+	}
+	names := map[string]bool{}
+	paths := map[string]bool{}
+	for i, v := range volumes {
+		field := fmt.Sprintf("container.volumes[%d]", i)
+		switch {
+		case !volumeNameRE.MatchString(v.Name):
+			errs = append(errs, ParseError{
+				Field: field + ".name",
+				Issue: fmt.Sprintf("is %q, want up to 32 lowercase letters, digits and inner hyphens", v.Name),
+			})
+		case names[v.Name]:
+			errs = append(errs, ParseError{Field: field + ".name", Issue: fmt.Sprintf("repeats %q", v.Name)})
+		}
+		names[v.Name] = true
+		switch {
+		case !path.IsAbs(v.Path) || path.Clean(v.Path) != v.Path || v.Path == "/":
+			errs = append(errs, ParseError{
+				Field: field + ".path",
+				Issue: fmt.Sprintf("is %q, want a clean absolute path other than /", v.Path),
+			})
+		case paths[v.Path]:
+			errs = append(errs, ParseError{Field: field + ".path", Issue: fmt.Sprintf("repeats %q", v.Path)})
+		}
+		paths[v.Path] = true
+	}
+	return errs
 }

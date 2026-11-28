@@ -14,6 +14,7 @@ import (
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 	"golang.org/x/xerrors"
 
@@ -24,9 +25,9 @@ import (
 // only on containers that carry it.
 const LabelSandbox = "com.coder.sandbox"
 
-// ErrNotOwned reports a container of the name that this runtime did not
-// create.
-var ErrNotOwned = xerrors.New("the container was not created by the sandbox runtime")
+// ErrNotOwned reports a container or volume of the name that this runtime
+// did not create.
+var ErrNotOwned = xerrors.New("not created by the sandbox runtime")
 
 // hostGateway is the name of the Docker host in a sandbox container. The
 // runtime maps it to the host gateway, as the Docker template does.
@@ -87,8 +88,9 @@ func (r *Runtime) Close() error {
 	return r.client.Close()
 }
 
-// Create makes the container and pulls its image when the daemon lacks it.
-// It rewrites a loopback host in sandbox.EnvAgentURL to hostGateway.
+// Create makes the missing volumes and the container, and pulls its image
+// when the daemon lacks it. It rewrites a loopback host in
+// sandbox.EnvAgentURL to hostGateway.
 func (r *Runtime) Create(ctx context.Context, req sandbox.CreateRequest) (sandbox.Container, error) {
 	unlock, err := r.locks.acquire(ctx, req.ID)
 	if err != nil {
@@ -96,6 +98,21 @@ func (r *Runtime) Create(ctx context.Context, req sandbox.CreateRequest) (sandbo
 	}
 	defer unlock()
 
+	mounts := make([]mount.Mount, 0, len(req.Volumes))
+	for _, v := range req.Volumes {
+		// The daemon returns an existing volume of the name as it is.
+		res, err := r.client.VolumeCreate(ctx, client.VolumeCreateOptions{
+			Name:   v.Name,
+			Labels: map[string]string{LabelSandbox: "true"},
+		})
+		if err != nil {
+			return sandbox.Container{}, xerrors.Errorf("create volume %s: %w", v.Name, err)
+		}
+		if res.Volume.Labels[LabelSandbox] != "true" {
+			return sandbox.Container{}, xerrors.Errorf("%w: volume %s", ErrNotOwned, v.Name)
+		}
+		mounts = append(mounts, mount.Mount{Type: mount.TypeVolume, Source: v.Name, Target: v.Path})
+	}
 	env := make([]string, 0, len(req.Env))
 	for k, v := range req.Env {
 		if k == sandbox.EnvAgentURL {
@@ -114,6 +131,7 @@ func (r *Runtime) Create(ctx context.Context, req sandbox.CreateRequest) (sandbo
 		},
 		HostConfig: &container.HostConfig{
 			ExtraHosts: []string{hostGateway + ":host-gateway"},
+			Mounts:     mounts,
 			Resources: container.Resources{
 				NanoCPUs: req.CPUMillis * 1_000_000,
 				Memory:   req.MemoryMiB << 20,
@@ -181,6 +199,7 @@ func (r *Runtime) Stop(ctx context.Context, containerID string, timeout time.Dur
 }
 
 // Remove deletes the container, running or not, with its anonymous volumes.
+// It keeps the named volumes.
 func (r *Runtime) Remove(ctx context.Context, containerID string) error {
 	unlock, err := r.locks.acquire(ctx, containerID)
 	if err != nil {
@@ -202,6 +221,49 @@ func (r *Runtime) Status(ctx context.Context, containerID string) (sandbox.Conta
 	}
 	defer unlock()
 	return r.inspect(ctx, containerID)
+}
+
+// Volumes lists the volumes that carry LabelSandbox and whose names start
+// with prefix. The daemon's name filter matches a substring, so the prefix
+// is checked here.
+func (r *Runtime) Volumes(ctx context.Context, prefix string) ([]string, error) {
+	res, err := r.client.VolumeList(ctx, client.VolumeListOptions{
+		Filters: make(client.Filters).Add("label", LabelSandbox+"=true").Add("name", prefix),
+	})
+	if err != nil {
+		return nil, xerrors.Errorf("list volumes: %w", err)
+	}
+	var names []string
+	for _, v := range res.Items {
+		if strings.HasPrefix(v.Name, prefix) && v.Labels[LabelSandbox] == "true" {
+			names = append(names, v.Name)
+		}
+	}
+	slices.Sort(names)
+	return names, nil
+}
+
+// RemoveVolume deletes a volume that carries LabelSandbox. The daemon
+// refuses to remove a volume that a container mounts.
+func (r *Runtime) RemoveVolume(ctx context.Context, name string) error {
+	res, err := r.client.VolumeInspect(ctx, name, client.VolumeInspectOptions{})
+	if cerrdefs.IsNotFound(err) {
+		return xerrors.Errorf("%w: volume %s", sandbox.ErrNotFound, name)
+	}
+	if err != nil {
+		return xerrors.Errorf("inspect volume %s: %w", name, err)
+	}
+	if res.Volume.Labels[LabelSandbox] != "true" {
+		return xerrors.Errorf("%w: volume %s", ErrNotOwned, name)
+	}
+	_, err = r.client.VolumeRemove(ctx, name, client.VolumeRemoveOptions{})
+	if cerrdefs.IsNotFound(err) {
+		return xerrors.Errorf("%w: volume %s", sandbox.ErrNotFound, name)
+	}
+	if err != nil {
+		return xerrors.Errorf("remove volume %s: %w", name, err)
+	}
+	return nil
 }
 
 // inspect reads the container and fails with ErrNotOwned when it lacks

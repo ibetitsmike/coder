@@ -1,6 +1,8 @@
 package sandbox_test
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -122,6 +124,38 @@ agent:
 			require.ErrorAs(t, err, &errs, name)
 			require.Len(t, errs, 1, name)
 			require.Equal(t, "agent.name", errs[0].Field, name)
+		}
+	})
+
+	t.Run("Volumes", func(t *testing.T) {
+		t.Parallel()
+		parse := func(volumes string) (*sandbox.Spec, error) {
+			return sandbox.ParseSpec([]byte("version: 1\ncontainer:\n  image: alpine\n  volumes:\n" + volumes + "agent:\n  name: main\n"))
+		}
+		spec, err := parse("    - {name: home, path: /home/coder}\n    - {name: cache-2, path: /var/cache}\n")
+		require.NoError(t, err)
+		require.Equal(t, []sandbox.VolumeSpec{{Name: "home", Path: "/home/coder"}, {Name: "cache-2", Path: "/var/cache"}}, spec.Container.Volumes)
+
+		var tooMany strings.Builder
+		for i := range sandbox.MaxVolumes + 1 {
+			_, _ = fmt.Fprintf(&tooMany, "    - {name: v%d, path: /v%d}\n", i, i)
+		}
+		for _, tc := range []struct{ volumes, field string }{
+			{volumes: "    - {name: Home, path: /home}\n", field: "container.volumes[0].name"},
+			{volumes: "    - {name: home-, path: /home}\n", field: "container.volumes[0].name"},
+			{volumes: "    - {name: " + strings.Repeat("a", 33) + ", path: /home}\n", field: "container.volumes[0].name"},
+			{volumes: "    - {name: home, path: home}\n", field: "container.volumes[0].path"},
+			{volumes: "    - {name: home, path: /home/../etc}\n", field: "container.volumes[0].path"},
+			{volumes: "    - {name: home, path: /}\n", field: "container.volumes[0].path"},
+			{volumes: "    - {name: a, path: /a}\n    - {name: a, path: /b}\n", field: "container.volumes[1].name"},
+			{volumes: "    - {name: a, path: /a}\n    - {name: b, path: /a}\n", field: "container.volumes[1].path"},
+			{volumes: tooMany.String(), field: "container.volumes"},
+		} {
+			_, err := parse(tc.volumes)
+			var errs sandbox.ParseErrors
+			require.ErrorAs(t, err, &errs, tc.volumes)
+			require.Len(t, errs, 1, tc.volumes)
+			require.Equal(t, tc.field, errs[0].Field, tc.volumes)
 		}
 	})
 
