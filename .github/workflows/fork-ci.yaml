@@ -127,6 +127,10 @@ jobs:
       - name: Start Postgres
         run: ./.github/fork/start-postgres.sh
       - name: Fork tests in other packages
+        # The sandbox runtime contract runs against the runner's Docker
+        # daemon, and fails instead of skipping when Docker is missing (#453).
+        env:
+          FORK_SANDBOX_DOCKER_TEST: "1"
         run: ./.github/fork/fork-tests.sh go-run
 
   site:
