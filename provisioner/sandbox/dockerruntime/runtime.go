@@ -5,7 +5,11 @@ package dockerruntime
 
 import (
 	"context"
+	"net"
+	"net/netip"
+	"net/url"
 	"slices"
+	"strings"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -23,6 +27,30 @@ const LabelSandbox = "com.coder.sandbox"
 // ErrNotOwned reports a container of the name that this runtime did not
 // create.
 var ErrNotOwned = xerrors.New("the container was not created by the sandbox runtime")
+
+// hostGateway is the name of the Docker host in a sandbox container. The
+// runtime maps it to the host gateway, as the Docker template does.
+const hostGateway = "host.docker.internal"
+
+// containerURL rewrites a loopback host in raw to hostGateway. Loopback in a
+// container is the container itself, so an agent could not reach a coderd
+// whose access URL names localhost or 127.0.0.1.
+func containerURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	host, port := u.Hostname(), u.Port()
+	ip, err := netip.ParseAddr(host)
+	if !strings.EqualFold(host, "localhost") && (err != nil || !ip.IsLoopback()) {
+		return raw
+	}
+	u.Host = hostGateway
+	if port != "" {
+		u.Host = net.JoinHostPort(hostGateway, port)
+	}
+	return u.String()
+}
 
 // Runtime drives sandbox containers through a Docker daemon. It serializes
 // the calls on one container, so a call from a reaped job cannot interleave
@@ -59,6 +87,7 @@ func (r *Runtime) Close() error {
 }
 
 // Create makes the container and pulls its image when the daemon lacks it.
+// It rewrites a loopback host in sandbox.EnvAgentURL to hostGateway.
 func (r *Runtime) Create(ctx context.Context, req sandbox.CreateRequest) (sandbox.Container, error) {
 	unlock, err := r.locks.acquire(ctx, req.ID)
 	if err != nil {
@@ -68,6 +97,9 @@ func (r *Runtime) Create(ctx context.Context, req sandbox.CreateRequest) (sandbo
 
 	env := make([]string, 0, len(req.Env))
 	for k, v := range req.Env {
+		if k == sandbox.EnvAgentURL {
+			v = containerURL(v)
+		}
 		env = append(env, k+"="+v)
 	}
 	slices.Sort(env)
@@ -80,6 +112,7 @@ func (r *Runtime) Create(ctx context.Context, req sandbox.CreateRequest) (sandbo
 			Labels:     map[string]string{LabelSandbox: "true"},
 		},
 		HostConfig: &container.HostConfig{
+			ExtraHosts: []string{hostGateway + ":host-gateway"},
 			Resources: container.Resources{
 				NanoCPUs: req.CPUMillis * 1_000_000,
 				Memory:   req.MemoryMiB << 20,

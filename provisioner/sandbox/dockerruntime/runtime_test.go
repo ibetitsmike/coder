@@ -2,7 +2,12 @@ package dockerruntime_test
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -78,4 +83,60 @@ func TestForeignContainer(t *testing.T) {
 	in, err := c.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
 	require.NoError(t, err)
 	require.Equal(t, container.StateCreated, in.Container.State.Status)
+}
+
+// TestCreateMapsLoopbackToTheHost checks what the runtime asks the daemon
+// for: the agent URL with a loopback host names the Docker host instead, the
+// container maps that name to the host gateway, and other variables stay.
+func TestCreateMapsLoopbackToTheHost(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	var created container.CreateRequest
+	docker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/_ping"):
+			w.Header().Set("Api-Version", "1.47")
+			_, _ = w.Write([]byte("OK"))
+		case strings.HasSuffix(r.URL.Path, "/containers/create"):
+			created = container.CreateRequest{}
+			if err := json.NewDecoder(r.Body).Decode(&created); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(container.CreateResponse{ID: "id"})
+		case strings.HasSuffix(r.URL.Path, "/json"):
+			_ = json.NewEncoder(w).Encode(container.InspectResponse{
+				Config: created.Config,
+				State:  &container.State{Status: container.StateCreated},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(docker.Close)
+	ctx := testutil.Context(t, testutil.WaitShort)
+	rt, err := dockerruntime.New(ctx, "tcp://"+docker.Listener.Addr().String())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rt.Close() })
+
+	for _, tc := range []struct{ url, want string }{
+		{url: "http://127.0.0.1:3000", want: "http://host.docker.internal:3000"},
+		{url: "http://LOCALHOST/", want: "http://host.docker.internal/"},
+		{url: "http://[::1]:3000/coder", want: "http://host.docker.internal:3000/coder"},
+		{url: "https://coder.example.com:8443", want: "https://coder.example.com:8443"},
+	} {
+		_, err := rt.Create(ctx, sandbox.CreateRequest{ID: "sbx-" + uuid.NewString(), Image: testImage, Env: map[string]string{
+			sandbox.EnvAgentURL: tc.url,
+			"APP_URL":           "http://127.0.0.1:8080",
+		}})
+		require.NoError(t, err, tc.url)
+		mu.Lock()
+		got := created
+		mu.Unlock()
+		require.Equal(t, []string{"APP_URL=http://127.0.0.1:8080", sandbox.EnvAgentURL + "=" + tc.want}, got.Env, tc.url)
+		require.Equal(t, []string{"host.docker.internal:host-gateway"}, got.HostConfig.ExtraHosts, tc.url)
+	}
 }

@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,6 +38,18 @@ const (
 )
 
 const stopTimeout = 30 * time.Second
+
+// agentEntrypoint is the container entrypoint of a spec that sets none. It
+// runs the bootstrap script that the Terraform provider gives a coder_agent:
+// the script downloads the agent binary for arch from coderd and runs it with
+// token auth. The script reads the coderd URL from EnvAgentURL, so a runtime
+// that maps the URL for its containers only changes that variable.
+func agentEntrypoint(arch string) []string {
+	script := provisionersdk.AgentScriptEnv()["CODER_AGENT_SCRIPT_linux_"+arch]
+	script = strings.ReplaceAll(script, "${ACCESS_URL}", "${"+EnvAgentURL+"%/}/")
+	script = strings.ReplaceAll(script, "${AUTH_TYPE}", "token")
+	return []string{"sh", "-c", script}
+}
 
 // stateBlob is the provisioner state the engine persists between builds.
 // ContainerID names the container of the workspace and AgentToken is the
@@ -298,10 +311,14 @@ func (e *Engine) applyStart(ctx context.Context, spec *Spec, metadata *proto.Met
 	}
 	env[EnvAgentToken] = next.AgentToken
 	env[EnvAgentURL] = metadata.GetCoderUrl()
+	entrypoint := spec.Container.Entrypoint
+	if len(entrypoint) == 0 {
+		entrypoint = agentEntrypoint(spec.Agent.Arch)
+	}
 	create := CreateRequest{
 		ID:         next.ContainerID,
 		Image:      spec.Container.Image,
-		Entrypoint: spec.Container.Entrypoint,
+		Entrypoint: entrypoint,
 		Env:        env,
 		CPUMillis:  spec.Container.CPUMillis,
 		MemoryMiB:  spec.Container.MemoryMiB,
