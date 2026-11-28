@@ -6346,6 +6346,7 @@ export type Experiment =
 	| "fork-agent-definitions"
 	| "fork-chat-todos"
 	| "fork-chat-wakeups"
+	| "fork-compaction-recovery"
 	| "fork-context-cache"
 	| "fork-context-hash-rows"
 	| "fork-family-messages"
@@ -6444,6 +6445,7 @@ export const Experiments: Experiment[] = [
 	"fork-agent-definitions",
 	"fork-chat-todos",
 	"fork-chat-wakeups",
+	"fork-compaction-recovery",
 	"fork-context-cache",
 	"fork-context-hash-rows",
 	"fork-family-messages",

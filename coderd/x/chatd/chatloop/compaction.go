@@ -587,6 +587,10 @@ func generateCompactionSummary(
 		call.Prompt = summaryPromptFor(request.history)
 		call.Tools = request.tools
 		summary, err = streamSummaryText(call)
+		// Fork hook: fork-compaction-recovery retries a summary stream that
+		// spent its whole output cap on reasoning and returned no text; see
+		// fork_compaction_recovery.go. It passes every other result through.
+		summary, err = forkRecoveredSummary(summaryCtx, call, options, streamSummaryText, summary, err)
 		// The rejection can arrive from the stream open or as an in-stream
 		// error part, so the next request repeats the whole attempt.
 		if !isContextTooLargeError(err) {
