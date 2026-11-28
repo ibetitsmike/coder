@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -24,14 +25,16 @@ func TestMain(m *testing.M) {
 }
 
 // specArchive tars one testdata file as the template upload does: the spec
-// at the archive root, named sandbox.yaml whatever the fixture name.
-func specArchive(t *testing.T, name string) []byte {
+// at the archive root, named sandbox.yaml whatever the fixture name. The
+// old, new pairs in replace edit the fixture.
+func specArchive(t *testing.T, name string, replace ...string) []byte {
 	t.Helper()
 
 	var buf bytes.Buffer
 	w := tar.NewWriter(&buf)
-	data, err := os.ReadFile(filepath.Join("testdata", name))
+	raw, err := os.ReadFile(filepath.Join("testdata", name))
 	require.NoError(t, err)
+	data := []byte(strings.NewReplacer(replace...).Replace(string(raw)))
 	require.NoError(t, w.WriteHeader(&tar.Header{
 		Name: sandbox.SpecFileName,
 		Mode: 0o600,

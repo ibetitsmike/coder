@@ -5,6 +5,8 @@ package sandbox
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"maps"
@@ -46,6 +48,9 @@ type stateBlob struct {
 	ContainerID string `json:"container_id"`
 	BuildID     string `json:"build_id"`
 	AgentToken  string `json:"agent_token"`
+	// Config is a hash of the container spec and the agent URL, so a start
+	// with a changed configuration replaces the container.
+	Config string `json:"config"`
 }
 
 // ContainerName is the container ID of a workspace. It is deterministic so
@@ -153,8 +158,18 @@ func (*Engine) Plan(sess *provisionersdk.Session, req *proto.PlanRequest, _ <-ch
 // the transition and records the result. A build that a newer build
 // superseded fails before it touches the runtime, or fails without a state
 // when the newer build arrived while it ran.
-func (e *Engine) Apply(sess *provisionersdk.Session, req *proto.ApplyRequest, _ <-chan struct{}) *proto.ApplyComplete {
-	ctx := sess.Context()
+func (e *Engine) Apply(sess *provisionersdk.Session, req *proto.ApplyRequest, canceledOrComplete <-chan struct{}) *proto.ApplyComplete {
+	// A cancel of the job stops a blocked runtime call. The result is still
+	// recorded under the session context.
+	ctx, cancel := context.WithCancel(sess.Context())
+	defer cancel()
+	go func() {
+		select {
+		case <-canceledOrComplete:
+		case <-ctx.Done():
+		}
+		cancel()
+	}()
 	metadata := req.GetMetadata()
 	spec, err := readSpec(sess)
 	if err != nil {
@@ -195,7 +210,7 @@ func (e *Engine) Apply(sess *provisionersdk.Session, req *proto.ApplyRequest, _ 
 		applyErr = xerrors.New("unknown transition")
 	}
 
-	if err := e.ops.Complete(ctx, op, applyErr); err != nil {
+	if err := e.ops.Complete(sess.Context(), op, applyErr); err != nil {
 		if errors.Is(err, ErrSuperseded) {
 			return &proto.ApplyComplete{Error: "complete sandbox operation: " + err.Error()}
 		}
@@ -269,10 +284,15 @@ func (*Engine) Graph(sess *provisionersdk.Session, req *proto.GraphRequest, _ <-
 	}
 }
 
-// applyStart resumes the recorded container, or creates and starts a new
-// one with a fresh agent token.
+// applyStart resumes the recorded container when its configuration is
+// current, or creates and starts a new one with the recorded agent token.
 func (e *Engine) applyStart(ctx context.Context, spec *Spec, metadata *proto.Metadata, workspaceID uuid.UUID, state stateBlob) (stateBlob, error) {
-	if state.ContainerID != "" && state.AgentToken != "" {
+	config, err := json.Marshal([]any{spec.Container, metadata.GetCoderUrl()})
+	if err != nil {
+		return stateBlob{}, xerrors.Errorf("marshal container config: %w", err)
+	}
+	sum := sha256.Sum256(config)
+	if state.ContainerID != "" && state.AgentToken != "" && state.Config == hex.EncodeToString(sum[:]) {
 		c, err := e.runtime.Status(ctx, state.ContainerID)
 		switch {
 		case err == nil && c.State == ContainerStateRunning:
@@ -296,6 +316,7 @@ func (e *Engine) applyStart(ctx context.Context, spec *Spec, metadata *proto.Met
 		ContainerID: ContainerName(workspaceID),
 		BuildID:     metadata.GetWorkspaceBuildId(),
 		AgentToken:  state.AgentToken,
+		Config:      hex.EncodeToString(sum[:]),
 	}
 	if next.AgentToken == "" {
 		next.AgentToken = uuid.NewString()
@@ -314,10 +335,10 @@ func (e *Engine) applyStart(ctx context.Context, spec *Spec, metadata *proto.Met
 		CPUMillis:  spec.Container.CPUMillis,
 		MemoryMiB:  spec.Container.MemoryMiB,
 	}
-	_, err := e.runtime.Create(ctx, create)
+	_, err = e.runtime.Create(ctx, create)
 	if errors.Is(err, ErrExists) {
-		// A crashed worker created the container but never recorded it, so
-		// nothing knows its agent token. Replace it.
+		// The container has an older configuration, or a crashed build created
+		// it and never recorded its agent token. Replace it.
 		if err := e.removeContainer(ctx, next.ContainerID); err != nil {
 			return stateBlob{}, err
 		}
