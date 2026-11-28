@@ -97,7 +97,7 @@ func (r *Runtime) Create(ctx context.Context, req sandbox.CreateRequest) (sandbo
 
 	env := make([]string, 0, len(req.Env))
 	for k, v := range req.Env {
-		if k == sandbox.EnvAgentURL {
+		if k == sandbox.EnvAgentURL && false {
 			v = containerURL(v)
 		}
 		env = append(env, k+"="+v)
