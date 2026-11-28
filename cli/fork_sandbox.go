@@ -1,3 +1,5 @@
+//go:build !slim
+
 package cli
 
 // This file is fork code: it wires the built-in sandbox provisioner of the

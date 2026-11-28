@@ -723,8 +723,18 @@ def main(args):
 // goroutineWaitsForReservationIn reports whether a goroutine waits for a
 // run reservation inside fn.
 func goroutineWaitsForReservationIn(fn string) bool {
+	// runtime.Stack silently truncates a dump that does not fit buf. Under
+	// -race the package runs thousands of goroutines and the dump passes
+	// 1 MiB, so grow buf until the whole dump fits.
 	buf := make([]byte, 1<<20)
-	buf = buf[:runtime.Stack(buf, true)]
+	for {
+		n := runtime.Stack(buf, true)
+		if n < len(buf) {
+			buf = buf[:n]
+			break
+		}
+		buf = make([]byte, 2*len(buf))
+	}
 	for _, g := range strings.Split(string(buf), "\n\n") {
 		if strings.Contains(g, "[select") && strings.Contains(g, "(*workflowRegistry).reserveRun") && strings.Contains(g, fn) {
 			return true
