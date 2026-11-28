@@ -8,9 +8,15 @@ package cli
 // and a server without the experiment behaves exactly like upstream.
 
 import (
+	"cmp"
 	"context"
 	"io"
+	"net"
+	"net/http"
+	"net/netip"
+	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -67,6 +73,11 @@ func forkSandboxProvisioners(
 	if !api.Experiments.Enabled(codersdk.ExperimentForkSandboxProvisioner) {
 		return types, connector
 	}
+	err := sandboxAccessURLError(api.AccessURL, api.DeploymentValues)
+	if err != nil {
+		logger.Warn(ctx, "the sandbox provisioner is not registered", slog.Error(err))
+		return types, connector
+	}
 	runtime, release, err := acquireSandboxRuntime(ctx, api)
 	if err == nil {
 		var served []codersdk.ProvisionerType
@@ -84,6 +95,27 @@ func forkSandboxProvisioners(
 	}
 	logger.Warn(ctx, "the sandbox provisioner is not registered", slog.Error(err))
 	return types, connector
+}
+
+// sandboxAccessURLError reports why the agents in docker sandbox containers
+// could not reach coderd. The runtime points the agent of a loopback access
+// URL at the host gateway, which reaches coderd only when coderd serves plain
+// HTTP on every interface at the access URL port.
+func sandboxAccessURLError(accessURL *url.URL, dv *codersdk.DeploymentValues) error {
+	if dv.Sandbox.Runtime.Value() != codersdk.SandboxRuntimeDocker ||
+		dockerruntime.ContainerURL(accessURL.String()) == accessURL.String() {
+		return nil
+	}
+	if accessURL.Scheme != "http" {
+		return xerrors.Errorf("sandbox containers reach the loopback access URL %s on another host name, which its TLS certificate does not cover: set an access URL the containers can reach", accessURL)
+	}
+	port := cmp.Or(accessURL.Port(), "80")
+	host, listenPort, err := net.SplitHostPort(dv.HTTPAddress.Value())
+	ip, ipErr := netip.ParseAddr(host)
+	if err != nil || listenPort != port || (host != "" && (ipErr != nil || !ip.IsUnspecified())) {
+		return xerrors.Errorf("sandbox containers reach the loopback access URL %s through the host gateway, but coderd listens on %q: set --http-address 0.0.0.0:%s or an access URL the containers can reach", accessURL, dv.HTTPAddress.Value(), port)
+	}
+	return nil
 }
 
 // sandboxRuntimes holds the runtime that the built-in daemons of one API
@@ -177,4 +209,27 @@ func serveSandboxProvisioner(
 	}()
 	connector[string(codersdk.ProvisionerTypeSandbox)] = sdkproto.NewDRPCProvisionerClient(client)
 	return append(slices.Clone(types), codersdk.ProvisionerTypeSandbox), connector, nil
+}
+
+// forkSandboxAccessHost lets requests from Docker sandbox containers past the
+// access URL redirect. For a loopback access URL the Docker runtime points
+// the agent at the host gateway, and a redirect back to loopback would send
+// the agent to the container itself. Other requests go to redirecting.
+func forkSandboxAccessHost(api *coderd.API, direct, redirecting http.Handler) http.Handler {
+	if !api.Experiments.Enabled(codersdk.ExperimentForkSandboxProvisioner) ||
+		api.DeploymentValues.Sandbox.Runtime.Value() != codersdk.SandboxRuntimeDocker {
+		return redirecting
+	}
+	accessURL := api.AccessURL
+	u, err := url.Parse(dockerruntime.ContainerURL(accessURL.String()))
+	if err != nil || u.Host == accessURL.Host || accessURL.Scheme != "http" {
+		return redirecting
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(strings.TrimSuffix(r.Host, ":80"), strings.TrimSuffix(u.Host, ":80")) {
+			direct.ServeHTTP(w, r)
+			return
+		}
+		redirecting.ServeHTTP(w, r)
+	})
 }

@@ -29,7 +29,11 @@ type Spec struct {
 
 // ContainerSpec describes the container image and how it starts.
 type ContainerSpec struct {
-	Image      string   `yaml:"image"`
+	Image string `yaml:"image"`
+	// Entrypoint replaces the agent bootstrap, so an image that sets it must
+	// start the agent itself from the CODER_AGENT_ variables. Without it the
+	// container runs the bootstrap, which downloads the agent from coderd and
+	// needs sh and curl, wget or busybox in the image.
 	Entrypoint []string `yaml:"entrypoint"`
 	// Env is the container environment. Names that start with
 	// ReservedEnvPrefix are reserved for the variables the provisioner sets.

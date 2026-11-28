@@ -3,6 +3,12 @@ package sandbox_test
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -25,11 +31,12 @@ type harness struct {
 	runtime sandbox.Runtime
 	ops     *sandboxtest.FakeOperations
 	archive []byte
+	url     string
 }
 
 func newHarness(t *testing.T) *harness {
 	rt := sandboxtest.NewFakeRuntime()
-	return &harness{ws: uuid.New(), rt: rt, runtime: rt, ops: sandboxtest.NewFakeOperations(), archive: specArchive(t, "sandbox.yaml")}
+	return &harness{ws: uuid.New(), rt: rt, runtime: rt, ops: sandboxtest.NewFakeOperations(), archive: specArchive(t, "sandbox.yaml"), url: coderURL}
 }
 
 // build runs plan and apply of one transition for build, as the runner does,
@@ -49,7 +56,7 @@ func (h *harness) build(t *testing.T, build uuid.UUID, transition proto.Workspac
 func (h *harness) apply(build uuid.UUID, transition proto.WorkspaceTransition) *proto.Request {
 	return &proto.Request{Type: &proto.Request_Apply{Apply: &proto.ApplyRequest{
 		Metadata: &proto.Metadata{
-			CoderUrl:            coderURL,
+			CoderUrl:            h.url,
 			WorkspaceId:         h.ws.String(),
 			WorkspaceBuildId:    build.String(),
 			WorkspaceTransition: transition,
@@ -102,12 +109,55 @@ func TestEngineApply(t *testing.T) {
 		require.Len(t, creates, 1)
 		require.Equal(t, sandbox.ContainerName(h.ws), creates[0].ID)
 		require.Equal(t, "docker.io/library/alpine:3.20", creates[0].Image)
+		require.Equal(t, []string{"/bin/sh", "-c", "sleep infinity"}, creates[0].Entrypoint)
 		require.Equal(t, "vim", creates[0].Env["EDITOR"])
 		require.Equal(t, coderURL, creates[0].Env[sandbox.EnvAgentURL])
 		require.NotEmpty(t, creates[0].Env[sandbox.EnvAgentToken])
 		require.Equal(t, creates[0].Env[sandbox.EnvAgentToken], token(t, g))
 		require.Contains(t, string(apply.GetState()), sandbox.ContainerName(h.ws))
 		require.Equal(t, sandboxtest.OperationDone, h.ops.Status(b))
+	})
+
+	t.Run("StartWithoutEntrypointBootstrapsTheAgent", func(t *testing.T) {
+		t.Parallel()
+		if runtime.GOOS == "windows" {
+			t.Skip("the bootstrap is a POSIX shell script")
+		}
+
+		// coderd serves the agent binary for the spec's arch. This one is a
+		// script that reports how the bootstrap ran it.
+		agent := "#!/bin/sh\n[ \"$1\" = --version ] && echo Coder && exit 0\n" +
+			"echo \"ran $1 auth=$CODER_AGENT_AUTH url=$CODER_AGENT_URL token=$CODER_AGENT_TOKEN\"\n"
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/bin/coder-linux-arm64" {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = w.Write([]byte(agent))
+		}))
+		t.Cleanup(srv.Close)
+		h := newHarness(t)
+		h.url = srv.URL
+		h.archive = specArchive(t, "sandbox.yaml", `  entrypoint: ["/bin/sh", "-c", "sleep infinity"]`+"\n", "", "arch: amd64", "arch: arm64")
+		apply, _ := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, nil)
+		require.Empty(t, apply.GetError())
+		create := h.rt.Creates()[0]
+		require.NotEmpty(t, create.Entrypoint)
+
+		// A failed bootstrap retries or sleeps, so the context bounds it, and
+		// a sleep that returns at once leaves no process behind.
+		bin := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(bin, "sleep"), []byte("#!/bin/sh\n"), 0o700)) //nolint:gosec // The stub must be executable.
+		ctx := testutil.Context(t, testutil.WaitMedium)
+		cmd := exec.CommandContext(ctx, create.Entrypoint[0], create.Entrypoint[1:]...) //nolint:gosec // The engine built the command.
+		cmd.Env = []string{"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"), "BINARY_DIR=" + t.TempDir()}
+		for k, v := range create.Env {
+			cmd.Env = append(cmd.Env, k+"="+v)
+		}
+		cmd.WaitDelay = time.Second
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(out))
+		require.Contains(t, string(out), "ran agent auth=token url="+srv.URL+"/ token="+create.Env[sandbox.EnvAgentToken]+"\n")
 	})
 
 	t.Run("EveryStartReplacesTheContainer", func(t *testing.T) {

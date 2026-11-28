@@ -5,9 +5,18 @@ package cli
 import (
 	"archive/tar"
 	"bytes"
+	"cmp"
 	"context"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,6 +36,7 @@ import (
 	"github.com/coder/coder/v2/coderd/wsbuilder"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/provisioner/sandbox"
+	"github.com/coder/coder/v2/provisioner/sandbox/dockerruntime"
 	"github.com/coder/coder/v2/provisioner/sandbox/sandboxtest"
 	"github.com/coder/coder/v2/provisionerd"
 	"github.com/coder/coder/v2/provisionerd/proto"
@@ -55,11 +65,13 @@ func TestForkSandboxProvisioners(t *testing.T) {
 		name        string
 		experiments []string
 		runtime     string
+		httpAddress string
 		registered  bool
 	}{
 		{name: "ExperimentOff", runtime: codersdk.SandboxRuntimeDocker},
 		{name: "NoRuntime", experiments: experiment},
-		{name: "ExperimentOnWithRuntime", experiments: experiment, runtime: codersdk.SandboxRuntimeDocker, registered: true},
+		{name: "UnreachableAccessURL", experiments: experiment, runtime: codersdk.SandboxRuntimeDocker, httpAddress: "127.0.0.1:3000"},
+		{name: "ExperimentOnWithRuntime", experiments: experiment, runtime: codersdk.SandboxRuntimeDocker, httpAddress: "0.0.0.0:3000", registered: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -80,7 +92,11 @@ func TestForkSandboxProvisioners(t *testing.T) {
 			dv.Experiments = tc.experiments
 			dv.Sandbox.Runtime = serpent.String(tc.runtime)
 			dv.Sandbox.DockerHost = serpent.String("tcp://" + docker.Listener.Addr().String())
-			_, closer, api := coderdtest.NewWithAPI(t, &coderdtest.Options{DeploymentValues: dv})
+			dv.HTTPAddress = serpent.String(tc.httpAddress)
+			_, closer, api := coderdtest.NewWithAPI(t, &coderdtest.Options{
+				DeploymentValues: dv,
+				AccessURL:        &url.URL{Scheme: "http", Host: "127.0.0.1:3000"},
+			})
 			t.Cleanup(func() { _ = closer.Close() })
 
 			// The server calls the hook once for each built-in daemon.
@@ -111,68 +127,94 @@ func TestForkSandboxProvisioners(t *testing.T) {
 	}
 }
 
+// TestSandboxAccessURLError checks which loopback access URLs the agents in
+// docker sandbox containers can reach.
+func TestSandboxAccessURLError(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		accessURL, httpAddress, runtime, err string
+	}{
+		{accessURL: "http://coder.example.com", httpAddress: "127.0.0.1:3000"},
+		{accessURL: "http://127.0.0.1:3000", httpAddress: "127.0.0.1:3000", runtime: "fake"},
+		{accessURL: "http://127.0.0.1:3000", httpAddress: "0.0.0.0:3000"},
+		{accessURL: "http://localhost", httpAddress: ":80"},
+		{accessURL: "http://127.0.0.1:3000", httpAddress: "127.0.0.1:3000", err: "set --http-address 0.0.0.0:3000"},
+		{accessURL: "http://127.0.0.1:3000", httpAddress: "0.0.0.0:4000", err: "set --http-address 0.0.0.0:3000"},
+		{accessURL: "http://localhost", httpAddress: "", err: "set --http-address 0.0.0.0:80"},
+		{accessURL: "https://localhost:3443", httpAddress: "0.0.0.0:3443", err: "TLS certificate"},
+	} {
+		accessURL, err := url.Parse(tc.accessURL)
+		require.NoError(t, err)
+		dv := &codersdk.DeploymentValues{HTTPAddress: serpent.String(tc.httpAddress)}
+		dv.Sandbox.Runtime = serpent.String(cmp.Or(tc.runtime, codersdk.SandboxRuntimeDocker))
+		err = sandboxAccessURLError(accessURL, dv)
+		if tc.err == "" {
+			require.NoError(t, err, tc)
+		} else {
+			require.ErrorContains(t, err, tc.err, tc)
+		}
+	}
+}
+
+// TestForkSandboxAccessHost checks that the access URL redirect lets through
+// the host a Docker sandbox container reaches a loopback access URL on.
+func TestForkSandboxAccessHost(t *testing.T) {
+	t.Parallel()
+
+	served := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	for _, tc := range []struct {
+		name       string
+		experiment bool
+		runtime    string
+		accessURL  string
+		host       string
+		want       int
+	}{
+		{name: "ContainerHost", experiment: true, runtime: codersdk.SandboxRuntimeDocker, accessURL: "http://127.0.0.1:3000", host: "host.docker.internal:3000", want: http.StatusOK},
+		{name: "DefaultPort", experiment: true, runtime: codersdk.SandboxRuntimeDocker, accessURL: "http://localhost:80", host: "host.docker.internal", want: http.StatusOK},
+		{name: "OtherPort", experiment: true, runtime: codersdk.SandboxRuntimeDocker, accessURL: "http://127.0.0.1:3000", host: "host.docker.internal:4000", want: http.StatusTemporaryRedirect},
+		{name: "HTTPSAccessURL", experiment: true, runtime: codersdk.SandboxRuntimeDocker, accessURL: "https://localhost:3443", host: "host.docker.internal:3443", want: http.StatusTemporaryRedirect},
+		{name: "ExperimentOff", runtime: codersdk.SandboxRuntimeDocker, accessURL: "http://127.0.0.1:3000", host: "host.docker.internal:3000", want: http.StatusTemporaryRedirect},
+		{name: "NoDockerRuntime", experiment: true, accessURL: "http://127.0.0.1:3000", host: "host.docker.internal:3000", want: http.StatusTemporaryRedirect},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			accessURL, err := url.Parse(tc.accessURL)
+			require.NoError(t, err)
+			dv := &codersdk.DeploymentValues{}
+			dv.Sandbox.Runtime = serpent.String(tc.runtime)
+			api := &coderd.API{Options: &coderd.Options{AccessURL: accessURL, DeploymentValues: dv}}
+			if tc.experiment {
+				api.Experiments = codersdk.Experiments{codersdk.ExperimentForkSandboxProvisioner}
+			}
+			handler := forkSandboxAccessHost(api, served, redirectToAccessURL(served, accessURL, false, nil))
+			req := httptest.NewRequest(http.MethodGet, "/api/v2/buildinfo", nil)
+			req.Host = tc.host
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			require.Equal(t, tc.want, rec.Code)
+		})
+	}
+}
+
 // TestSandboxProvisionerEndToEnd runs a sandbox template and workspace
 // through coderd, the provisionerd runner, the engine, the operation log in
 // the database and the fake runtime.
 func TestSandboxProvisionerEndToEnd(t *testing.T) {
 	t.Parallel()
 
-	dv := coderdtest.DeploymentValues(t)
-	dv.Experiments = []string{string(codersdk.ExperimentForkSandboxProvisioner)}
 	reg := prometheus.NewRegistry()
 	jobMetrics := provisionerdserver.NewMetrics(testutil.Logger(t))
 	require.NoError(t, jobMetrics.Register(reg))
 	buildMetrics, err := wsbuilder.NewMetrics(reg)
 	require.NoError(t, err)
-	client, closer, api := coderdtest.NewWithAPI(t, &coderdtest.Options{
-		DeploymentValues:          dv,
+	rt := sandboxtest.NewFakeRuntime()
+	client, api, user := newSandboxServer(t, rt, &coderdtest.Options{
 		ProvisionerdServerMetrics: jobMetrics,
 		WorkspaceBuilderMetrics:   buildMetrics,
 	})
-	t.Cleanup(func() { _ = closer.Close() })
-	user := coderdtest.CreateFirstUser(t, client)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	t.Cleanup(func() {
-		cancel()
-		wg.Wait()
-	})
-	rt := sandboxtest.NewFakeRuntime()
-	types, connector, err := serveSandboxProvisioner(ctx, api, rt, testutil.Logger(t), t.TempDir(),
-		nil, provisionerd.LocalProvisioners{}, make(chan error, 1), &wg, cancel)
-	require.NoError(t, err)
-	require.Equal(t, []codersdk.ProvisionerType{codersdk.ProvisionerTypeSandbox}, types)
-	connected := make(chan struct{})
-	daemon := provisionerd.New(func(dialCtx context.Context) (proto.DRPCProvisionerDaemonClient, error) {
-		return api.CreateInMemoryTaggedProvisionerDaemon(dialCtx, "sandbox", types, nil)
-	}, &provisionerd.Options{
-		Logger:              testutil.Logger(t),
-		UpdateInterval:      250 * time.Millisecond,
-		ForceCancelInterval: 5 * time.Second,
-		Connector:           connector,
-		InitConnectionCh:    connected,
-	})
-	t.Cleanup(func() { _ = coderdtest.NewProvisionerDaemonCloser(daemon).Close() })
-	testutil.TryReceive(testutil.Context(t, testutil.WaitShort), t, connected)
-
-	var buf bytes.Buffer
-	w := tar.NewWriter(&buf)
-	require.NoError(t, w.WriteHeader(&tar.Header{Name: sandbox.SpecFileName, Mode: 0o600, Size: int64(len(sandboxSpec))}))
-	_, err = w.Write([]byte(sandboxSpec))
-	require.NoError(t, err)
-	require.NoError(t, w.Close())
-	file, err := client.Upload(ctx, codersdk.ContentTypeTar, &buf)
-	require.NoError(t, err)
-	version, err := client.CreateTemplateVersion(ctx, user.OrganizationID, codersdk.CreateTemplateVersionRequest{
-		FileID:        file.ID,
-		StorageMethod: codersdk.ProvisionerStorageMethodFile,
-		Provisioner:   codersdk.ProvisionerTypeSandbox,
-	})
-	require.NoError(t, err)
-	version = coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
-	require.Equal(t, codersdk.ProvisionerJobSucceeded, version.Job.Status, version.Job.Error)
-	template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
+	template := createSandboxTemplate(t, client, user.OrganizationID, sandboxSpec)
 
 	ws := coderdtest.CreateWorkspace(t, client, template.ID)
 	start := coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, ws.LatestBuild.ID)
@@ -214,6 +256,133 @@ func TestSandboxProvisionerEndToEnd(t *testing.T) {
 		"transition": string(database.WorkspaceTransitionStart), "build_reason": string(database.BuildReasonInitiator),
 	})
 	require.Equal(t, uint64(2), wait.GetSampleCount())
+}
+
+// TestSandboxAgentConnects starts a sandbox workspace in a Docker container
+// that sets no entrypoint, and waits for the agent that the bootstrap
+// downloads from coderd to connect. The access URL is on loopback, so the
+// agent only reaches coderd through the host the Docker runtime maps it to.
+func TestSandboxAgentConnects(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("FORK_SANDBOX_DOCKER_TEST") != "1" {
+		t.Skip("set FORK_SANDBOX_DOCKER_TEST=1 to run against a Docker daemon")
+	}
+	arch := runtime.GOARCH
+	if arch != "amd64" && arch != "arm64" {
+		t.Skipf("no sandbox agent for %s", arch)
+	}
+	ctx := testutil.Context(t, 5*time.Minute)
+	rt, err := dockerruntime.New(ctx, "")
+	require.NoError(t, err, "FORK_SANDBOX_DOCKER_TEST=1 needs a Docker daemon")
+	t.Cleanup(func() { _ = rt.Close() })
+
+	agentBin := filepath.Join(t.TempDir(), "coder-linux-"+arch)
+	build := exec.CommandContext(ctx, "go", "build", "-tags", "slim", "-o", agentBin, "../cmd/coder")
+	build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+arch)
+	out, err := build.CombinedOutput()
+	require.NoError(t, err, string(out))
+
+	// coderdtest listens on 127.0.0.1, which a container cannot reach. A
+	// proxy on every interface stands in for the deployment: it serves the
+	// agent binary, which coderdtest does not embed, and passes the rest to
+	// coderd. The access URL names the proxy on loopback.
+	l, err := net.Listen("tcp", ":0") //nolint:gosec // The container reaches the host on the Docker bridge.
+	require.NoError(t, err)
+	tcpAddr, ok := l.Addr().(*net.TCPAddr)
+	require.True(t, ok)
+	client, _, user := newSandboxServer(t, rt, &coderdtest.Options{
+		AccessURL: &url.URL{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", tcpAddr.Port)},
+	})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/bin/coder-linux-"+arch, func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, agentBin)
+	})
+	mux.Handle("/", httputil.NewSingleHostReverseProxy(client.URL))
+	proxy := &httptest.Server{Listener: l, Config: &http.Server{Handler: mux, ReadHeaderTimeout: testutil.WaitShort}}
+	proxy.Start()
+	t.Cleanup(proxy.Close)
+
+	template := createSandboxTemplate(t, client, user.OrganizationID, fmt.Sprintf(`version: 1
+container:
+  image: docker.io/library/alpine:3.21
+agent:
+  name: main
+  arch: %s
+`, arch))
+	ws := coderdtest.CreateWorkspace(t, client, template.ID)
+	name := sandbox.ContainerName(ws.ID)
+	t.Cleanup(func() {
+		if t.Failed() {
+			logs, _ := exec.Command("docker", "logs", name).CombinedOutput()
+			t.Logf("container logs:\n%s", logs)
+		}
+		_ = rt.Remove(context.Background(), name)
+	})
+	start := coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, ws.LatestBuild.ID)
+	require.Equal(t, codersdk.ProvisionerJobSucceeded, start.Job.Status, start.Job.Error)
+	coderdtest.NewWorkspaceAgentWaiter(t, client, ws.ID).WithContext(ctx).Wait()
+}
+
+// newSandboxServer starts coderd with the sandbox experiment and a
+// provisioner daemon that runs sandbox jobs on rt.
+func newSandboxServer(t *testing.T, rt sandbox.Runtime, opts *coderdtest.Options) (*codersdk.Client, *coderd.API, codersdk.CreateFirstUserResponse) {
+	t.Helper()
+
+	if opts.DeploymentValues == nil {
+		opts.DeploymentValues = coderdtest.DeploymentValues(t)
+	}
+	opts.DeploymentValues.Experiments = []string{string(codersdk.ExperimentForkSandboxProvisioner)}
+	client, closer, api := coderdtest.NewWithAPI(t, opts)
+	t.Cleanup(func() { _ = closer.Close() })
+	user := coderdtest.CreateFirstUser(t, client)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	t.Cleanup(func() {
+		cancel()
+		wg.Wait()
+	})
+	types, connector, err := serveSandboxProvisioner(ctx, api, rt, testutil.Logger(t), t.TempDir(),
+		nil, provisionerd.LocalProvisioners{}, make(chan error, 1), &wg, cancel)
+	require.NoError(t, err)
+	require.Equal(t, []codersdk.ProvisionerType{codersdk.ProvisionerTypeSandbox}, types)
+	connected := make(chan struct{})
+	daemon := provisionerd.New(func(dialCtx context.Context) (proto.DRPCProvisionerDaemonClient, error) {
+		return api.CreateInMemoryTaggedProvisionerDaemon(dialCtx, "sandbox", types, nil)
+	}, &provisionerd.Options{
+		Logger:              testutil.Logger(t),
+		UpdateInterval:      250 * time.Millisecond,
+		ForceCancelInterval: 5 * time.Second,
+		Connector:           connector,
+		InitConnectionCh:    connected,
+	})
+	t.Cleanup(func() { _ = coderdtest.NewProvisionerDaemonCloser(daemon).Close() })
+	testutil.TryReceive(testutil.Context(t, testutil.WaitShort), t, connected)
+	return client, api, user
+}
+
+// createSandboxTemplate makes a template from a sandbox spec.
+func createSandboxTemplate(t *testing.T, client *codersdk.Client, orgID uuid.UUID, spec string) codersdk.Template {
+	t.Helper()
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+	var buf bytes.Buffer
+	w := tar.NewWriter(&buf)
+	require.NoError(t, w.WriteHeader(&tar.Header{Name: sandbox.SpecFileName, Mode: 0o600, Size: int64(len(spec))}))
+	_, err := w.Write([]byte(spec))
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+	file, err := client.Upload(ctx, codersdk.ContentTypeTar, &buf)
+	require.NoError(t, err)
+	version, err := client.CreateTemplateVersion(ctx, orgID, codersdk.CreateTemplateVersionRequest{
+		FileID:        file.ID,
+		StorageMethod: codersdk.ProvisionerStorageMethodFile,
+		Provisioner:   codersdk.ProvisionerTypeSandbox,
+	})
+	require.NoError(t, err)
+	version = coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
+	require.Equal(t, codersdk.ProvisionerJobSucceeded, version.Job.Status, version.Job.Error)
+	return coderdtest.CreateTemplate(t, client, orgID, version.ID)
 }
 
 // agentToken reads the auth token coderd stored for the one agent of a
