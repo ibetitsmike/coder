@@ -2,6 +2,7 @@
 
 This page is for a Coder Agents user who runs pstack skills, and shows how to give a child its own git worktree.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
+Its code cites are on [pstack adapter evidence](https://github.com/ibetitsmike/coder/blob/main/docs/fork/pstack-adapter-evidence.md).
 
 When the deployment enables the `fork-subagent-isolation` experiment, `spawn_agent` also takes `isolation`, `repo_path`, and `base_branch`.
 A custom type's definition can set the `isolation` of a spawn that sets none, as [Custom agent types](custom-agent-types.md) describes.

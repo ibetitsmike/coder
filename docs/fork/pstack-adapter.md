@@ -142,4 +142,4 @@ When a later step needs what the skipped step made, such as a URL or a key, leav
 
 ## Evidence
 
-The code cites that back this page are on their own page, [pstack adapter evidence](https://github.com/ibetitsmike/coder/blob/main/docs/fork/pstack-adapter-evidence.md).
+The code cites that back this page and the pages it links are on their own page, [pstack adapter evidence](https://github.com/ibetitsmike/coder/blob/main/docs/fork/pstack-adapter-evidence.md).

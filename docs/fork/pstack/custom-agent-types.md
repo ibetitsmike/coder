@@ -2,6 +2,7 @@
 
 This page is for a Coder Agents user who runs pstack skills, and shows how to run pstack's agents as `spawn_agent` types.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
+Its code cites are on [pstack adapter evidence](https://github.com/ibetitsmike/coder/blob/main/docs/fork/pstack-adapter-evidence.md).
 
 When the deployment enables the `fork-agent-definitions` experiment, `spawn_agent` accepts a custom type for each agent definition that the workspace agent finds.
 It reads the `*.md` files in `agents/`, `.agents/agents/`, `.claude/agents/`, and `.cursor/agents/` of each scan root, including `~/.coder/agents/`.
@@ -39,7 +40,7 @@ An empty **Model** runs the definition on the chat's model.
 If the page already shows that the definition changed or was deleted after the dialog opened, the dialog doesn't save and asks you to copy your changes and reopen it.
 The save itself has no version check, so it can overwrite a change from another tab or the API that the page hasn't loaded.
 The dialog shows the server's errors, such as `Invalid agent definition content.` or `An agent definition with this name already exists.`
-The page doesn't list the workspace's definition files, such as the pstack agents that Setup copies to `~/.coder/agents/`.
+The page doesn't list the workspace's definition files, such as the pstack agents that [Setup](install.md) copies to `~/.coder/agents/`.
 `spawn_agent` also offers the chat owner's enabled personal definitions in the chat's organization, the enabled organization definitions that the owner can read, and the enabled definitions of the chat's project.
 It offers project definitions only when the chat owner owns the project or the project is shared with them, and a child chat uses its root chat's project.
 To manage a project's definitions, open the project from the Agents sidebar and select the **Agent definitions** row in its details panel.

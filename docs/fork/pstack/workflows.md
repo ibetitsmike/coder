@@ -2,6 +2,7 @@
 
 This page is for a Coder Agents user who runs pstack skills, and shows how to run a saved workflow from a chat.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
+Its code cites are on [pstack adapter evidence](https://github.com/ibetitsmike/coder/blob/main/docs/fork/pstack-adapter-evidence.md).
 
 The workflow tools exist only when the deployment enables the `fork-workflows` experiment, and only in a root chat that is not in plan mode and is not an `explore` chat.
 A root chat then has `run_workflow`, `await_workflow`, and `list_workflows`, and every chat owner gets them.
@@ -50,4 +51,4 @@ The tool only reads, so never claim to have saved or edited one.
 If the workflow has an args schema, `args` must match it or the run doesn't start, and missing args validate as an empty object.
 
 Without the experiment, a `run_workflow` call fails with `Tool not active in this turn: run_workflow`.
-Then spawn workers with `spawn_agent` and collect them with `wait_agent`, as the Tasks row says.
+Then spawn workers with `spawn_agent` and collect them with `wait_agent`, as the [Tasks row](../pstack-adapter.md#tools) says.

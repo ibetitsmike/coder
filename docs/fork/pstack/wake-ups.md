@@ -2,6 +2,7 @@
 
 This page is for a Coder Agents user who runs pstack skills, and shows how to wake a chat later, or when its children or a pull request change.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
+Its code cites are on [pstack adapter evidence](https://github.com/ibetitsmike/coder/blob/main/docs/fork/pstack-adapter-evidence.md).
 
 When the deployment enables the `fork-chat-wakeups` experiment, a chat has `schedule_wakeup`, `wait_for_events`, and [`notify_user`](notifications.md), except in plan-mode turns and in `explore` children.
 A [custom agent tool policy](custom-agent-tool-policy.md) can also remove them from a custom child.

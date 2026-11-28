@@ -2,6 +2,7 @@
 
 This page is for a Coder Agents user who runs pstack skills, and shows how to send the chat owner a Coder notification.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
+Its code cites are on [pstack adapter evidence](https://github.com/ibetitsmike/coder/blob/main/docs/fork/pstack-adapter-evidence.md).
 
 With the `fork-chat-wakeups` experiment, `notify_user` sends the chat owner a Coder notification.
 The owner gets it in the Coder notifications inbox when the deployment keeps the inbox on, and by email or webhook when the deployment sends notifications that way.

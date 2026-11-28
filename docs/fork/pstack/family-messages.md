@@ -2,6 +2,7 @@
 
 This page is for a Coder Agents user who runs pstack skills, and shows how to send messages between the chats of one family.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
+Its code cites are on [pstack adapter evidence](https://github.com/ibetitsmike/coder/blob/main/docs/fork/pstack-adapter-evidence.md).
 
 When the deployment enables the `fork-family-messages` experiment, each chat gets `message_family_chat` and `list_family_chats`, except in plan-mode turns, in an `explore` chat, and in a chat of a custom type with `readonly: true`.
 A custom type's `tools` and `disallowed_tools` treat both tools as part of `Task`.

@@ -2,6 +2,7 @@
 
 This page is for a Coder Agents user who runs pstack skills, and shows how to tell which tools a child of a custom agent type keeps.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
+Its code cites are on [pstack adapter evidence](https://github.com/ibetitsmike/coder/blob/main/docs/fork/pstack-adapter-evidence.md).
 
 When Coder Agents spawns a custom type, it stores the definition's tool fields with the child chat.
 On every turn of the child while the experiment is on, Coder Agents removes the tools that the stored fields don't allow.

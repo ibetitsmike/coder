@@ -2,6 +2,7 @@
 
 This page is for a Coder Agents user who runs pstack skills, and shows how to read a chat's messages with `read_chat_transcript` and find chats with `search_chats`.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
+Its code cites are on [pstack adapter evidence](https://github.com/ibetitsmike/coder/blob/main/docs/fork/pstack-adapter-evidence.md).
 
 When the deployment enables the `fork-chat-todos` experiment, `read_chat_transcript` reads the stored messages of a chat in pages.
 Leave `chat_id` empty to read your own chat, including messages that compaction took out of your context.
@@ -17,4 +18,4 @@ Plan-mode turns and `explore` children don't get either tool.
 With the same experiment, `wait_agent` also takes `include_tool_calls`, from 1 to 20, and adds up to that many of the child's latest tool calls, oldest first, to its reply.
 Its card then shows them under a line such as **2 recent tool calls** that expands to each call's tool name and arguments, and shows the `tool_calls_error` text when Coder can't read them.
 Without the experiment, there is no transcript or chat search tool.
-Root chats in a project have `read_memory` and `save_memory`, but Setup creates no project.
+Root chats in a project have `read_memory` and `save_memory`, but [Setup](install.md) creates no project.

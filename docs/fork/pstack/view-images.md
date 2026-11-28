@@ -2,6 +2,7 @@
 
 This page is for a Coder Agents user who runs pstack skills, and shows how to load an image into the model's context and show the user an HTML page.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
+Its code cites are on [pstack adapter evidence](https://github.com/ibetitsmike/coder/blob/main/docs/fork/pstack-adapter-evidence.md).
 
 `view_image` exists only when the deployment enables the `fork-view-image` experiment.
 It loads a PNG, JPEG, GIF, or WebP file from the workspace into the model's context as an image.

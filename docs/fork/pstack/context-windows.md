@@ -2,6 +2,7 @@
 
 This page is for a Coder Agents user who runs pstack skills, and shows how to pick how an organization's chats compact.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
+Its code cites are on [pstack adapter evidence](https://github.com/ibetitsmike/coder/blob/main/docs/fork/pstack-adapter-evidence.md).
 
 With the `fork-token-budget` experiment, each organization picks how its chats compact.
 `GET /api/v2/chats/fork/organizations/{organization}/token-budget` returns the setting, and `PUT` on the same path replaces it.

@@ -2,6 +2,7 @@
 
 This page is for a Coder Agents user who runs pstack skills, and shows how to give a child its own workspace.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
+Its code cites are on [pstack adapter evidence](https://github.com/ibetitsmike/coder/blob/main/docs/fork/pstack-adapter-evidence.md).
 
 With the `fork-subagent-isolation` experiment, `isolation: "workspace"` gives the child its own new workspace.
 `spawn_agent` creates it as the chat owner, from the active version of the parent workspace's template, with the parameters of the parent workspace's latest build.

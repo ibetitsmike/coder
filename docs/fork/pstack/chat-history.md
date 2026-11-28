@@ -2,6 +2,7 @@
 
 This page is for a Coder Agents user who runs pstack skills, and shows how to read the chat's own earlier messages with `chat_history`.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
+Its code cites are on [pstack adapter evidence](https://github.com/ibetitsmike/coder/blob/main/docs/fork/pstack-adapter-evidence.md).
 
 `chat_history` exists only when the deployment enables the `fork-token-budget` experiment.
 Plan-mode turns, `explore` children and read-only custom agent types don't get it.
