@@ -51,11 +51,7 @@ const expand: Story["play"] = async ({ canvasElement }) => {
 	);
 };
 
-export const Sent: Story = {
-	play: async ({ canvasElement }) => {
-		within(canvasElement).getByRole("button", { name: "negative control" });
-	},
-};
+export const Sent: Story = { play: expand };
 
 export const Queued: Story = {
 	args: { result: MockQueuedMessageFamilyChatResult },
