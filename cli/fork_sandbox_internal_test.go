@@ -120,9 +120,11 @@ func TestSandboxProvisionerEndToEnd(t *testing.T) {
 	}
 	build(database.WorkspaceTransitionStop)
 	require.Equal(t, sandbox.ContainerStateStopped, rt.Containers()[name].State)
+	// A start replaces the container and keeps the token coderd knows.
 	restart := build(database.WorkspaceTransitionStart)
 	require.Equal(t, sandbox.ContainerStateRunning, rt.Containers()[name].State)
-	require.Len(t, rt.Creates(), 1)
+	require.Len(t, rt.Creates(), 2)
+	require.Equal(t, creates[0].Env[sandbox.EnvAgentToken], rt.Creates()[1].Env[sandbox.EnvAgentToken])
 	require.Equal(t, creates[0].Env[sandbox.EnvAgentToken], agentToken(t, api, restart.Job.ID).String())
 	build(database.WorkspaceTransitionDelete)
 	require.Empty(t, rt.Containers())
