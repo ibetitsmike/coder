@@ -1,5 +1,6 @@
 # Workspace isolation
 
+This page is for a Coder Agents user who runs pstack skills, and shows how to give a child its own workspace.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
 
 With the `fork-subagent-isolation` experiment, `isolation: "workspace"` gives the child its own new workspace.

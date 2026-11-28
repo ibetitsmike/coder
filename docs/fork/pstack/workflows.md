@@ -1,5 +1,6 @@
 # Workflows
 
+This page is for a Coder Agents user who runs pstack skills, and shows how to run a saved workflow from a chat.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
 
 The workflow tools exist only when the deployment enables the `fork-workflows` experiment, and only in a root chat that is not in plan mode and is not an `explore` chat.

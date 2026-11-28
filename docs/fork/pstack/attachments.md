@@ -1,5 +1,6 @@
 # Attachments
 
+This page is for a Coder Agents user who runs pstack skills, and shows how to hand a workspace file to the user with `attach_file`.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
 
 `attach_file` copies a workspace file into the chat, so the user can open or download it from the conversation.

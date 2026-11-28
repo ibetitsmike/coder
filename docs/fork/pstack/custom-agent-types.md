@@ -1,5 +1,6 @@
 # Custom agent types
 
+This page is for a Coder Agents user who runs pstack skills, and shows how to run pstack's agents as `spawn_agent` types.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
 
 When the deployment enables the `fork-agent-definitions` experiment, `spawn_agent` accepts a custom type for each agent definition that the workspace agent finds.

@@ -1,5 +1,6 @@
 # Pinned skills
 
+This page is for a Coder Agents user who runs pstack skills, and shows how to pin a skill so a chat follows it on every turn.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
 
 With the `fork-pinned-skills` experiment, the chat owner can pin up to 8 skills to a chat, including skills hidden from the model.

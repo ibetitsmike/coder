@@ -1,5 +1,6 @@
 # Context windows
 
+This page is for a Coder Agents user who runs pstack skills, and shows how to pick how an organization's chats compact.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
 
 With the `fork-token-budget` experiment, each organization picks how its chats compact.

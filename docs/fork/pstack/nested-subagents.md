@@ -1,5 +1,6 @@
 # Nested subagents
 
+This page is for a Coder Agents user who runs pstack skills, and shows how to let a child spawn and collect its own workers.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
 
 When the deployment enables the `fork-nested-subagents` experiment, a `general` child gets `spawn_agent` and the other subagent tools while its own children stay within `--chat-max-subagent-depth`.

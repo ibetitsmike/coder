@@ -1,5 +1,6 @@
 # Install pstack on Coder Agents
 
+This page is for a Coder Agents user who runs pstack skills, and shows how to install pstack's skills, agents and adapter pages in a workspace.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
 
 1. If `~/pstack-src` exists from an earlier setup, update it: `git -C ~/pstack-src fetch origin`.
@@ -26,7 +27,8 @@ This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it
    `ls ~/.coder/agents/*.md | wc -l` then prints at least 2.
 
    With the `fork-agent-definitions` experiment, chats also get them as [custom agent types](custom-agent-types.md).
-7. Download the adapter page and the pages it links: `rm -rf ~/.coder/pstack && mkdir -p ~/.coder/pstack && curl -fsSL -o ~/.coder/pstack-adapter.md https://raw.githubusercontent.com/ibetitsmike/coder/main/docs/fork/pstack-adapter.md && for p in attachments chat-history chat-transcripts context-windows custom-agent-tool-policy custom-agent-types family-messages install nested-subagents notes notifications pinned-skills questions setup-pstack subagent-limits todo-list view-images wake-ups workflows workspace-isolation worktree-isolation; do curl -fsSL -o ~/.coder/pstack/$p.md https://raw.githubusercontent.com/ibetitsmike/coder/main/docs/fork/pstack/$p.md || break; done`.
+7. Download the adapter page and the pages it links: `(set -e; d=$(mktemp -d); u=https://raw.githubusercontent.com/ibetitsmike/coder/main/docs/fork; curl -fsSL -o "$d/pstack-adapter.md" "$u/pstack-adapter.md"; mkdir "$d/pstack"; for p in attachments chat-history chat-transcripts context-windows custom-agent-tool-policy custom-agent-types family-messages install nested-subagents notes notifications pinned-skills questions setup-pstack subagent-limits todo-list view-images wake-ups workflows workspace-isolation worktree-isolation; do curl -fsSL -o "$d/pstack/$p.md" "$u/pstack/$p.md"; done; rm -rf ~/.coder/pstack; mv "$d/pstack" ~/.coder/pstack; mv "$d/pstack-adapter.md" ~/.coder/pstack-adapter.md; rmdir "$d")`.
+   The command exits with 0 only when every page downloaded, and it keeps the old copies when one fails.
    `head -1 ~/.coder/pstack-adapter.md` then prints `# pstack on Coder Agents`, and `ls ~/.coder/pstack/*.md | wc -l` prints 21.
 8. If the downloaded page pins another pstack commit than step 3, start over.
 9. If `~/.coder/AGENTS.md` already holds a block between `<!-- pstack-adapter -->` and `<!-- /pstack-adapter -->`, delete that block.

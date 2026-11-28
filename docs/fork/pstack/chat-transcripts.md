@@ -1,5 +1,6 @@
 # Chat transcripts
 
+This page is for a Coder Agents user who runs pstack skills, and shows how to read a chat's messages with `read_chat_transcript` and find chats with `search_chats`.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
 
 When the deployment enables the `fork-chat-todos` experiment, `read_chat_transcript` reads the stored messages of a chat in pages.

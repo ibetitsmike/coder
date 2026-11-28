@@ -1,5 +1,6 @@
 # Todo list
 
+This page is for a Coder Agents user who runs pstack skills, and shows how to track a chat's work with `todo_write` and `todo_read`.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
 
 `todo_write` and `todo_read` exist only when the deployment enables the `fork-chat-todos` experiment.

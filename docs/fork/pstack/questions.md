@@ -1,5 +1,6 @@
 # Questions
 
+This page is for a Coder Agents user who runs pstack skills, and shows how to ask the user a question from a chat.
 This page belongs to [pstack on Coder Agents](../pstack-adapter.md) and, like it, isn't in `docs/manifest.json`.
 
 A root chat has `ask_user_question` in plan-mode turns, where the question ends the turn.
