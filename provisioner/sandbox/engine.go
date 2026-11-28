@@ -5,8 +5,6 @@ package sandbox
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"maps"
@@ -47,9 +45,6 @@ type stateBlob struct {
 	ContainerID string `json:"container_id"`
 	BuildID     string `json:"build_id"`
 	AgentToken  string `json:"agent_token"`
-	// Config is a hash of the container spec and the agent URL, so a start
-	// with a changed configuration replaces the container.
-	Config string `json:"config"`
 }
 
 // ContainerName is the container ID of a workspace. It is deterministic so
@@ -195,13 +190,6 @@ func (e *Engine) Apply(sess *provisionersdk.Session, req *proto.ApplyRequest, ca
 	if err != nil {
 		return &proto.ApplyComplete{Error: "begin sandbox operation: " + err.Error()}
 	}
-	if op.Abandoned {
-		// An older build may have replaced the container without recording
-		// it, so a start must not trust the recorded configuration.
-		state.Config = ""
-		e.logger.Warn(ctx, "older builds left sandbox operations unfinished",
-			slog.F("workspace_id", workspaceID), slog.F("build_id", buildID))
-	}
 
 	var next stateBlob
 	var applyErr error
@@ -236,8 +224,8 @@ func (e *Engine) Apply(sess *provisionersdk.Session, req *proto.ApplyRequest, ca
 		return &proto.ApplyComplete{Error: "write session state: " + err.Error()}
 	}
 	if applyErr != nil {
-		// The state still names a container the build created, so a later
-		// build can resume or remove it.
+		// The state still records the agent token of the container, so a later
+		// build can replace or remove it.
 		return &proto.ApplyComplete{State: data, Error: applyErr.Error()}
 	}
 	return &proto.ApplyComplete{State: data}
@@ -290,39 +278,16 @@ func (*Engine) Graph(sess *provisionersdk.Session, req *proto.GraphRequest, _ <-
 	}
 }
 
-// applyStart resumes the recorded container when its configuration is
-// current, or creates and starts a new one with the recorded agent token.
+// applyStart replaces the container of the workspace with one built from the
+// current spec, so no state, however stale, resumes a container built from
+// another configuration. It keeps the recorded agent token and mints one only
+// when the state has none, so a replay from an older state still matches the
+// container it creates.
 func (e *Engine) applyStart(ctx context.Context, spec *Spec, metadata *proto.Metadata, workspaceID uuid.UUID, state stateBlob) (stateBlob, error) {
-	config, err := json.Marshal([]any{spec.Container, metadata.GetCoderUrl()})
-	if err != nil {
-		return stateBlob{}, xerrors.Errorf("marshal container config: %w", err)
-	}
-	sum := sha256.Sum256(config)
-	if state.ContainerID != "" && state.AgentToken != "" && state.Config == hex.EncodeToString(sum[:]) {
-		c, err := e.runtime.Status(ctx, state.ContainerID)
-		switch {
-		case err == nil && c.State == ContainerStateRunning:
-			return state, nil
-		case err == nil && (c.State == ContainerStateStopped || c.State == ContainerStateCreated):
-			if err := e.runtime.Start(ctx, state.ContainerID); err != nil {
-				return state, xerrors.Errorf("start container: %w", err)
-			}
-			return state, nil
-		case err == nil:
-			return state, xerrors.Errorf("container is in an unknown state: %s", c.State)
-		case !errors.Is(err, ErrNotFound):
-			return state, xerrors.Errorf("read container: %w", err)
-		}
-		// The container is gone. Create a fresh one with the recorded token, so
-		// a replay of this build from the same state resumes a container whose
-		// token matches the state.
-	}
-
 	next := stateBlob{
 		ContainerID: ContainerName(workspaceID),
 		BuildID:     metadata.GetWorkspaceBuildId(),
 		AgentToken:  state.AgentToken,
-		Config:      hex.EncodeToString(sum[:]),
 	}
 	if next.AgentToken == "" {
 		next.AgentToken = uuid.NewString()
@@ -341,17 +306,17 @@ func (e *Engine) applyStart(ctx context.Context, spec *Spec, metadata *proto.Met
 		CPUMillis:  spec.Container.CPUMillis,
 		MemoryMiB:  spec.Container.MemoryMiB,
 	}
-	_, err = e.runtime.Create(ctx, create)
+	_, err := e.runtime.Create(ctx, create)
 	if errors.Is(err, ErrExists) {
-		// The container has an older configuration, or a crashed build created
-		// it and never recorded its agent token. Replace it.
+		// An earlier start, or a crashed build that never recorded its agent
+		// token, left the container. Replace it.
 		if err := e.removeContainer(ctx, next.ContainerID); err != nil {
-			return stateBlob{}, err
+			return state, err
 		}
 		_, err = e.runtime.Create(ctx, create)
 	}
 	if err != nil {
-		return stateBlob{}, xerrors.Errorf("create container: %w", err)
+		return state, xerrors.Errorf("create container: %w", err)
 	}
 	if err := e.runtime.Start(ctx, next.ContainerID); err != nil {
 		return next, xerrors.Errorf("start container: %w", err)
@@ -359,9 +324,9 @@ func (e *Engine) applyStart(ctx context.Context, spec *Spec, metadata *proto.Met
 	return next, nil
 }
 
-// applyStop stops the container and keeps the state, so a later start can
-// resume it. It stops the deterministic name, which also covers a container
-// that a crashed start left running without a state.
+// applyStop stops the container and keeps the state, so a later start keeps
+// the agent token. It stops the deterministic name, which also covers a
+// container that a crashed start left running without a state.
 func (e *Engine) applyStop(ctx context.Context, workspaceID uuid.UUID, state stateBlob) (stateBlob, error) {
 	err := e.runtime.Stop(ctx, ContainerName(workspaceID), stopTimeout)
 	if err != nil && !errors.Is(err, ErrNotFound) {

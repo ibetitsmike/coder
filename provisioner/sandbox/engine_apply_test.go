@@ -110,27 +110,41 @@ func TestEngineApply(t *testing.T) {
 		require.Equal(t, sandboxtest.OperationDone, h.ops.Status(b))
 	})
 
-	t.Run("StopThenStartKeepsTheContainerAndToken", func(t *testing.T) {
+	t.Run("EveryStartReplacesTheContainer", func(t *testing.T) {
 		t.Parallel()
 
 		h := newHarness(t)
-		start, g := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, nil)
+		name := sandbox.ContainerName(h.ws)
+		x, g := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, nil)
 		first := token(t, g)
-		stop, _ := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_STOP, start.GetState())
+		stop, _ := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_STOP, x.GetState())
 		require.Empty(t, stop.GetError())
-		require.Equal(t, start.GetState(), stop.GetState())
-		require.Equal(t, sandbox.ContainerStateStopped, h.rt.Containers()[sandbox.ContainerName(h.ws)].State)
+		require.Equal(t, x.GetState(), stop.GetState())
+		require.Equal(t, sandbox.ContainerStateStopped, h.rt.Containers()[name].State)
 
+		// A start after a stop, and a start of a running container, each
+		// replace the container and keep the token.
 		again, g := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, stop.GetState())
 		require.Empty(t, again.GetError())
 		require.Equal(t, first, token(t, g))
-		require.Len(t, h.rt.Creates(), 1)
-		require.Equal(t, sandbox.ContainerStateRunning, h.rt.Containers()[sandbox.ContainerName(h.ws)].State)
+		_, g = h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, again.GetState())
+		require.Equal(t, first, token(t, g))
+		require.Equal(t, []string{"Create", "Start", "Stop", "Create", "Stop", "Remove", "Create", "Start", "Create", "Stop", "Remove", "Create", "Start"}, h.rt.Calls())
 
-		// Replaying the start of a running container changes nothing.
-		replay, _ := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, again.GetState())
-		require.Empty(t, replay.GetError())
-		require.Equal(t, []string{"Create", "Start", "Stop", "Status", "Start", "Status"}, h.rt.Calls())
+		// A start with spec Y loses its state, and a rollback to spec X
+		// arrives with the older state of X. It must not keep the Y container.
+		h.archive = specArchive(t, "sandbox.yaml", "alpine:3.20", "alpine:3.21")
+		y, _ := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, x.GetState())
+		require.Empty(t, y.GetError())
+		h.archive = specArchive(t, "sandbox.yaml")
+		rollback, g := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, x.GetState())
+		require.Empty(t, rollback.GetError())
+		require.Equal(t, first, token(t, g))
+		creates := h.rt.Creates()
+		require.Len(t, creates, 5)
+		require.Equal(t, "docker.io/library/alpine:3.21", creates[3].Image)
+		require.Equal(t, "docker.io/library/alpine:3.20", creates[4].Image)
+		require.Equal(t, sandbox.ContainerStateRunning, h.rt.Containers()[name].State)
 	})
 
 	t.Run("RecreateKeepsTheRecordedToken", func(t *testing.T) {
@@ -148,29 +162,14 @@ func TestEngineApply(t *testing.T) {
 		require.Len(t, creates, 2)
 		require.Equal(t, first, creates[1].Env[sandbox.EnvAgentToken])
 
-		// A replay from the older state, as after a lost job state, resumes
-		// the recreated container with the token it runs with.
+		// A replay from the older state, as after a lost job state, replaces
+		// the container again with the same token.
 		replay, g := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, start.GetState())
 		require.Empty(t, replay.GetError())
 		require.Equal(t, first, token(t, g))
-		require.Len(t, h.rt.Creates(), 2)
-	})
-
-	t.Run("StartWithAChangedSpecReplacesTheContainer", func(t *testing.T) {
-		t.Parallel()
-
-		h := newHarness(t)
-		start, g := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, nil)
-		first := token(t, g)
-		h.archive = specArchive(t, "sandbox.yaml", "alpine:3.20", "alpine:3.21")
-
-		again, g := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, start.GetState())
-		require.Empty(t, again.GetError())
-		require.Equal(t, first, token(t, g))
-		creates := h.rt.Creates()
-		require.Len(t, creates, 2)
-		require.Equal(t, "docker.io/library/alpine:3.21", creates[1].Image)
-		require.Equal(t, sandbox.ContainerStateRunning, h.rt.Containers()[sandbox.ContainerName(h.ws)].State)
+		creates = h.rt.Creates()
+		require.Len(t, creates, 3)
+		require.Equal(t, first, creates[2].Env[sandbox.EnvAgentToken])
 	})
 
 	t.Run("CancelEndsABlockedRuntimeCall", func(t *testing.T) {
@@ -245,29 +244,6 @@ func TestEngineApply(t *testing.T) {
 				require.Empty(t, apply.GetError(), tr.String())
 			}
 		}
-	})
-
-	t.Run("AbandonedOperationForcesARecreate", func(t *testing.T) {
-		t.Parallel()
-
-		// A crashed build replaced the container with another image and never
-		// returned a state, so the recorded state still matches the spec.
-		h := newHarness(t)
-		ctx := context.Background()
-		start, _ := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, nil)
-		_, err := h.ops.Begin(ctx, h.ws, h.ops.NewBuild(h.ws))
-		require.NoError(t, err)
-		name := sandbox.ContainerName(h.ws)
-		require.NoError(t, h.rt.Remove(ctx, name))
-		_, err = h.rt.Create(ctx, sandbox.CreateRequest{ID: name, Image: "crashed"})
-		require.NoError(t, err)
-		require.NoError(t, h.rt.Start(ctx, name))
-
-		again, _ := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, start.GetState())
-		require.Empty(t, again.GetError())
-		creates := h.rt.Creates()
-		require.Len(t, creates, 3)
-		require.Equal(t, "docker.io/library/alpine:3.20", creates[2].Image)
 	})
 
 	t.Run("StateNamingAnotherContainerFails", func(t *testing.T) {
@@ -347,5 +323,11 @@ func TestEngineApply(t *testing.T) {
 		require.NoError(t, json.Unmarshal(apply.GetState(), &state))
 		require.Equal(t, sandbox.ContainerName(h.ws), state["container_id"])
 		require.Equal(t, sandboxtest.OperationFailed, h.ops.Status(b))
+
+		// A start that cannot replace the container keeps the recorded token.
+		h.rt.Fail("Remove", xerrors.New("stuck"))
+		again, _ := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, apply.GetState())
+		require.Contains(t, again.GetError(), "stuck")
+		require.Equal(t, apply.GetState(), again.GetState())
 	})
 }
