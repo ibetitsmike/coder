@@ -823,8 +823,10 @@ func TestProcessFiredText(t *testing.T) {
 			wantText: prefix + "is still running and printed 3 new lines matching `ERROR`.\n\nLast 2 matching lines:\n```\nERROR b\nERROR c\n```" +
 				"\n\nThis is the last message for matching lines of this process. Its exit still wakes this chat.",
 		},
-		{name: "ExitOverLines", fired: `{"matched":1,"lines":"ERROR a","exit":{"code":2,"at":"2026-05-29T12:00:00Z"}}`,
-			wantText: prefix + "exited with code 2.\n\nBefore it exited, it printed 1 new line matching `ERROR`.\n\nMatching lines:\n```\nERROR a\n```", wantDone: true},
+		{
+			name: "ExitOverLines", fired: `{"matched":1,"lines":"ERROR a","exit":{"code":2,"at":"2026-05-29T12:00:00Z"}}`,
+			wantText: prefix + "exited with code 2.\n\nBefore it exited, it printed 1 new line matching `ERROR`.\n\nMatching lines:\n```\nERROR a\n```", wantDone: true,
+		},
 		{
 			name: "ExitOverManyLines", fired: `{"matched":3,"lines":"ERROR a\nERROR b\nERROR c","exit":{"code":2,"at":"2026-05-29T12:00:00Z"}}`,
 			wantText: prefix + "exited with code 2.\n\nBefore it exited, it printed 3 new lines matching `ERROR`.\n\nMatching lines:\n```\nERROR a\nERROR b\nERROR c\n```", wantDone: true,
@@ -841,8 +843,10 @@ func TestProcessFiredText(t *testing.T) {
 			name: "ExitOverLinesOnFinalPoll", fired: `{"matched":1,"lines":"ERROR a","exit":{"code":2,"at":"2026-05-29T12:00:00Z"}}`, expired: true,
 			wantText: prefix + "exited with code 2.\n\nBefore it exited, it printed 1 new line matching `ERROR`.\n\nMatching lines:\n```\nERROR a\n```", wantDone: true,
 		},
-		{name: "LostOverLines", fired: `{"matched":2,"lines":"ERROR a\nERROR b","lost":{"reason":"gone","at":"2026-05-29T12:00:00Z"}}`,
-			wantText: "Lost the watch on background process proc-1 (`make`): gone.\n\nBefore the watch was lost, it printed 2 new lines matching `ERROR`.\n\nMatching lines:\n```\nERROR a\nERROR b\n```", wantDone: true},
+		{
+			name: "LostOverLines", fired: `{"matched":2,"lines":"ERROR a\nERROR b","lost":{"reason":"gone","at":"2026-05-29T12:00:00Z"}}`,
+			wantText: "Lost the watch on background process proc-1 (`make`): gone.\n\nBefore the watch was lost, it printed 2 new lines matching `ERROR`.\n\nMatching lines:\n```\nERROR a\nERROR b\n```", wantDone: true,
+		},
 		{name: "Lost", fired: `{"lost":{"reason":"gone","at":"2026-05-29T12:00:00Z"}}`, wantText: "Lost the watch on background process proc-1 (`make`): gone.", wantDone: true},
 		{name: "Invalid", fired: `[]`, wantText: "Lost the watch on background process proc-1 (`make`): its event could not be read.", wantDone: true},
 		{name: "Empty", fired: `{}`},

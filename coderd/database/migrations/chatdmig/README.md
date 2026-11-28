@@ -372,8 +372,10 @@ schedule registers stays active until the next hourly pass.
 | `chat-tests` | `./coderd/x/...`, `./coderd/database/...`, `./enterprise/dbcrypt/...`, the chat, skill, MCP, plugin and fork tests of `./coderd` and `./enterprise/coderd`, and the swagger annotation tests of `./coderd/coderdtest` and `./enterprise/coderd/coderdenttest`. |
 | `agent-sdk`  | `./agent/agentcontext/...`, `./agent/agentgit/...`, `./agent/x/agentmcp/...` and `./codersdk/`.          |
 | `fork-tests` | The fork tests of every other Go package.                                                                |
-| `site`       | `tsc` of `site`, the unit tests of `site/src/pages/AgentsPage` and the fork's other unit test files.     |
+| `site`       | `tsc`, `lint:oxlint` and `lint:design-system` of `site`, the unit tests of `site/src/pages/AgentsPage` and the fork's other unit test files. |
 | `build`      | `go build ./enterprise/cmd/coder`.                                                                       |
+| `pr-size`    | PRs only. Reports the non-generated changed lines from the merge base and warns over 500. It never fails. |
+| `fmt`        | gofumpt and gci leave the non-generated Go files unchanged, and the Biome format check of `make fmt` and `pnpm run check-docs` pass. It runs no Go or site linter. |
 | `forkdb`     | `forkdb/generate.sh` leaves no diff.                                                                     |
 
 A fork test is a top-level test in a test file that differs between the merge

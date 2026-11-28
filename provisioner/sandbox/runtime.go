@@ -25,8 +25,8 @@ const (
 
 // CreateRequest describes the container to create.
 type CreateRequest struct {
-	// ID names the container. The caller derives it from the workspace and
-	// build so a retried create converges on the same container.
+	// ID names the container. The caller derives it from the workspace so a
+	// retried create converges on the same container.
 	ID string
 	// Image is the image reference from the spec.
 	Image string

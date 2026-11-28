@@ -1,7 +1,6 @@
 // This file is fork code: it is the engine of the experimental native
-// sandbox provisioner. It speaks the standard provisionersdk protocol and
-// drives disposable containers through a Runtime, so import, build, stop,
-// and delete keep working through the standard provisionerd runner.
+// sandbox provisioner. It speaks the standard provisionersdk protocol, so a
+// template import runs through the standard provisionerd runner.
 package sandbox
 
 import (
@@ -18,7 +17,6 @@ import (
 	"golang.org/x/xerrors"
 
 	"cdr.dev/slog/v3"
-
 	"github.com/coder/coder/v2/provisionersdk"
 	"github.com/coder/coder/v2/provisionersdk/proto"
 )
@@ -42,8 +40,7 @@ const stopTimeout = 30 * time.Second
 
 // stateBlob is the provisioner state the engine persists between builds.
 // ContainerID names the container of the workspace and AgentToken is the
-// token the container was created with. The token stays the same while the
-// container lives, because a stopped container keeps its environment.
+// token the container was created with.
 type stateBlob struct {
 	ContainerID string `json:"container_id"`
 	BuildID     string `json:"build_id"`
@@ -134,7 +131,8 @@ func (*Engine) Parse(sess *provisionersdk.Session, _ *proto.ParseRequest, _ <-ch
 }
 
 // Plan carries the previous build's state into the session, where Apply
-// and Graph read it.
+// and Graph read it. A stop or destroy leaves no container, so it costs
+// nothing.
 func (*Engine) Plan(sess *provisionersdk.Session, req *proto.PlanRequest, _ <-chan struct{}) *proto.PlanComplete {
 	spec, err := readSpec(sess)
 	if err != nil {
@@ -143,7 +141,94 @@ func (*Engine) Plan(sess *provisionersdk.Session, req *proto.PlanRequest, _ <-ch
 	if err := writeState(sess, req.GetState()); err != nil {
 		return &proto.PlanComplete{Error: "write session state: " + err.Error()}
 	}
+	switch req.GetMetadata().GetWorkspaceTransition() {
+	case proto.WorkspaceTransition_STOP, proto.WorkspaceTransition_DESTROY:
+		return &proto.PlanComplete{}
+	}
 	return &proto.PlanComplete{DailyCost: specDailyCost(spec)}
+}
+
+// Apply records the build in the operation log, drives the runtime through
+// the transition and records the result. A build that a newer build
+// superseded fails before it touches the runtime, or fails without a state
+// when the newer build arrived while it ran.
+func (e *Engine) Apply(sess *provisionersdk.Session, req *proto.ApplyRequest, canceledOrComplete <-chan struct{}) *proto.ApplyComplete {
+	// A cancel of the job stops a blocked runtime call. The result is still
+	// recorded under the session context.
+	ctx, cancel := context.WithCancel(sess.Context())
+	defer cancel()
+	go func() {
+		select {
+		case <-canceledOrComplete:
+		case <-ctx.Done():
+		}
+		cancel()
+	}()
+	metadata := req.GetMetadata()
+	spec, err := readSpec(sess)
+	if err != nil {
+		return &proto.ApplyComplete{Error: err.Error()}
+	}
+	workspaceID, err := uuid.Parse(metadata.GetWorkspaceId())
+	if err != nil {
+		return &proto.ApplyComplete{Error: "invalid workspace id: " + err.Error()}
+	}
+	buildID, err := uuid.Parse(metadata.GetWorkspaceBuildId())
+	if err != nil {
+		return &proto.ApplyComplete{Error: "invalid workspace build id: " + err.Error()}
+	}
+	state, err := readState(sess)
+	if err != nil {
+		return &proto.ApplyComplete{Error: err.Error()}
+	}
+	// The state comes from coderd, which also accepts it as a build
+	// override, so it must never name the container of another workspace.
+	if state.ContainerID != "" && state.ContainerID != ContainerName(workspaceID) {
+		return &proto.ApplyComplete{Error: "the state names the container of another workspace"}
+	}
+	op, err := e.ops.Begin(ctx, workspaceID, buildID)
+	if err != nil {
+		return &proto.ApplyComplete{Error: "begin sandbox operation: " + err.Error()}
+	}
+
+	var next stateBlob
+	var applyErr error
+	switch metadata.GetWorkspaceTransition() {
+	case proto.WorkspaceTransition_START:
+		next, applyErr = e.applyStart(ctx, spec, metadata, workspaceID, state)
+	case proto.WorkspaceTransition_STOP:
+		next, applyErr = e.applyStop(ctx, workspaceID, state)
+	case proto.WorkspaceTransition_DESTROY:
+		applyErr = e.applyDestroy(ctx, workspaceID)
+	default:
+		applyErr = xerrors.New("unknown transition")
+	}
+
+	if err := e.ops.Complete(sess.Context(), op, applyErr); err != nil {
+		if errors.Is(err, ErrSuperseded) {
+			return &proto.ApplyComplete{Error: "complete sandbox operation: " + err.Error()}
+		}
+		if applyErr == nil {
+			applyErr = xerrors.Errorf("complete sandbox operation: %w", err)
+		}
+	}
+
+	var data []byte
+	if next.ContainerID != "" {
+		data, err = json.Marshal(next)
+		if err != nil {
+			return &proto.ApplyComplete{Error: "marshal state: " + err.Error()}
+		}
+	}
+	if err := writeState(sess, data); err != nil {
+		return &proto.ApplyComplete{Error: "write session state: " + err.Error()}
+	}
+	if applyErr != nil {
+		// The state still records the agent token of the container, so a later
+		// build can replace or remove it.
+		return &proto.ApplyComplete{State: data, Error: applyErr.Error()}
+	}
+	return &proto.ApplyComplete{State: data}
 }
 
 // Graph emits one sandbox_container resource with one agent. After an apply
@@ -170,9 +255,14 @@ func (*Engine) Graph(sess *provisionersdk.Session, req *proto.GraphRequest, _ <-
 		}
 		token = state.AgentToken
 	}
+	// A template import has no workspace name.
+	name := req.GetMetadata().GetWorkspaceName()
+	if name == "" {
+		name = "sandbox"
+	}
 	return &proto.GraphComplete{
 		Resources: []*proto.Resource{{
-			Name:      req.GetMetadata().GetWorkspaceName(),
+			Name:      name,
 			Type:      "sandbox_container",
 			DailyCost: specDailyCost(spec),
 			Agents: []*proto.Agent{{
@@ -188,104 +278,19 @@ func (*Engine) Graph(sess *provisionersdk.Session, req *proto.GraphRequest, _ <-
 	}
 }
 
-// Apply records the build in the operation log, drives the runtime through
-// the transition and records the result. A build that a newer build
-// superseded fails before it touches the runtime, or fails without a state
-// when the newer build arrived while it ran.
-func (e *Engine) Apply(sess *provisionersdk.Session, req *proto.ApplyRequest, _ <-chan struct{}) *proto.ApplyComplete {
-	ctx := sess.Context()
-	metadata := req.GetMetadata()
-	spec, err := readSpec(sess)
-	if err != nil {
-		return &proto.ApplyComplete{Error: err.Error()}
-	}
-	workspaceID, err := uuid.Parse(metadata.GetWorkspaceId())
-	if err != nil {
-		return &proto.ApplyComplete{Error: "invalid workspace id: " + err.Error()}
-	}
-	buildID, err := uuid.Parse(metadata.GetWorkspaceBuildId())
-	if err != nil {
-		return &proto.ApplyComplete{Error: "invalid workspace build id: " + err.Error()}
-	}
-	state, err := readState(sess)
-	if err != nil {
-		return &proto.ApplyComplete{Error: err.Error()}
-	}
-
-	op, err := e.ops.Begin(ctx, workspaceID, buildID)
-	if err != nil {
-		return &proto.ApplyComplete{Error: "begin sandbox operation: " + err.Error()}
-	}
-	if op.Abandoned {
-		e.logger.Warn(ctx, "older builds left sandbox operations unfinished",
-			slog.F("workspace_id", workspaceID), slog.F("build_id", buildID))
-	}
-
-	var next stateBlob
-	var applyErr error
-	switch metadata.GetWorkspaceTransition() {
-	case proto.WorkspaceTransition_START:
-		next, applyErr = e.applyStart(ctx, spec, metadata, workspaceID, state)
-	case proto.WorkspaceTransition_STOP:
-		next, applyErr = e.applyStop(ctx, workspaceID, state)
-	case proto.WorkspaceTransition_DESTROY:
-		applyErr = e.applyDestroy(ctx, workspaceID, state)
-	default:
-		applyErr = xerrors.New("unknown transition")
-	}
-
-	if err := e.ops.Complete(ctx, op, applyErr); err != nil {
-		if errors.Is(err, ErrSuperseded) {
-			return &proto.ApplyComplete{Error: "complete sandbox operation: " + err.Error()}
-		}
-		if applyErr == nil {
-			applyErr = xerrors.Errorf("complete sandbox operation: %w", err)
-		}
-	}
-
-	var data []byte
-	if next.ContainerID != "" {
-		data, err = json.Marshal(next)
-		if err != nil {
-			return &proto.ApplyComplete{Error: "marshal state: " + err.Error()}
-		}
-	}
-	if err := writeState(sess, data); err != nil {
-		return &proto.ApplyComplete{Error: "write session state: " + err.Error()}
-	}
-	if applyErr != nil {
-		// The state still names a container the build created, so a later
-		// build can resume or remove it.
-		return &proto.ApplyComplete{State: data, Error: applyErr.Error()}
-	}
-	return &proto.ApplyComplete{State: data}
-}
-
-// applyStart resumes the recorded container, or creates and starts a new
-// one with a fresh agent token.
+// applyStart replaces the container of the workspace with one built from the
+// current spec, so no state, however stale, resumes a container built from
+// another configuration. It keeps the recorded agent token and mints one only
+// when the state has none, so a replay from an older state still matches the
+// container it creates.
 func (e *Engine) applyStart(ctx context.Context, spec *Spec, metadata *proto.Metadata, workspaceID uuid.UUID, state stateBlob) (stateBlob, error) {
-	if state.ContainerID != "" && state.AgentToken != "" {
-		c, err := e.runtime.Status(ctx, state.ContainerID)
-		switch {
-		case err == nil && c.State == ContainerStateRunning:
-			return state, nil
-		case err == nil && (c.State == ContainerStateStopped || c.State == ContainerStateCreated):
-			if err := e.runtime.Start(ctx, state.ContainerID); err != nil {
-				return state, xerrors.Errorf("start container: %w", err)
-			}
-			return state, nil
-		case err == nil:
-			return state, xerrors.Errorf("container is in an unknown state: %s", c.State)
-		case !errors.Is(err, ErrNotFound):
-			return state, xerrors.Errorf("read container: %w", err)
-		}
-		// The container is gone. Create a fresh one.
-	}
-
 	next := stateBlob{
 		ContainerID: ContainerName(workspaceID),
 		BuildID:     metadata.GetWorkspaceBuildId(),
-		AgentToken:  uuid.NewString(),
+		AgentToken:  state.AgentToken,
+	}
+	if next.AgentToken == "" {
+		next.AgentToken = uuid.NewString()
 	}
 	env := maps.Clone(spec.Container.Env)
 	if env == nil {
@@ -303,15 +308,15 @@ func (e *Engine) applyStart(ctx context.Context, spec *Spec, metadata *proto.Met
 	}
 	_, err := e.runtime.Create(ctx, create)
 	if errors.Is(err, ErrExists) {
-		// A crashed worker created the container but never recorded it, so
-		// nothing knows its agent token. Replace it.
+		// An earlier start, or a crashed build that never recorded its agent
+		// token, left the container. Replace it.
 		if err := e.removeContainer(ctx, next.ContainerID); err != nil {
-			return stateBlob{}, err
+			return state, err
 		}
 		_, err = e.runtime.Create(ctx, create)
 	}
 	if err != nil {
-		return stateBlob{}, xerrors.Errorf("create container: %w", err)
+		return state, xerrors.Errorf("create container: %w", err)
 	}
 	if err := e.runtime.Start(ctx, next.ContainerID); err != nil {
 		return next, xerrors.Errorf("start container: %w", err)
@@ -319,31 +324,22 @@ func (e *Engine) applyStart(ctx context.Context, spec *Spec, metadata *proto.Met
 	return next, nil
 }
 
-// applyStop stops the container and keeps the state, so a later start can
-// resume it. Without a recorded container it stops the deterministic name,
-// which a crashed start may have left running.
+// applyStop stops the container and keeps the state, so a later start keeps
+// the agent token. It stops the deterministic name, which also covers a
+// container that a crashed start left running without a state.
 func (e *Engine) applyStop(ctx context.Context, workspaceID uuid.UUID, state stateBlob) (stateBlob, error) {
-	id := state.ContainerID
-	if id == "" {
-		id = ContainerName(workspaceID)
-	}
-	err := e.runtime.Stop(ctx, id, stopTimeout)
+	err := e.runtime.Stop(ctx, ContainerName(workspaceID), stopTimeout)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return state, xerrors.Errorf("stop container: %w", err)
 	}
 	return state, nil
 }
 
-// applyDestroy removes the container of the workspace. Without a recorded
-// container it removes the deterministic name, which only this workspace
-// uses, so a crashed first build leaves nothing behind. A corrupt state has
-// already failed the apply.
-func (e *Engine) applyDestroy(ctx context.Context, workspaceID uuid.UUID, state stateBlob) error {
-	id := state.ContainerID
-	if id == "" {
-		id = ContainerName(workspaceID)
-	}
-	return e.removeContainer(ctx, id)
+// applyDestroy removes the container of the workspace by its deterministic
+// name, which only this workspace uses, so a crashed first build leaves
+// nothing behind. A corrupt state has already failed the apply.
+func (e *Engine) applyDestroy(ctx context.Context, workspaceID uuid.UUID) error {
+	return e.removeContainer(ctx, ContainerName(workspaceID))
 }
 
 // removeContainer stops and removes a container. A missing container is

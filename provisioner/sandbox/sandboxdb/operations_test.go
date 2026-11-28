@@ -9,7 +9,6 @@ import (
 	"golang.org/x/xerrors"
 
 	"cdr.dev/slog/v3/sloggers/slogtest"
-
 	"github.com/coder/coder/v2/coderd/coderdtest"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
@@ -113,6 +112,11 @@ func TestOperations(t *testing.T) {
 				_, err = h.ops.Begin(ctx, ws, build)
 				require.ErrorIs(t, err, sandbox.ErrSuperseded, "a second worker for the build must not claim")
 
+				lost := op
+				lost.ID = uuid.New()
+				require.ErrorIs(t, h.ops.Complete(ctx, lost, nil), sandbox.ErrSuperseded, "only the claimed operation may complete")
+				require.Equal(t, sandboxtest.OperationClaimed, h.status(op))
+
 				require.NoError(t, h.ops.Complete(ctx, op, errFailed))
 				require.Equal(t, sandboxtest.OperationFailed, h.status(op))
 				require.ErrorIs(t, h.ops.Complete(ctx, op, nil), sandbox.ErrSuperseded)
@@ -144,6 +148,9 @@ func TestOperations(t *testing.T) {
 				stale := h.newBuild(ws)
 				latest := h.newBuild(ws)
 
+				forged := op1
+				forged.Generation = 3
+				require.ErrorIs(t, h.ops.Complete(ctx, forged, nil), sandbox.ErrSuperseded, "the stored generation fences, not the caller's")
 				require.ErrorIs(t, h.ops.Complete(ctx, op1, nil), sandbox.ErrSuperseded)
 				_, err = h.ops.Begin(ctx, ws, stale)
 				require.ErrorIs(t, err, sandbox.ErrSuperseded, "a stale build must not begin")

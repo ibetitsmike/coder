@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -24,14 +25,16 @@ func TestMain(m *testing.M) {
 }
 
 // specArchive tars one testdata file as the template upload does: the spec
-// at the archive root, named sandbox.yaml whatever the fixture name.
-func specArchive(t *testing.T, name string) []byte {
+// at the archive root, named sandbox.yaml whatever the fixture name. The
+// old, new pairs in replace edit the fixture.
+func specArchive(t *testing.T, name string, replace ...string) []byte {
 	t.Helper()
 
 	var buf bytes.Buffer
 	w := tar.NewWriter(&buf)
-	data, err := os.ReadFile(filepath.Join("testdata", name))
+	raw, err := os.ReadFile(filepath.Join("testdata", name))
 	require.NoError(t, err)
+	data := []byte(strings.NewReplacer(replace...).Replace(string(raw)))
 	require.NoError(t, w.WriteHeader(&tar.Header{
 		Name: sandbox.SpecFileName,
 		Mode: 0o600,
@@ -43,9 +46,8 @@ func specArchive(t *testing.T, name string) []byte {
 	return buf.Bytes()
 }
 
-// session serves an engine over fakes in memory, configures a session and
-// unpacks the archive, as the provisionerd runner does at the start of every
-// job.
+// session serves the engine in memory, configures a session and unpacks the
+// archive, as the provisionerd runner does at the start of every job.
 func session(t *testing.T, archive []byte) proto.DRPCProvisioner_SessionClient {
 	t.Helper()
 	return serve(t, sandboxtest.NewFakeRuntime(), sandboxtest.NewFakeOperations(), archive)
@@ -155,6 +157,27 @@ func TestEngineImport(t *testing.T) {
 		stop := graph(t, s, proto.GraphSource_SOURCE_PLAN, proto.WorkspaceTransition_STOP)
 		require.Empty(t, stop.GetError())
 		require.Empty(t, stop.GetResources())
+
+		// A template import graphs without a workspace name.
+		imported := call(t, s, &proto.Request{Type: &proto.Request_Graph{Graph: &proto.GraphRequest{
+			Metadata: &proto.Metadata{WorkspaceTransition: proto.WorkspaceTransition_START},
+			Source:   proto.GraphSource_SOURCE_PLAN,
+		}}}).GetGraph()
+		require.Empty(t, imported.GetError())
+		require.Equal(t, "sandbox", imported.GetResources()[0].GetName())
+	})
+
+	t.Run("StopAndDestroyCostNothing", func(t *testing.T) {
+		t.Parallel()
+
+		s := session(t, specArchive(t, "sandbox.yaml"))
+		for _, transition := range []proto.WorkspaceTransition{proto.WorkspaceTransition_STOP, proto.WorkspaceTransition_DESTROY} {
+			p := call(t, s, &proto.Request{Type: &proto.Request_Plan{Plan: &proto.PlanRequest{
+				Metadata: &proto.Metadata{WorkspaceTransition: transition},
+			}}}).GetPlan()
+			require.Empty(t, p.GetError(), transition)
+			require.Zero(t, p.GetDailyCost(), transition)
+		}
 	})
 
 	t.Run("GraphFromStateUsesRecordedToken", func(t *testing.T) {
@@ -183,7 +206,7 @@ func TestEngineImport(t *testing.T) {
 		}
 	})
 
-	t.Run("ApplyWithoutIDsFails", func(t *testing.T) {
+	t.Run("ApplyFailsWithoutState", func(t *testing.T) {
 		t.Parallel()
 
 		s := session(t, specArchive(t, "sandbox.yaml"))
