@@ -247,6 +247,43 @@ func TestEngineApply(t *testing.T) {
 		}
 	})
 
+	t.Run("AbandonedOperationForcesARecreate", func(t *testing.T) {
+		t.Parallel()
+
+		// A crashed build replaced the container with another image and never
+		// returned a state, so the recorded state still matches the spec.
+		h := newHarness(t)
+		ctx := context.Background()
+		start, _ := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, nil)
+		_, err := h.ops.Begin(ctx, h.ws, h.ops.NewBuild(h.ws))
+		require.NoError(t, err)
+		name := sandbox.ContainerName(h.ws)
+		require.NoError(t, h.rt.Remove(ctx, name))
+		_, err = h.rt.Create(ctx, sandbox.CreateRequest{ID: name, Image: "crashed"})
+		require.NoError(t, err)
+		require.NoError(t, h.rt.Start(ctx, name))
+
+		again, _ := h.build(t, h.ops.NewBuild(h.ws), proto.WorkspaceTransition_START, start.GetState())
+		require.Empty(t, again.GetError())
+		creates := h.rt.Creates()
+		require.Len(t, creates, 3)
+		require.Equal(t, "docker.io/library/alpine:3.20", creates[2].Image)
+	})
+
+	t.Run("StateNamingAnotherContainerFails", func(t *testing.T) {
+		t.Parallel()
+
+		h := newHarness(t)
+		other := sandbox.ContainerName(uuid.New())
+		_, err := h.rt.Create(context.Background(), sandbox.CreateRequest{ID: other})
+		require.NoError(t, err)
+		b := h.ops.NewBuild(h.ws)
+		apply, _ := h.build(t, b, proto.WorkspaceTransition_DESTROY, []byte(`{"container_id":"`+other+`"}`))
+		require.Contains(t, apply.GetError(), "another workspace")
+		require.Contains(t, h.rt.Containers(), other)
+		require.Empty(t, h.ops.Status(b))
+	})
+
 	t.Run("SupersededBuildDoesNotTouchTheRuntime", func(t *testing.T) {
 		t.Parallel()
 

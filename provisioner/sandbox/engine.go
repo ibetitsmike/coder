@@ -187,12 +187,19 @@ func (e *Engine) Apply(sess *provisionersdk.Session, req *proto.ApplyRequest, ca
 	if err != nil {
 		return &proto.ApplyComplete{Error: err.Error()}
 	}
-
+	// The state comes from coderd, which also accepts it as a build
+	// override, so it must never name the container of another workspace.
+	if state.ContainerID != "" && state.ContainerID != ContainerName(workspaceID) {
+		return &proto.ApplyComplete{Error: "the state names the container of another workspace"}
+	}
 	op, err := e.ops.Begin(ctx, workspaceID, buildID)
 	if err != nil {
 		return &proto.ApplyComplete{Error: "begin sandbox operation: " + err.Error()}
 	}
 	if op.Abandoned {
+		// An older build may have replaced the container without recording
+		// it, so a start must not trust the recorded configuration.
+		state.Config = ""
 		e.logger.Warn(ctx, "older builds left sandbox operations unfinished",
 			slog.F("workspace_id", workspaceID), slog.F("build_id", buildID))
 	}
@@ -205,7 +212,7 @@ func (e *Engine) Apply(sess *provisionersdk.Session, req *proto.ApplyRequest, ca
 	case proto.WorkspaceTransition_STOP:
 		next, applyErr = e.applyStop(ctx, workspaceID, state)
 	case proto.WorkspaceTransition_DESTROY:
-		applyErr = e.applyDestroy(ctx, workspaceID, state)
+		applyErr = e.applyDestroy(ctx, workspaceID)
 	default:
 		applyErr = xerrors.New("unknown transition")
 	}
@@ -354,30 +361,21 @@ func (e *Engine) applyStart(ctx context.Context, spec *Spec, metadata *proto.Met
 }
 
 // applyStop stops the container and keeps the state, so a later start can
-// resume it. Without a recorded container it stops the deterministic name,
-// which a crashed start may have left running.
+// resume it. It stops the deterministic name, which also covers a container
+// that a crashed start left running without a state.
 func (e *Engine) applyStop(ctx context.Context, workspaceID uuid.UUID, state stateBlob) (stateBlob, error) {
-	id := state.ContainerID
-	if id == "" {
-		id = ContainerName(workspaceID)
-	}
-	err := e.runtime.Stop(ctx, id, stopTimeout)
+	err := e.runtime.Stop(ctx, ContainerName(workspaceID), stopTimeout)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return state, xerrors.Errorf("stop container: %w", err)
 	}
 	return state, nil
 }
 
-// applyDestroy removes the container of the workspace. Without a recorded
-// container it removes the deterministic name, which only this workspace
-// uses, so a crashed first build leaves nothing behind. A corrupt state has
-// already failed the apply.
-func (e *Engine) applyDestroy(ctx context.Context, workspaceID uuid.UUID, state stateBlob) error {
-	id := state.ContainerID
-	if id == "" {
-		id = ContainerName(workspaceID)
-	}
-	return e.removeContainer(ctx, id)
+// applyDestroy removes the container of the workspace by its deterministic
+// name, which only this workspace uses, so a crashed first build leaves
+// nothing behind. A corrupt state has already failed the apply.
+func (e *Engine) applyDestroy(ctx context.Context, workspaceID uuid.UUID) error {
+	return e.removeContainer(ctx, ContainerName(workspaceID))
 }
 
 // removeContainer stops and removes a container. A missing container is
