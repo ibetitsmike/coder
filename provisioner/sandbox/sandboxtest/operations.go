@@ -83,7 +83,11 @@ func (f *FakeOperations) Begin(_ context.Context, workspaceID, buildID uuid.UUID
 }
 
 // Complete records the result as sandbox.Operations describes.
-func (f *FakeOperations) Complete(_ context.Context, op sandbox.Operation, applyErr error) error {
+func (f *FakeOperations) Complete(ctx context.Context, op sandbox.Operation, applyErr error) error {
+	// Like the database, a canceled context records nothing.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	claimed := f.builds[op.BuildID]
