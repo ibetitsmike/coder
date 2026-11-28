@@ -6,6 +6,7 @@ import (
 	"context"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +21,8 @@ import (
 type FakeRuntime struct {
 	mu         sync.Mutex
 	containers map[string]sandbox.Container
+	mounts     map[string][]sandbox.VolumeMount
+	volumes    map[string]bool
 	creates    []sandbox.CreateRequest
 	order      []string
 	failures   map[string]error
@@ -31,12 +34,14 @@ var _ sandbox.Runtime = (*FakeRuntime)(nil)
 func NewFakeRuntime() *FakeRuntime {
 	return &FakeRuntime{
 		containers: make(map[string]sandbox.Container),
+		mounts:     make(map[string][]sandbox.VolumeMount),
+		volumes:    make(map[string]bool),
 		failures:   make(map[string]error),
 	}
 }
 
 // Fail makes the next call of the named method return err. The method name is
-// one of Create, Start, Stop, Remove, Status.
+// one of Create, Start, Stop, Remove, Status, Volumes, RemoveVolume.
 func (f *FakeRuntime) Fail(method string, err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -73,7 +78,7 @@ func (f *FakeRuntime) record(method string) error {
 	return err
 }
 
-// Create makes the container in the created state.
+// Create makes the missing volumes and the container in the created state.
 func (f *FakeRuntime) Create(_ context.Context, req sandbox.CreateRequest) (sandbox.Container, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -89,7 +94,11 @@ func (f *FakeRuntime) Create(_ context.Context, req sandbox.CreateRequest) (sand
 		State:     sandbox.ContainerStateCreated,
 		CreatedAt: time.Now(),
 	}
+	for _, v := range req.Volumes {
+		f.volumes[v.Name] = true
+	}
 	f.containers[req.ID] = c
+	f.mounts[req.ID] = slices.Clone(req.Volumes)
 	f.creates = append(f.creates, req)
 	return c, nil
 }
@@ -143,6 +152,7 @@ func (f *FakeRuntime) Remove(_ context.Context, containerID string) error {
 		return xerrors.Errorf("%w: %s", sandbox.ErrNotFound, containerID)
 	}
 	delete(f.containers, containerID)
+	delete(f.mounts, containerID)
 	return nil
 }
 
@@ -158,4 +168,40 @@ func (f *FakeRuntime) Status(_ context.Context, containerID string) (sandbox.Con
 		return sandbox.Container{}, xerrors.Errorf("%w: %s", sandbox.ErrNotFound, containerID)
 	}
 	return c, nil
+}
+
+// Volumes lists the volumes whose names start with prefix, sorted.
+func (f *FakeRuntime) Volumes(_ context.Context, prefix string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.record("Volumes"); err != nil {
+		return nil, err
+	}
+	var names []string
+	for name := range f.volumes {
+		if strings.HasPrefix(name, prefix) {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return names, nil
+}
+
+// RemoveVolume deletes a volume that no container mounts.
+func (f *FakeRuntime) RemoveVolume(_ context.Context, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.record("RemoveVolume"); err != nil {
+		return err
+	}
+	if !f.volumes[name] {
+		return xerrors.Errorf("%w: volume %s", sandbox.ErrNotFound, name)
+	}
+	for id, mounts := range f.mounts {
+		if slices.ContainsFunc(mounts, func(m sandbox.VolumeMount) bool { return m.Name == name }) {
+			return xerrors.Errorf("volume %s is in use by %s", name, id)
+		}
+	}
+	delete(f.volumes, name)
+	return nil
 }

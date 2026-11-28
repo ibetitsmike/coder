@@ -109,6 +109,37 @@ func RuntimeContract(t *testing.T, image string, newRuntime func(t *testing.T) s
 		require.Equal(t, sandbox.ContainerStateCreated, create(t, rt, req).State)
 	})
 
+	t.Run("VolumeOutlivesTheContainer", func(t *testing.T) {
+		t.Parallel()
+		rt, req := setup(t)
+		vol := req.ID + "-data"
+		req.Volumes = []sandbox.VolumeMount{{Name: vol, Path: "/data"}}
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitSuperLong)
+			defer cancel()
+			_ = rt.Remove(ctx, req.ID)
+			_ = rt.RemoveVolume(ctx, vol)
+		})
+		volumes := func() []string {
+			t.Helper()
+			names, err := rt.Volumes(t.Context(), req.ID+"-")
+			require.NoError(t, err)
+			return names
+		}
+		create(t, rt, req)
+		require.Equal(t, []string{vol}, volumes())
+		err := rt.RemoveVolume(t.Context(), vol)
+		require.Error(t, err, "a mounted volume must not be removed")
+		require.NotErrorIs(t, err, sandbox.ErrNotFound)
+		require.NoError(t, rt.Remove(t.Context(), req.ID))
+		require.Equal(t, []string{vol}, volumes())
+		create(t, rt, req)
+		require.NoError(t, rt.Remove(t.Context(), req.ID))
+		require.NoError(t, rt.RemoveVolume(t.Context(), vol))
+		require.Empty(t, volumes())
+		require.ErrorIs(t, rt.RemoveVolume(t.Context(), vol), sandbox.ErrNotFound)
+	})
+
 	t.Run("UnknownRejected", func(t *testing.T) {
 		t.Parallel()
 		rt, req := setup(t)

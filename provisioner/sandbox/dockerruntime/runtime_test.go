@@ -85,6 +85,58 @@ func TestForeignContainer(t *testing.T) {
 	require.Equal(t, container.StateCreated, in.Container.State.Status)
 }
 
+// TestVolumeKeepsData checks that a file written to a volume is still there
+// in a new container, and that the runtime refuses a volume of the name that
+// it did not create.
+func TestVolumeKeepsData(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t)
+	ctx := testutil.Context(t, testutil.WaitSuperLong)
+	c, err := client.New(client.FromEnv, client.WithAPIVersionNegotiation())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	id := "sbx-volume-" + uuid.NewString()
+	vol := id + "-data"
+	t.Cleanup(func() {
+		_ = rt.Remove(context.Background(), id)
+		_ = rt.RemoveVolume(context.Background(), vol)
+	})
+	run := func(script string) int {
+		t.Helper()
+		_, err := rt.Create(ctx, sandbox.CreateRequest{
+			ID: id, Image: testImage, Entrypoint: []string{"sh", "-c", script},
+			Volumes: []sandbox.VolumeMount{{Name: vol, Path: "/data"}},
+		})
+		require.NoError(t, err)
+		require.NoError(t, rt.Start(ctx, id))
+		require.Eventually(t, func() bool {
+			got, err := rt.Status(ctx, id)
+			return err == nil && got.State == sandbox.ContainerStateStopped
+		}, testutil.WaitLong, testutil.IntervalFast)
+		in, err := c.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+		require.NoError(t, err)
+		require.NoError(t, rt.Remove(ctx, id))
+		return in.Container.State.ExitCode
+	}
+	require.Equal(t, 0, run("echo kept > /data/marker"))
+	require.Equal(t, 0, run("test \"$(cat /data/marker)\" = kept"))
+
+	foreign := "sbx-foreign-" + uuid.NewString()
+	_, err = c.VolumeCreate(ctx, client.VolumeCreateOptions{Name: foreign})
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = c.VolumeRemove(context.Background(), foreign, client.VolumeRemoveOptions{}) })
+	_, err = rt.Create(ctx, sandbox.CreateRequest{
+		ID: "sbx-foreign-" + uuid.NewString(), Image: testImage,
+		Volumes: []sandbox.VolumeMount{{Name: foreign, Path: "/data"}},
+	})
+	require.ErrorIs(t, err, dockerruntime.ErrNotOwned)
+	require.ErrorIs(t, rt.RemoveVolume(ctx, foreign), dockerruntime.ErrNotOwned)
+	names, err := rt.Volumes(ctx, foreign)
+	require.NoError(t, err)
+	require.Empty(t, names)
+}
+
 // TestCreateMapsLoopbackToTheHost checks what the runtime asks the daemon
 // for: the agent URL with a loopback host names the Docker host instead, the
 // container maps that name to the host gateway, and other variables stay.

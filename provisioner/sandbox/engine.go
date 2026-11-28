@@ -67,6 +67,12 @@ func ContainerName(workspaceID uuid.UUID) string {
 	return "sbx-" + workspaceID.String()
 }
 
+// volumePrefix starts the volume names of a workspace. A UUID has a fixed
+// length, so no other workspace's volume starts with it.
+func volumePrefix(workspaceID uuid.UUID) string {
+	return ContainerName(workspaceID) + "-"
+}
+
 // Engine implements provisionersdk.Server against a Runtime.
 type Engine struct {
 	runtime Runtime
@@ -323,6 +329,9 @@ func (e *Engine) applyStart(ctx context.Context, spec *Spec, metadata *proto.Met
 		CPUMillis:  spec.Container.CPUMillis,
 		MemoryMiB:  spec.Container.MemoryMiB,
 	}
+	for _, v := range spec.Container.Volumes {
+		create.Volumes = append(create.Volumes, VolumeMount{Name: volumePrefix(workspaceID) + v.Name, Path: v.Path})
+	}
 	_, err := e.runtime.Create(ctx, create)
 	if errors.Is(err, ErrExists) {
 		// An earlier start, or a crashed build that never recorded its agent
@@ -354,9 +363,23 @@ func (e *Engine) applyStop(ctx context.Context, workspaceID uuid.UUID, state sta
 
 // applyDestroy removes the container of the workspace by its deterministic
 // name, which only this workspace uses, so a crashed first build leaves
-// nothing behind. A corrupt state has already failed the apply.
+// nothing behind. It then removes every volume under the workspace prefix,
+// which also covers a volume that an older spec declared. A corrupt state has
+// already failed the apply.
 func (e *Engine) applyDestroy(ctx context.Context, workspaceID uuid.UUID) error {
-	return e.removeContainer(ctx, ContainerName(workspaceID))
+	if err := e.removeContainer(ctx, ContainerName(workspaceID)); err != nil {
+		return err
+	}
+	volumes, err := e.runtime.Volumes(ctx, volumePrefix(workspaceID))
+	if err != nil {
+		return xerrors.Errorf("list volumes: %w", err)
+	}
+	for _, name := range volumes {
+		if err := e.runtime.RemoveVolume(ctx, name); err != nil && !errors.Is(err, ErrNotFound) {
+			return xerrors.Errorf("remove volume %s: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // removeContainer stops and removes a container. A missing container is
