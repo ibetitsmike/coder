@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/coder/coder/v2/codersdk/drpcsdk"
 	"github.com/coder/coder/v2/provisioner/sandbox"
+	"github.com/coder/coder/v2/provisioner/sandbox/sandboxtest"
 	"github.com/coder/coder/v2/provisionersdk"
 	"github.com/coder/coder/v2/provisionersdk/proto"
 	"github.com/coder/coder/v2/testutil"
@@ -23,14 +25,16 @@ func TestMain(m *testing.M) {
 }
 
 // specArchive tars one testdata file as the template upload does: the spec
-// at the archive root, named sandbox.yaml whatever the fixture name.
-func specArchive(t *testing.T, name string) []byte {
+// at the archive root, named sandbox.yaml whatever the fixture name. The
+// old, new pairs in replace edit the fixture.
+func specArchive(t *testing.T, name string, replace ...string) []byte {
 	t.Helper()
 
 	var buf bytes.Buffer
 	w := tar.NewWriter(&buf)
-	data, err := os.ReadFile(filepath.Join("testdata", name))
+	raw, err := os.ReadFile(filepath.Join("testdata", name))
 	require.NoError(t, err)
+	data := []byte(strings.NewReplacer(replace...).Replace(string(raw)))
 	require.NoError(t, w.WriteHeader(&tar.Header{
 		Name: sandbox.SpecFileName,
 		Mode: 0o600,
@@ -46,6 +50,11 @@ func specArchive(t *testing.T, name string) []byte {
 // archive, as the provisionerd runner does at the start of every job.
 func session(t *testing.T, archive []byte) proto.DRPCProvisioner_SessionClient {
 	t.Helper()
+	return serve(t, sandboxtest.NewFakeRuntime(), sandboxtest.NewFakeOperations(), archive)
+}
+
+func serve(t *testing.T, rt sandbox.Runtime, ops sandbox.Operations, archive []byte) proto.DRPCProvisioner_SessionClient {
+	t.Helper()
 
 	client, server := drpcsdk.MemTransportPipe()
 	t.Cleanup(func() {
@@ -57,7 +66,7 @@ func session(t *testing.T, archive []byte) proto.DRPCProvisioner_SessionClient {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = sandbox.Serve(ctx, &provisionersdk.ServeOptions{
+		_ = sandbox.Serve(ctx, rt, ops, &provisionersdk.ServeOptions{
 			Listener:      server,
 			WorkDirectory: t.TempDir(),
 			Logger:        testutil.Logger(t),
@@ -205,7 +214,7 @@ func TestEngineImport(t *testing.T) {
 		apply := call(t, s, &proto.Request{Type: &proto.Request_Apply{Apply: &proto.ApplyRequest{
 			Metadata: &proto.Metadata{WorkspaceTransition: proto.WorkspaceTransition_START},
 		}}}).GetApply()
-		require.NotEmpty(t, apply.GetError())
+		require.Contains(t, apply.GetError(), "invalid workspace id")
 		require.Empty(t, apply.GetState())
 	})
 }

@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/spf13/afero"
@@ -28,6 +29,15 @@ const SpecFileName = "sandbox.yaml"
 // Apply, and all calls of one job share the session directory.
 const StateFileName = "sandbox-state.json"
 
+// The environment variables the engine sets so the agent in the container
+// can reach coderd and authenticate.
+const (
+	EnvAgentToken = ReservedEnvPrefix + "TOKEN"
+	EnvAgentURL   = ReservedEnvPrefix + "URL"
+)
+
+const stopTimeout = 30 * time.Second
+
 // stateBlob is the provisioner state the engine persists between builds.
 // ContainerID names the container of the workspace and AgentToken is the
 // token the container was created with.
@@ -37,19 +47,29 @@ type stateBlob struct {
 	AgentToken  string `json:"agent_token"`
 }
 
-// Engine implements provisionersdk.Server.
-type Engine struct {
-	logger slog.Logger
+// ContainerName is the container ID of a workspace. It is deterministic so
+// a build can find a container that a crashed worker created but did not
+// record.
+func ContainerName(workspaceID uuid.UUID) string {
+	return "sbx-" + workspaceID.String()
 }
 
-// NewEngine returns a sandbox engine.
-func NewEngine(logger slog.Logger) *Engine {
-	return &Engine{logger: logger}
+// Engine implements provisionersdk.Server against a Runtime.
+type Engine struct {
+	runtime Runtime
+	ops     Operations
+	logger  slog.Logger
+}
+
+// NewEngine returns an engine that drives containers through runtime and
+// records every build in ops before it touches the runtime.
+func NewEngine(runtime Runtime, ops Operations, logger slog.Logger) *Engine {
+	return &Engine{runtime: runtime, ops: ops, logger: logger}
 }
 
 // Serve serves the sandbox provisioner over the listener in options.
-func Serve(ctx context.Context, options *provisionersdk.ServeOptions) error {
-	return provisionersdk.Serve(ctx, NewEngine(options.Logger), options)
+func Serve(ctx context.Context, runtime Runtime, ops Operations, options *provisionersdk.ServeOptions) error {
+	return provisionersdk.Serve(ctx, NewEngine(runtime, ops, options.Logger), options)
 }
 
 // readSpec parses the spec that Init unpacked into the work directory.
@@ -128,9 +148,87 @@ func (*Engine) Plan(sess *provisionersdk.Session, req *proto.PlanRequest, _ <-ch
 	return &proto.PlanComplete{DailyCost: specDailyCost(spec)}
 }
 
-// Apply cannot drive a container yet, so every build fails without a state.
-func (*Engine) Apply(_ *provisionersdk.Session, _ *proto.ApplyRequest, _ <-chan struct{}) *proto.ApplyComplete {
-	return &proto.ApplyComplete{Error: "the sandbox engine cannot apply builds yet"}
+// Apply records the build in the operation log, drives the runtime through
+// the transition and records the result. A build that a newer build
+// superseded fails before it touches the runtime, or fails without a state
+// when the newer build arrived while it ran.
+func (e *Engine) Apply(sess *provisionersdk.Session, req *proto.ApplyRequest, canceledOrComplete <-chan struct{}) *proto.ApplyComplete {
+	// A cancel of the job stops a blocked runtime call. The result is still
+	// recorded under the session context.
+	ctx, cancel := context.WithCancel(sess.Context())
+	defer cancel()
+	go func() {
+		select {
+		case <-canceledOrComplete:
+		case <-ctx.Done():
+		}
+		cancel()
+	}()
+	metadata := req.GetMetadata()
+	spec, err := readSpec(sess)
+	if err != nil {
+		return &proto.ApplyComplete{Error: err.Error()}
+	}
+	workspaceID, err := uuid.Parse(metadata.GetWorkspaceId())
+	if err != nil {
+		return &proto.ApplyComplete{Error: "invalid workspace id: " + err.Error()}
+	}
+	buildID, err := uuid.Parse(metadata.GetWorkspaceBuildId())
+	if err != nil {
+		return &proto.ApplyComplete{Error: "invalid workspace build id: " + err.Error()}
+	}
+	state, err := readState(sess)
+	if err != nil {
+		return &proto.ApplyComplete{Error: err.Error()}
+	}
+	// The state comes from coderd, which also accepts it as a build
+	// override, so it must never name the container of another workspace.
+	if state.ContainerID != "" && state.ContainerID != ContainerName(workspaceID) {
+		return &proto.ApplyComplete{Error: "the state names the container of another workspace"}
+	}
+	op, err := e.ops.Begin(ctx, workspaceID, buildID)
+	if err != nil {
+		return &proto.ApplyComplete{Error: "begin sandbox operation: " + err.Error()}
+	}
+
+	var next stateBlob
+	var applyErr error
+	switch metadata.GetWorkspaceTransition() {
+	case proto.WorkspaceTransition_START:
+		next, applyErr = e.applyStart(ctx, spec, metadata, workspaceID, state)
+	case proto.WorkspaceTransition_STOP:
+		next, applyErr = e.applyStop(ctx, workspaceID, state)
+	case proto.WorkspaceTransition_DESTROY:
+		applyErr = e.applyDestroy(ctx, workspaceID)
+	default:
+		applyErr = xerrors.New("unknown transition")
+	}
+
+	if err := e.ops.Complete(sess.Context(), op, applyErr); err != nil {
+		if errors.Is(err, ErrSuperseded) {
+			return &proto.ApplyComplete{Error: "complete sandbox operation: " + err.Error()}
+		}
+		if applyErr == nil {
+			applyErr = xerrors.Errorf("complete sandbox operation: %w", err)
+		}
+	}
+
+	var data []byte
+	if next.ContainerID != "" {
+		data, err = json.Marshal(next)
+		if err != nil {
+			return &proto.ApplyComplete{Error: "marshal state: " + err.Error()}
+		}
+	}
+	if err := writeState(sess, data); err != nil {
+		return &proto.ApplyComplete{Error: "write session state: " + err.Error()}
+	}
+	if applyErr != nil {
+		// The state still records the agent token of the container, so a later
+		// build can replace or remove it.
+		return &proto.ApplyComplete{State: data, Error: applyErr.Error()}
+	}
+	return &proto.ApplyComplete{State: data}
 }
 
 // Graph emits one sandbox_container resource with one agent. After an apply
@@ -178,4 +276,80 @@ func (*Engine) Graph(sess *provisionersdk.Session, req *proto.GraphRequest, _ <-
 			}},
 		}},
 	}
+}
+
+// applyStart replaces the container of the workspace with one built from the
+// current spec, so no state, however stale, resumes a container built from
+// another configuration. It keeps the recorded agent token and mints one only
+// when the state has none, so a replay from an older state still matches the
+// container it creates.
+func (e *Engine) applyStart(ctx context.Context, spec *Spec, metadata *proto.Metadata, workspaceID uuid.UUID, state stateBlob) (stateBlob, error) {
+	next := stateBlob{
+		ContainerID: ContainerName(workspaceID),
+		BuildID:     metadata.GetWorkspaceBuildId(),
+		AgentToken:  state.AgentToken,
+	}
+	if next.AgentToken == "" {
+		next.AgentToken = uuid.NewString()
+	}
+	env := maps.Clone(spec.Container.Env)
+	if env == nil {
+		env = map[string]string{}
+	}
+	env[EnvAgentToken] = next.AgentToken
+	env[EnvAgentURL] = metadata.GetCoderUrl()
+	create := CreateRequest{
+		ID:         next.ContainerID,
+		Image:      spec.Container.Image,
+		Entrypoint: spec.Container.Entrypoint,
+		Env:        env,
+		CPUMillis:  spec.Container.CPUMillis,
+		MemoryMiB:  spec.Container.MemoryMiB,
+	}
+	_, err := e.runtime.Create(ctx, create)
+	if errors.Is(err, ErrExists) {
+		// An earlier start, or a crashed build that never recorded its agent
+		// token, left the container. Replace it.
+		if err := e.removeContainer(ctx, next.ContainerID); err != nil {
+			return state, err
+		}
+		_, err = e.runtime.Create(ctx, create)
+	}
+	if err != nil {
+		return state, xerrors.Errorf("create container: %w", err)
+	}
+	if err := e.runtime.Start(ctx, next.ContainerID); err != nil {
+		return next, xerrors.Errorf("start container: %w", err)
+	}
+	return next, nil
+}
+
+// applyStop stops the container and keeps the state, so a later start keeps
+// the agent token. It stops the deterministic name, which also covers a
+// container that a crashed start left running without a state.
+func (e *Engine) applyStop(ctx context.Context, workspaceID uuid.UUID, state stateBlob) (stateBlob, error) {
+	err := e.runtime.Stop(ctx, ContainerName(workspaceID), stopTimeout)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return state, xerrors.Errorf("stop container: %w", err)
+	}
+	return state, nil
+}
+
+// applyDestroy removes the container of the workspace by its deterministic
+// name, which only this workspace uses, so a crashed first build leaves
+// nothing behind. A corrupt state has already failed the apply.
+func (e *Engine) applyDestroy(ctx context.Context, workspaceID uuid.UUID) error {
+	return e.removeContainer(ctx, ContainerName(workspaceID))
+}
+
+// removeContainer stops and removes a container. A missing container is
+// already removed.
+func (e *Engine) removeContainer(ctx context.Context, id string) error {
+	if err := e.runtime.Stop(ctx, id, stopTimeout); err != nil && !errors.Is(err, ErrNotFound) {
+		return xerrors.Errorf("stop container: %w", err)
+	}
+	if err := e.runtime.Remove(ctx, id); err != nil && !errors.Is(err, ErrNotFound) {
+		return xerrors.Errorf("remove container: %w", err)
+	}
+	return nil
 }
