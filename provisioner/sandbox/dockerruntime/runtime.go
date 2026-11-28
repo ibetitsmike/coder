@@ -131,7 +131,6 @@ func (r *Runtime) Create(ctx context.Context, req sandbox.CreateRequest) (sandbo
 		},
 		HostConfig: &container.HostConfig{
 			ExtraHosts: []string{hostGateway + ":host-gateway"},
-			Mounts:     mounts,
 			Resources: container.Resources{
 				NanoCPUs: req.CPUMillis * 1_000_000,
 				Memory:   req.MemoryMiB << 20,
