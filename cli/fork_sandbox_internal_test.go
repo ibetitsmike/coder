@@ -34,6 +34,10 @@ agent:
 func TestForkSandboxProvisioners(t *testing.T) {
 	t.Parallel()
 
+	// The test FakeRuntime is never the default.
+	_, err := sandboxRuntime()
+	require.ErrorIs(t, err, errNoSandboxRuntime)
+
 	// Without a runtime the hook leaves the daemon as it is, with the
 	// experiment on or off.
 	for _, experiments := range []codersdk.Experiments{nil, {codersdk.ExperimentForkSandboxProvisioner}} {
