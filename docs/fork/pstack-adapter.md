@@ -425,9 +425,9 @@ The message leaves out review and comment bodies, so open the listed URLs to rea
 After that message, the call stops watching the pull request, so call `wait_for_events` again to keep watching.
 When the call watches a pull request or a process, the default prompt is `Something you were waiting for happened. Check it, then continue.`
 The result also holds `pull_request`, with its `url`, the watched events in `on`, and the `head_sha` and `checks_state` at the time of the call.
-Coder Agents reads the pull request once a minute with the chat owner's linked GitHub account, and checks the call's children once a minute too until the pull request's message arrives.
+Coder Agents reads the pull request once a minute with the chat owner's linked GitHub account.
 A failed read doesn't end the watch.
-Coder Agents reads again after 5&nbsp;minutes, or after a GitHub rate limit resets, but at most 5&nbsp;minutes later while children still wait.
+Coder Agents reads again after 5&nbsp;minutes, or after a GitHub rate limit resets but no sooner than a minute.
 Activity after `expires_at` doesn't count.
 The call reads the pull request before it returns, and fails with `read pull request <url>: <error>` when it can't.
 The error can be `no git provider is configured for <url>` when no external auth provider of the deployment matches the URL, `<url> is not a pull request URL`, `the chat owner has no linked account for <host>`, or `pull request activity is only available for GitHub`.
@@ -469,7 +469,7 @@ More than 10 processes fail with `cannot wait for <n> processes at once, the max
 The call leaves out processes that an earlier call still watches, and fails with `these processes are already watched by wake-up <id>: end your turn to wait for them` when it leaves out all of them.
 `process_output_pattern` without `process_ids` fails with `process_output_pattern requires process_ids`, and the cool-down or the limit without a pattern fails with `process_output_cooldown_seconds and process_output_max_events require process_output_pattern`.
 
-Coder Agents checks for due wake-ups every 15&nbsp;seconds, so expect a run to arrive some seconds after its time.
+Coder Agents runs a wake-up at its time and also checks for due wake-ups every minute, so expect a run to arrive within a minute of its time.
 A wake-up never interrupts a turn.
 While the chat is busy, the run waits until the chat is idle.
 Coder Agents doesn't replay runs that it missed.
@@ -483,7 +483,7 @@ Otherwise a resumed interval or cron wake-up continues its schedule from now, an
 While the experiment is on, the composer of a chat with active or paused wake-ups shows a pill with their number.
 Selecting the pill lists each one with its schedule, its prompt, its next run or check or **Paused**, and its run count, with **Pause** or **Resume** and **Cancel** buttons that make the same changes as the API.
 A wake-up that a limit, a prompt hook, or an invalid cron schedule or events paused also shows the reason, such as **Paused: daily run limit reached**.
-The pill reads the list again every 30&nbsp;seconds, so a change that a run makes can take that long to show.
+The pill reads the list again every 30&nbsp;seconds while an events wake-up is active and every minute otherwise, so a change that a run makes can take that long to show.
 When the list fails to load, the composer shows a warning pill instead.
 While the experiment is on, the conversation shows each `schedule_wakeup`, `wait_for_events`, and `notify_user` call as a card.
 The title of a `schedule_wakeup` card names the schedule, such as **Scheduled a wake-up every 5m**, and a cron schedule shows its time zone, which is UTC by default.
