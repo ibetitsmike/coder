@@ -148,6 +148,27 @@ func TestEngineImport(t *testing.T) {
 		stop := graph(t, s, proto.GraphSource_SOURCE_PLAN, proto.WorkspaceTransition_STOP)
 		require.Empty(t, stop.GetError())
 		require.Empty(t, stop.GetResources())
+
+		// A template import graphs without a workspace name.
+		imported := call(t, s, &proto.Request{Type: &proto.Request_Graph{Graph: &proto.GraphRequest{
+			Metadata: &proto.Metadata{WorkspaceTransition: proto.WorkspaceTransition_START},
+			Source:   proto.GraphSource_SOURCE_PLAN,
+		}}}).GetGraph()
+		require.Empty(t, imported.GetError())
+		require.Equal(t, "sandbox", imported.GetResources()[0].GetName())
+	})
+
+	t.Run("StopAndDestroyCostNothing", func(t *testing.T) {
+		t.Parallel()
+
+		s := session(t, specArchive(t, "sandbox.yaml"))
+		for _, transition := range []proto.WorkspaceTransition{proto.WorkspaceTransition_STOP, proto.WorkspaceTransition_DESTROY} {
+			p := call(t, s, &proto.Request{Type: &proto.Request_Plan{Plan: &proto.PlanRequest{
+				Metadata: &proto.Metadata{WorkspaceTransition: transition},
+			}}}).GetPlan()
+			require.Empty(t, p.GetError(), transition)
+			require.Zero(t, p.GetDailyCost(), transition)
+		}
 	})
 
 	t.Run("GraphFromStateUsesRecordedToken", func(t *testing.T) {
