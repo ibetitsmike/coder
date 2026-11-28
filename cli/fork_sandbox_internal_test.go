@@ -5,6 +5,7 @@ package cli
 import (
 	"archive/tar"
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"net"
@@ -64,11 +65,13 @@ func TestForkSandboxProvisioners(t *testing.T) {
 		name        string
 		experiments []string
 		runtime     string
+		httpAddress string
 		registered  bool
 	}{
 		{name: "ExperimentOff", runtime: codersdk.SandboxRuntimeDocker},
 		{name: "NoRuntime", experiments: experiment},
-		{name: "ExperimentOnWithRuntime", experiments: experiment, runtime: codersdk.SandboxRuntimeDocker, registered: true},
+		{name: "UnreachableAccessURL", experiments: experiment, runtime: codersdk.SandboxRuntimeDocker, httpAddress: "127.0.0.1:3000"},
+		{name: "ExperimentOnWithRuntime", experiments: experiment, runtime: codersdk.SandboxRuntimeDocker, httpAddress: "0.0.0.0:3000", registered: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -89,7 +92,11 @@ func TestForkSandboxProvisioners(t *testing.T) {
 			dv.Experiments = tc.experiments
 			dv.Sandbox.Runtime = serpent.String(tc.runtime)
 			dv.Sandbox.DockerHost = serpent.String("tcp://" + docker.Listener.Addr().String())
-			_, closer, api := coderdtest.NewWithAPI(t, &coderdtest.Options{DeploymentValues: dv})
+			dv.HTTPAddress = serpent.String(tc.httpAddress)
+			_, closer, api := coderdtest.NewWithAPI(t, &coderdtest.Options{
+				DeploymentValues: dv,
+				AccessURL:        &url.URL{Scheme: "http", Host: "127.0.0.1:3000"},
+			})
 			t.Cleanup(func() { _ = closer.Close() })
 
 			// The server calls the hook once for each built-in daemon.
@@ -120,6 +127,36 @@ func TestForkSandboxProvisioners(t *testing.T) {
 	}
 }
 
+// TestSandboxAccessURLError checks which loopback access URLs the agents in
+// docker sandbox containers can reach.
+func TestSandboxAccessURLError(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		accessURL, httpAddress, runtime, err string
+	}{
+		{accessURL: "http://coder.example.com", httpAddress: "127.0.0.1:3000"},
+		{accessURL: "http://127.0.0.1:3000", httpAddress: "127.0.0.1:3000", runtime: "fake"},
+		{accessURL: "http://127.0.0.1:3000", httpAddress: "0.0.0.0:3000"},
+		{accessURL: "http://localhost", httpAddress: ":80"},
+		{accessURL: "http://127.0.0.1:3000", httpAddress: "127.0.0.1:3000", err: "set --http-address 0.0.0.0:3000"},
+		{accessURL: "http://127.0.0.1:3000", httpAddress: "0.0.0.0:4000", err: "set --http-address 0.0.0.0:3000"},
+		{accessURL: "http://localhost", httpAddress: "", err: "set --http-address 0.0.0.0:80"},
+		{accessURL: "https://localhost:3443", httpAddress: "0.0.0.0:3443", err: "TLS certificate"},
+	} {
+		accessURL, err := url.Parse(tc.accessURL)
+		require.NoError(t, err)
+		dv := &codersdk.DeploymentValues{HTTPAddress: serpent.String(tc.httpAddress)}
+		dv.Sandbox.Runtime = serpent.String(cmp.Or(tc.runtime, codersdk.SandboxRuntimeDocker))
+		err = sandboxAccessURLError(accessURL, dv)
+		if tc.err == "" {
+			require.NoError(t, err, tc)
+		} else {
+			require.ErrorContains(t, err, tc.err, tc)
+		}
+	}
+}
+
 // TestForkSandboxAccessHost checks that the access URL redirect lets through
 // the host a Docker sandbox container reaches a loopback access URL on.
 func TestForkSandboxAccessHost(t *testing.T) {
@@ -136,7 +173,7 @@ func TestForkSandboxAccessHost(t *testing.T) {
 	}{
 		{name: "ContainerHost", experiment: true, runtime: codersdk.SandboxRuntimeDocker, accessURL: "http://127.0.0.1:3000", host: "host.docker.internal:3000", want: http.StatusOK},
 		{name: "OtherPort", experiment: true, runtime: codersdk.SandboxRuntimeDocker, accessURL: "http://127.0.0.1:3000", host: "host.docker.internal:4000", want: http.StatusTemporaryRedirect},
-		{name: "HTTPSWithoutTLS", experiment: true, runtime: codersdk.SandboxRuntimeDocker, accessURL: "https://localhost:3443", host: "host.docker.internal:3443", want: http.StatusTemporaryRedirect},
+		{name: "HTTPSAccessURL", experiment: true, runtime: codersdk.SandboxRuntimeDocker, accessURL: "https://localhost:3443", host: "host.docker.internal:3443", want: http.StatusTemporaryRedirect},
 		{name: "ExperimentOff", runtime: codersdk.SandboxRuntimeDocker, accessURL: "http://127.0.0.1:3000", host: "host.docker.internal:3000", want: http.StatusTemporaryRedirect},
 		{name: "NoDockerRuntime", experiment: true, accessURL: "http://127.0.0.1:3000", host: "host.docker.internal:3000", want: http.StatusTemporaryRedirect},
 	} {
