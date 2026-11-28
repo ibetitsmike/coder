@@ -26,14 +26,15 @@ base=$(git merge-base "$1" "$2")
 head=$2
 summary=${GITHUB_STEP_SUMMARY:-/dev/stdout}
 
-# A sync PR brings upstream commits that the base does not have yet. A PR
-# branch that is behind the base has an older upstream merge base, which the
-# base already contains.
+# A sync PR brings upstream commits that the base tip does not have yet. A
+# PR branch that is behind the base has an older upstream merge base, which
+# the base tip already contains. The check uses the base tip, not the merge
+# base, because a criss-cross history can pick an older merge base.
 sync=${FORK_PR_SYNC:-false}
 if [[ "$sync" != true ]] &&
 	git fetch --quiet --no-tags --filter=blob:none https://github.com/coder/coder.git main 2>/dev/null; then
 	upstream_base=$(git merge-base "$head" FETCH_HEAD || true)
-	if [[ -n "$upstream_base" ]] && ! git merge-base --is-ancestor "$upstream_base" "$base"; then
+	if [[ -n "$upstream_base" ]] && ! git merge-base --is-ancestor "$upstream_base" "$1"; then
 		sync=true
 	fi
 fi
