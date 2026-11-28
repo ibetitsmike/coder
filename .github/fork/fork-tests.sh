@@ -13,6 +13,8 @@
 #                                     that the other fork-ci steps do not cover
 #   fork-tests.sh site-files          print the fork's site test files outside
 #                                     src/pages/AgentsPage, relative to site/
+#   fork-tests.sh site-stories        print the fork's Storybook story files,
+#                                     relative to site/
 #
 # It needs the full history (actions/checkout with fetch-depth: 0) and fetches
 # upstream main, unless FORK_UPSTREAM_BASE names the merge base.
@@ -105,6 +107,15 @@ site_files() {
 	files | grep -E '^site/src/.*\.test\.tsx?$' | grep -v '^site/src/pages/AgentsPage/' | sed 's|^site/||' || true
 }
 
+# A story file the fork added or changed holds fork stories, the same rule as
+# for test files.
+site_stories() {
+	local b
+	b=$(base)
+	git diff --name-only --no-renames --diff-filter=AM "$b" HEAD -- \
+		'site/src/*.stories.tsx' | sed 's|^site/||'
+}
+
 case "${1:-}" in
 files) files ;;
 go-pattern)
@@ -117,8 +128,9 @@ go-pattern)
 	;;
 go-run) go_run ;;
 site-files) site_files ;;
+site-stories) site_stories ;;
 *)
-	echo "usage: $0 {files|go-pattern <dir>...|go-run|site-files}" >&2
+	echo "usage: $0 {files|go-pattern <dir>...|go-run|site-files|site-stories}" >&2
 	exit 2
 	;;
 esac

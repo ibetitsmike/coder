@@ -415,13 +415,6 @@ export const StaleTurnSummaryAfterStreamingIsSuppressed: Story = {
 		const [phase, setPhase] = useState<
 			"streaming" | "stale-after-stream" | "fresh"
 		>("streaming");
-		useEffect(() => {
-			if (phase !== "streaming") {
-				return;
-			}
-			const id = setTimeout(() => setPhase("stale-after-stream"), 50);
-			return () => clearTimeout(id);
-		}, [phase]);
 		const chats = [
 			buildChat({
 				id: "chat-stale-summary",
@@ -432,6 +425,13 @@ export const StaleTurnSummaryAfterStreamingIsSuppressed: Story = {
 		];
 		return (
 			<div data-testid="flicker-harness" data-phase={phase}>
+				<button
+					data-testid="advance-to-stale"
+					type="button"
+					onClick={() => setPhase("stale-after-stream")}
+				>
+					stop
+				</button>
 				<button
 					data-testid="advance-to-fresh"
 					type="button"
@@ -452,13 +452,13 @@ export const StaleTurnSummaryAfterStreamingIsSuppressed: Story = {
 
 		// Phase 2: status flips to waiting while the previous summary is
 		// still cached server-side. The stale text must not flash; the
-		// fallback (model name) shows instead.
-		await waitFor(() => {
-			expect(canvas.getByTestId("flicker-harness")).toHaveAttribute(
-				"data-phase",
-				"stale-after-stream",
-			);
-		});
+		// fallback (model name) shows instead. A click, not a timer, ends the
+		// stream, so a slow runner cannot skip phase 1.
+		await userEvent.click(canvas.getByTestId("advance-to-stale"));
+		await expect(canvas.getByTestId("flicker-harness")).toHaveAttribute(
+			"data-phase",
+			"stale-after-stream",
+		);
 		await expect(
 			canvas.queryByText("GPT-4o streaming…"),
 		).not.toBeInTheDocument();
