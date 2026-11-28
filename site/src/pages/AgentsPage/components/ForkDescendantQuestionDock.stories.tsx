@@ -123,10 +123,13 @@ export const SecretAnswersDisabled: Story = {
 	},
 };
 
-// A settled answer reloads the questions. The reload stays pending, so the
-// story keeps the seeded question instead of showing a load error.
-const keepQuestionsReloading = () => {
-	spyOn(API.getAxiosInstance(), "get").mockReturnValue(new Promise(() => {}));
+// A settled answer reloads the questions and waits for the reload. The
+// reload returns the seeded question, so the story keeps it instead of
+// showing a load error.
+const reloadQuestions = () => {
+	spyOn(API.getAxiosInstance(), "get").mockResolvedValue({
+		data: [mockSecretQuestion],
+	});
 };
 
 export const SecretAnswerSent: Story = {
@@ -142,7 +145,7 @@ export const SecretAnswerSent: Story = {
 		spyOn(API.getAxiosInstance(), "post").mockResolvedValue({
 			data: undefined,
 		});
-		keepQuestionsReloading();
+		reloadQuestions();
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -193,7 +196,7 @@ export const SecretAnswerFailed: Story = {
 		spyOn(API.getAxiosInstance(), "post").mockRejectedValue(
 			mockApiError({ message: "The secret answer is too short." }),
 		);
-		keepQuestionsReloading();
+		reloadQuestions();
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);

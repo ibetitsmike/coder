@@ -14,6 +14,18 @@ import {
 	MockScheduleWakeupResult,
 	MockWaitForEventsResult,
 } from "#/testHelpers/forkChatWakeups";
+import {
+	MockListFamilyChatsResult,
+	MockMessageFamilyChatArgs,
+	MockMessageFamilyChatResult,
+} from "#/testHelpers/forkFamilyMessages";
+import {
+	MockForkWorkflowArgs,
+	MockForkWorkflowCompletedResult,
+	MockForkWorkflowRunId,
+	MockForkWorkflowScript,
+	MockForkWorkflowStartedResult,
+} from "#/testHelpers/forkWorkflows";
 import type { Tool } from "../Tool";
 
 type ForkToolShowcaseItem = Pick<
@@ -42,4 +54,20 @@ export const forkToolShowcaseItems: readonly ForkToolShowcaseItem[] = [
 	},
 	{ name: "wait_for_events", result: MockWaitForEventsResult },
 	{ name: "notify_user", args: MockNotifyUserArgs, result: { sent: true } },
+	{
+		name: "run_workflow",
+		args: { script: MockForkWorkflowScript, args: MockForkWorkflowArgs },
+		result: MockForkWorkflowStartedResult,
+	},
+	{
+		name: "await_workflow",
+		args: { run_id: MockForkWorkflowRunId },
+		result: MockForkWorkflowCompletedResult,
+	},
+	{
+		name: "message_family_chat",
+		args: MockMessageFamilyChatArgs,
+		result: MockMessageFamilyChatResult,
+	},
+	{ name: "list_family_chats", args: {}, result: MockListFamilyChatsResult },
 ];

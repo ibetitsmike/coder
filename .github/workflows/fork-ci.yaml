@@ -170,6 +170,57 @@ jobs:
           pnpm test:ci src/pages/AgentsPage "${fork_tests[@]}"
         working-directory: site
 
+  # Runs the play functions of the fork's stories, found by
+  # .github/fork/fork-tests.sh. No upstream job runs play functions (#168).
+  storybook:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    steps:
+      # fork-tests.sh needs the history to find the merge base with upstream.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          filter: blob:none
+      - name: Set up mise tools
+        uses: ./.github/actions/setup-mise
+        with:
+          install-args: "node pnpm"
+      - name: Install pnpm dependencies
+        uses: ./.github/actions/pnpm-install
+      - name: Compute Playwright cache key
+        id: playwright-cache
+        run: echo "key=playwright-${RUNNER_OS}-${RUNNER_ARCH}-$(pnpm exec playwright --version | tr ' ' '-')" >> "$GITHUB_OUTPUT"
+        working-directory: site
+      # Same split as the pnpm store: main saves, pull requests restore.
+      - name: Restore and save Playwright cache
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          lookup-only: true
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.playwright-cache.outputs.key }}
+      - name: Restore Playwright cache
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.playwright-cache.outputs.key }}
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --only-shell chromium
+        working-directory: site
+      # The storybook project bails after 5 failures, which hides the rest.
+      - name: Fork story play functions
+        run: |
+          stories=$(../.github/fork/fork-tests.sh site-stories)
+          test -n "$stories"
+          mapfile -t stories <<<"$stories"
+          echo "${#stories[@]} fork story files"
+          pnpm exec vitest run --project=storybook --bail=0 "${stories[@]}"
+        working-directory: site
+
   # Reports the PR's non-generated changed lines against the 500 line limit
   # (#171). It never fails: the lead's merge step enforces the limit.
   pr-size:
