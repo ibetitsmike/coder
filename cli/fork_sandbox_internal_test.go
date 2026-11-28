@@ -172,6 +172,7 @@ func TestForkSandboxAccessHost(t *testing.T) {
 		want       int
 	}{
 		{name: "ContainerHost", experiment: true, runtime: codersdk.SandboxRuntimeDocker, accessURL: "http://127.0.0.1:3000", host: "host.docker.internal:3000", want: http.StatusOK},
+		{name: "DefaultPort", experiment: true, runtime: codersdk.SandboxRuntimeDocker, accessURL: "http://localhost:80", host: "host.docker.internal", want: http.StatusOK},
 		{name: "OtherPort", experiment: true, runtime: codersdk.SandboxRuntimeDocker, accessURL: "http://127.0.0.1:3000", host: "host.docker.internal:4000", want: http.StatusTemporaryRedirect},
 		{name: "HTTPSAccessURL", experiment: true, runtime: codersdk.SandboxRuntimeDocker, accessURL: "https://localhost:3443", host: "host.docker.internal:3443", want: http.StatusTemporaryRedirect},
 		{name: "ExperimentOff", runtime: codersdk.SandboxRuntimeDocker, accessURL: "http://127.0.0.1:3000", host: "host.docker.internal:3000", want: http.StatusTemporaryRedirect},

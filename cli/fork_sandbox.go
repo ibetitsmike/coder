@@ -226,7 +226,7 @@ func forkSandboxAccessHost(api *coderd.API, direct, redirecting http.Handler) ht
 		return redirecting
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.EqualFold(r.Host, u.Host) {
+		if strings.EqualFold(strings.TrimSuffix(r.Host, ":80"), strings.TrimSuffix(u.Host, ":80")) {
 			direct.ServeHTTP(w, r)
 			return
 		}
