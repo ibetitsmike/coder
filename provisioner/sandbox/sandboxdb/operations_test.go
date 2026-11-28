@@ -149,6 +149,9 @@ func TestOperations(t *testing.T) {
 				stale := h.newBuild(ws)
 				latest := h.newBuild(ws)
 
+				forged := op1
+				forged.Generation = 3
+				require.ErrorIs(t, h.ops.Complete(ctx, forged, nil), sandbox.ErrSuperseded, "the stored generation fences, not the caller's")
 				require.ErrorIs(t, h.ops.Complete(ctx, op1, nil), sandbox.ErrSuperseded)
 				_, err = h.ops.Begin(ctx, ws, stale)
 				require.ErrorIs(t, err, sandbox.ErrSuperseded, "a stale build must not begin")

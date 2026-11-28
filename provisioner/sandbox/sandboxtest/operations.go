@@ -88,7 +88,7 @@ func (f *FakeOperations) Complete(_ context.Context, op sandbox.Operation, apply
 	defer f.mu.Unlock()
 	claimed := f.builds[op.BuildID]
 	if f.status[op.BuildID] != OperationClaimed || op.ID != claimed.ID || op.WorkspaceID != claimed.WorkspaceID ||
-		op.Generation != f.latest[op.WorkspaceID] {
+		claimed.Generation != f.latest[op.WorkspaceID] {
 		return xerrors.Errorf("complete: %w", sandbox.ErrSuperseded)
 	}
 	if applyErr != nil {
@@ -97,7 +97,7 @@ func (f *FakeOperations) Complete(_ context.Context, op sandbox.Operation, apply
 	}
 	f.status[op.BuildID] = OperationDone
 	for id, other := range f.builds {
-		if other.WorkspaceID == op.WorkspaceID && other.Generation < op.Generation && f.status[id] == OperationSuperseded {
+		if other.WorkspaceID == op.WorkspaceID && other.Generation < claimed.Generation && f.status[id] == OperationSuperseded {
 			f.status[id] = OperationReconciled
 		}
 	}
