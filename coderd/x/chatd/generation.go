@@ -1331,6 +1331,7 @@ func (s *taskStarter) generateCompaction(
 		compactionOpts.ModelConfigID = overrideModel.dbConfig.ID
 		compactionOpts.SummaryContextLimit = override.Config.ContextLimit
 		compactionOpts.SummaryCall = compactionSummaryCall(overrideModel)
+		compactionOpts.ForkSummaryRecovery = s.server.forkSummaryRecovery()
 		// Prompt caches are model-scoped and provider-native tools are
 		// model-specific, so unless the override resolves to the chat model
 		// itself its definitions buy the request nothing and can get it

@@ -26,6 +26,7 @@ var ForkExperiments = Experiments{
 	ExperimentForkContextHashRows,
 	ExperimentForkAPNsPush,
 	ExperimentForkSandboxProvisioner,
+	ExperimentForkCompactionRecovery,
 }
 
 // ExperimentForkChatTodos enables the todo_write and todo_read chat tools and
@@ -98,6 +99,11 @@ const ExperimentForkAPNsPush Experiment = "fork-apns-push"
 // provisioner: template versions with the sandbox provisioner type and the
 // built-in sandbox daemon.
 const ExperimentForkSandboxProvisioner Experiment = "fork-sandbox-provisioner"
+
+// ExperimentForkCompactionRecovery lets compaction recover when the summary
+// stream spends its whole output cap on reasoning and returns no summary
+// text: the summary call retries once with reasoning at low effort.
+const ExperimentForkCompactionRecovery Experiment = "fork-compaction-recovery"
 
 // forkExperimentDisplayNames names the fork experiments whose title-cased
 // names read wrong, such as "Html".

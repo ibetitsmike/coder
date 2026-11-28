@@ -31363,7 +31363,8 @@ const docTemplate = `{
                 "fork-context-cache",
                 "fork-context-hash-rows",
                 "fork-apns-push",
-                "fork-sandbox-provisioner"
+                "fork-sandbox-provisioner",
+                "fork-compaction-recovery"
             ],
             "x-enum-comments": {
                 "ExperimentAIGatewayReverseProxy": "Uses stateless reverse proxy routing when MCP injection is not configured.",
@@ -31421,6 +31422,7 @@ const docTemplate = `{
                 "",
                 "",
                 "",
+                "",
                 ""
             ],
             "x-enum-varnames": [
@@ -31458,7 +31460,8 @@ const docTemplate = `{
                 "ExperimentForkContextCache",
                 "ExperimentForkContextHashRows",
                 "ExperimentForkAPNsPush",
-                "ExperimentForkSandboxProvisioner"
+                "ExperimentForkSandboxProvisioner",
+                "ExperimentForkCompactionRecovery"
             ]
         },
         "codersdk.ExperimentRule": {

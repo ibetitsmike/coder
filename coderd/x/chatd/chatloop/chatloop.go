@@ -278,6 +278,13 @@ type GenerateCompactionOptions struct {
 
 	// Logger records summary requests the model rejects for their size.
 	Logger slog.Logger
+
+	// ForkSummaryRecovery enables fork-compaction-recovery: a summary stream
+	// that spent its whole output cap on reasoning and returned no text
+	// retries once with reasoning at low effort instead of failing the
+	// compaction. Server sets it only when the experiment is enabled, so the
+	// zero value keeps upstream behavior.
+	ForkSummaryRecovery bool
 }
 
 // ProviderTool pairs a tool definition that chatd builds for one

@@ -1079,6 +1079,7 @@ func (p *Server) buildTurnEnvironment(
 		StepUsage:            compactionStepUsage,
 		SummaryCall:          compactionSummaryCall(resolved),
 		ToolDefinitions:      toolDefinitions,
+		ForkSummaryRecovery:  p.forkSummaryRecovery(),
 	}
 
 	// workspaceCtx.currentChatSnapshot may carry a freshly persisted
