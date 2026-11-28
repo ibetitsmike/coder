@@ -16,8 +16,13 @@ import (
 	"github.com/coder/coder/v2/provisioner/sandbox"
 )
 
-// LabelSandbox marks the containers this runtime creates.
+// LabelSandbox marks the containers this runtime creates. The runtime acts
+// only on containers that carry it.
 const LabelSandbox = "com.coder.sandbox"
+
+// ErrNotOwned reports a container of the name that this runtime did not
+// create.
+var ErrNotOwned = xerrors.New("the container was not created by the sandbox runtime")
 
 // Runtime drives sandbox containers through a Docker daemon. It serializes
 // the calls on one container, so a call from a reaped job cannot interleave
@@ -85,6 +90,9 @@ func (r *Runtime) Create(ctx context.Context, req sandbox.CreateRequest) (sandbo
 		_, err = r.client.ContainerCreate(ctx, opts)
 	}
 	if cerrdefs.IsConflict(err) {
+		if _, err := r.inspect(ctx, req.ID); err != nil {
+			return sandbox.Container{}, err
+		}
 		return sandbox.Container{}, xerrors.Errorf("%w: %s", sandbox.ErrExists, req.ID)
 	}
 	if err != nil {
@@ -110,6 +118,9 @@ func (r *Runtime) Start(ctx context.Context, containerID string) error {
 		return err
 	}
 	defer unlock()
+	if _, err := r.inspect(ctx, containerID); err != nil {
+		return err
+	}
 	_, err = r.client.ContainerStart(ctx, containerID, client.ContainerStartOptions{})
 	return mapError("start", containerID, err)
 }
@@ -122,6 +133,9 @@ func (r *Runtime) Stop(ctx context.Context, containerID string, timeout time.Dur
 		return err
 	}
 	defer unlock()
+	if _, err := r.inspect(ctx, containerID); err != nil {
+		return err
+	}
 	seconds := int(timeout / time.Second)
 	_, err = r.client.ContainerStop(ctx, containerID, client.ContainerStopOptions{Timeout: &seconds})
 	return mapError("stop", containerID, err)
@@ -134,6 +148,9 @@ func (r *Runtime) Remove(ctx context.Context, containerID string) error {
 		return err
 	}
 	defer unlock()
+	if _, err := r.inspect(ctx, containerID); err != nil {
+		return err
+	}
 	_, err = r.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
 	return mapError("remove", containerID, err)
 }
@@ -148,20 +165,23 @@ func (r *Runtime) Status(ctx context.Context, containerID string) (sandbox.Conta
 	return r.inspect(ctx, containerID)
 }
 
+// inspect reads the container and fails with ErrNotOwned when it lacks
+// LabelSandbox.
 func (r *Runtime) inspect(ctx context.Context, containerID string) (sandbox.Container, error) {
 	res, err := r.client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
 	if err != nil {
 		return sandbox.Container{}, mapError("inspect", containerID, err)
 	}
 	in := res.Container
+	if in.Config == nil || in.Config.Labels[LabelSandbox] != "true" {
+		return sandbox.Container{}, xerrors.Errorf("%w: %s", ErrNotOwned, containerID)
+	}
 	c := sandbox.Container{
 		ID:        containerID,
 		State:     sandbox.ContainerStateStopped,
 		CreatedAt: parseTime(in.Created),
 	}
-	if in.Config != nil {
-		c.Image = in.Config.Image
-	}
+	c.Image = in.Config.Image
 	if in.State != nil {
 		switch in.State.Status {
 		case container.StateCreated:
