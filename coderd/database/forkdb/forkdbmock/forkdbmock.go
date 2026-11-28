@@ -116,6 +116,21 @@ func (mr *MockStoreMockRecorder) ClaimDuePullRequestWatches(ctx, arg any) *gomoc
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClaimDuePullRequestWatches", reflect.TypeOf((*MockStore)(nil).ClaimDuePullRequestWatches), ctx, arg)
 }
 
+// ClaimSandboxOperation mocks base method.
+func (m *MockStore) ClaimSandboxOperation(ctx context.Context, arg forkdb.ClaimSandboxOperationParams) (forkdb.SandboxOperation, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ClaimSandboxOperation", ctx, arg)
+	ret0, _ := ret[0].(forkdb.SandboxOperation)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ClaimSandboxOperation indicates an expected call of ClaimSandboxOperation.
+func (mr *MockStoreMockRecorder) ClaimSandboxOperation(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClaimSandboxOperation", reflect.TypeOf((*MockStore)(nil).ClaimSandboxOperation), ctx, arg)
+}
+
 // ClaimWorkflowRun mocks base method.
 func (m *MockStore) ClaimWorkflowRun(ctx context.Context, arg forkdb.ClaimWorkflowRunParams) (forkdb.WorkflowRun, error) {
 	m.ctrl.T.Helper()
@@ -129,6 +144,21 @@ func (m *MockStore) ClaimWorkflowRun(ctx context.Context, arg forkdb.ClaimWorkfl
 func (mr *MockStoreMockRecorder) ClaimWorkflowRun(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClaimWorkflowRun", reflect.TypeOf((*MockStore)(nil).ClaimWorkflowRun), ctx, arg)
+}
+
+// CompleteSandboxOperation mocks base method.
+func (m *MockStore) CompleteSandboxOperation(ctx context.Context, arg forkdb.CompleteSandboxOperationParams) (forkdb.SandboxOperation, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CompleteSandboxOperation", ctx, arg)
+	ret0, _ := ret[0].(forkdb.SandboxOperation)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CompleteSandboxOperation indicates an expected call of CompleteSandboxOperation.
+func (mr *MockStoreMockRecorder) CompleteSandboxOperation(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CompleteSandboxOperation", reflect.TypeOf((*MockStore)(nil).CompleteSandboxOperation), ctx, arg)
 }
 
 // ConsumePluginLinkCode mocks base method.
@@ -1270,6 +1300,21 @@ func (mr *MockStoreMockRecorder) GetProjectAgentDefinitionByName(ctx, arg any) *
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetProjectAgentDefinitionByName", reflect.TypeOf((*MockStore)(nil).GetProjectAgentDefinitionByName), ctx, arg)
 }
 
+// GetSandboxOperation mocks base method.
+func (m *MockStore) GetSandboxOperation(ctx context.Context, id uuid.UUID) (forkdb.SandboxOperation, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetSandboxOperation", ctx, id)
+	ret0, _ := ret[0].(forkdb.SandboxOperation)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetSandboxOperation indicates an expected call of GetSandboxOperation.
+func (mr *MockStoreMockRecorder) GetSandboxOperation(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSandboxOperation", reflect.TypeOf((*MockStore)(nil).GetSandboxOperation), ctx, id)
+}
+
 // GetSubagentCapacityCounts mocks base method.
 func (m *MockStore) GetSubagentCapacityCounts(ctx context.Context, arg forkdb.GetSubagentCapacityCountsParams) ([]forkdb.GetSubagentCapacityCountsRow, error) {
 	m.ctrl.T.Helper()
@@ -1681,6 +1726,21 @@ func (m *MockStore) InsertProjectAgentDefinition(ctx context.Context, arg forkdb
 func (mr *MockStoreMockRecorder) InsertProjectAgentDefinition(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertProjectAgentDefinition", reflect.TypeOf((*MockStore)(nil).InsertProjectAgentDefinition), ctx, arg)
+}
+
+// InsertSandboxOperation mocks base method.
+func (m *MockStore) InsertSandboxOperation(ctx context.Context, arg forkdb.InsertSandboxOperationParams) (forkdb.SandboxOperation, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertSandboxOperation", ctx, arg)
+	ret0, _ := ret[0].(forkdb.SandboxOperation)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// InsertSandboxOperation indicates an expected call of InsertSandboxOperation.
+func (mr *MockStoreMockRecorder) InsertSandboxOperation(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertSandboxOperation", reflect.TypeOf((*MockStore)(nil).InsertSandboxOperation), ctx, arg)
 }
 
 // InsertUserAgentDefinition mocks base method.
@@ -2289,6 +2349,21 @@ func (m *MockStore) SumOrganizationWakeupChatCostMicrosSince(ctx context.Context
 func (mr *MockStoreMockRecorder) SumOrganizationWakeupChatCostMicrosSince(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SumOrganizationWakeupChatCostMicrosSince", reflect.TypeOf((*MockStore)(nil).SumOrganizationWakeupChatCostMicrosSince), ctx, arg)
+}
+
+// SupersedeSandboxOperations mocks base method.
+func (m *MockStore) SupersedeSandboxOperations(ctx context.Context, arg forkdb.SupersedeSandboxOperationsParams) ([]forkdb.SandboxOperation, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SupersedeSandboxOperations", ctx, arg)
+	ret0, _ := ret[0].([]forkdb.SandboxOperation)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SupersedeSandboxOperations indicates an expected call of SupersedeSandboxOperations.
+func (mr *MockStoreMockRecorder) SupersedeSandboxOperations(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SupersedeSandboxOperations", reflect.TypeOf((*MockStore)(nil).SupersedeSandboxOperations), ctx, arg)
 }
 
 // UpdateChatAPNsDeviceEnvironment mocks base method.

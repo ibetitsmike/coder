@@ -38,11 +38,17 @@ type Querier interface {
 	// read or the lease runs out. The rows are sorted by pull request and chat
 	// owner, the key of one shared read.
 	ClaimDuePullRequestWatches(ctx context.Context, arg ClaimDuePullRequestWatchesParams) ([]ClaimDuePullRequestWatchesRow, error)
+	// Claims an intent of the newest build of the bound workspace. A stale
+	// generation, another workspace or a second claim returns no row.
+	ClaimSandboxOperation(ctx context.Context, arg ClaimSandboxOperationParams) (SandboxOperation, error)
 	// A resume takes over a run: an interrupted run, a running run whose owner
 	// stopped its heartbeat, or a run this process already owns. A running run
 	// of a live owner returns no row, so two resumes of one run cannot both
 	// execute it.
 	ClaimWorkflowRun(ctx context.Context, arg ClaimWorkflowRunParams) (WorkflowRun, error)
+	// Finishes a claimed operation of the newest build as done or failed, else
+	// returns no row. Done marks older superseded operations reconciled.
+	CompleteSandboxOperation(ctx context.Context, arg CompleteSandboxOperationParams) (SandboxOperation, error)
 	ConsumePluginLinkCode(ctx context.Context, arg ConsumePluginLinkCodeParams) (PluginLinkCode, error)
 	CountChatFamilyMessagesSince(ctx context.Context, arg CountChatFamilyMessagesSinceParams) (int64, error)
 	// Counts the notifications of a chat since a time, for the hourly limit.
@@ -212,6 +218,7 @@ type Querier interface {
 	GetPluginUserLinksByUserID(ctx context.Context, userID uuid.UUID) ([]PluginUserLink, error)
 	GetPluginsByOrganizationID(ctx context.Context, organizationID uuid.UUID) ([]Plugin, error)
 	GetProjectAgentDefinitionByName(ctx context.Context, arg GetProjectAgentDefinitionByNameParams) (AgentDefinition, error)
+	GetSandboxOperation(ctx context.Context, id uuid.UUID) (SandboxOperation, error)
 	// Returns, for each subagent chat in @candidate_ids or, when @root_chat_id is
 	// set, in the family of @root_chat_id, the subagent chats that
 	// hold a capacity slot: owned by a worker with a fresh heartbeat, like
@@ -279,6 +286,9 @@ type Querier interface {
 	InsertPluginPackProject(ctx context.Context, arg InsertPluginPackProjectParams) (PluginPackProject, error)
 	InsertPluginPackResources(ctx context.Context, arg InsertPluginPackResourcesParams) error
 	InsertProjectAgentDefinition(ctx context.Context, arg InsertProjectAgentDefinitionParams) (AgentDefinition, error)
+	// Writes the intent of one build, derived from the build and workspace rows.
+	// A second insert for the same build returns the existing row.
+	InsertSandboxOperation(ctx context.Context, arg InsertSandboxOperationParams) (SandboxOperation, error)
 	InsertUserAgentDefinition(ctx context.Context, arg InsertUserAgentDefinitionParams) (AgentDefinition, error)
 	InsertUserSavedWorkflow(ctx context.Context, arg InsertUserSavedWorkflowParams) (SavedWorkflow, error)
 	// phases holds the declared phases of the script plus every undeclared name
@@ -449,6 +459,9 @@ type Querier interface {
 	// delivered wake-up run in an hour bucket from runs_since on, so chats that
 	// only humans drive do not count.
 	SumOrganizationWakeupChatCostMicrosSince(ctx context.Context, arg SumOrganizationWakeupChatCostMicrosSinceParams) (int64, error)
+	// Supersedes the unfinished operations of older generations and returns them.
+	// They stay in the result until a newer generation completes as done.
+	SupersedeSandboxOperations(ctx context.Context, arg SupersedeSandboxOperationsParams) ([]SandboxOperation, error)
 	// Records the environment that APNs accepted a token in, unless the device
 	// registered again after not_after.
 	UpdateChatAPNsDeviceEnvironment(ctx context.Context, arg UpdateChatAPNsDeviceEnvironmentParams) error
