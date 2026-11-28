@@ -1326,7 +1326,7 @@ func (r *RootCmd) Server(newAPI func(context.Context, *coderd.Options) (*coderd.
 			// the request is not to a local IP.
 			var handler http.Handler = coderAPI.RootHandler
 			if vals.RedirectToAccessURL {
-				handler = redirectToAccessURL(handler, vals.AccessURL.Value(), tunnel != nil, appHostnameRegex)
+				handler = forkSandboxAccessHost(coderAPI, handler, redirectToAccessURL(handler, vals.AccessURL.Value(), tunnel != nil, appHostnameRegex))
 			}
 
 			// ReadHeaderTimeout is purposefully not enabled. It caused some
