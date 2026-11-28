@@ -374,6 +374,7 @@ schedule registers stays active until the next hourly pass.
 | `fork-tests` | The fork tests of every other Go package.                                                                |
 | `site`       | `tsc` of `site`, the unit tests of `site/src/pages/AgentsPage` and the fork's other unit test files.     |
 | `build`      | `go build ./enterprise/cmd/coder`.                                                                       |
+| `pr-size`    | PRs only. Reports the non-generated changed lines from the merge base and warns over 500. It never fails. |
 | `forkdb`     | `forkdb/generate.sh` leaves no diff.                                                                     |
 
 A fork test is a top-level test in a test file that differs between the merge
