@@ -956,3 +956,28 @@ func (f forkQueryMetricsStore) UpdateChatAPNsDeviceEnvironment(ctx context.Conte
 	defer f.observe(ctx, "UpdateChatAPNsDeviceEnvironment", time.Now())
 	return f.s.UpdateChatAPNsDeviceEnvironment(ctx, arg)
 }
+
+func (f forkQueryMetricsStore) InsertSandboxOperation(ctx context.Context, arg forkdb.InsertSandboxOperationParams) (forkdb.SandboxOperation, error) {
+	defer f.observe(ctx, "InsertSandboxOperation", time.Now())
+	return f.s.InsertSandboxOperation(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) GetSandboxOperation(ctx context.Context, id uuid.UUID) (forkdb.SandboxOperation, error) {
+	defer f.observe(ctx, "GetSandboxOperation", time.Now())
+	return f.s.GetSandboxOperation(ctx, id)
+}
+
+func (f forkQueryMetricsStore) SupersedeSandboxOperations(ctx context.Context, arg forkdb.SupersedeSandboxOperationsParams) ([]forkdb.SandboxOperation, error) {
+	defer f.observe(ctx, "SupersedeSandboxOperations", time.Now())
+	return f.s.SupersedeSandboxOperations(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) ClaimSandboxOperation(ctx context.Context, arg forkdb.ClaimSandboxOperationParams) (forkdb.SandboxOperation, error) {
+	defer f.observe(ctx, "ClaimSandboxOperation", time.Now())
+	return f.s.ClaimSandboxOperation(ctx, arg)
+}
+
+func (f forkQueryMetricsStore) CompleteSandboxOperation(ctx context.Context, arg forkdb.CompleteSandboxOperationParams) (forkdb.SandboxOperation, error) {
+	defer f.observe(ctx, "CompleteSandboxOperation", time.Now())
+	return f.s.CompleteSandboxOperation(ctx, arg)
+}

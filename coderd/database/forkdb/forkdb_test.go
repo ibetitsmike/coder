@@ -83,6 +83,33 @@ func TestAPIKeyScopeValues(t *testing.T) {
 	require.False(t, forkdb.ValidAPIKeyScope("plugin:nope"))
 }
 
+// TestProvisionerTypeValues checks that upstream's provisioner types and the
+// fork's types together are exactly the values of the provisioner_type enum.
+func TestProvisionerTypeValues(t *testing.T) {
+	t.Parallel()
+
+	_, _, sqlDB := dbtestutil.NewDBWithSQLDB(t)
+	ctx := testutil.Context(t, testutil.WaitShort)
+
+	rows, err := sqlDB.QueryContext(ctx, "SELECT unnest(enum_range(NULL::public.provisioner_type))::text")
+	require.NoError(t, err)
+	var got []database.ProvisionerType
+	for rows.Next() {
+		var s string
+		require.NoError(t, rows.Scan(&s))
+		got = append(got, database.ProvisionerType(s))
+	}
+	require.NoError(t, rows.Err())
+	require.NoError(t, rows.Close())
+
+	want := append(database.AllProvisionerTypeValues(), forkdb.ProvisionerTypeValues()...)
+	require.ElementsMatch(t, want, got)
+	for _, s := range got {
+		require.True(t, forkdb.ValidProvisionerType(s), "provisioner type %q", s)
+	}
+	require.False(t, forkdb.ValidProvisionerType("nope"))
+}
+
 func TestFrom(t *testing.T) {
 	t.Parallel()
 

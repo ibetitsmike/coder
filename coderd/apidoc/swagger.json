@@ -27399,7 +27399,7 @@
 				},
 				"provisioner": {
 					"type": "string",
-					"enum": ["terraform", "echo"]
+					"enum": ["terraform", "echo", "sandbox"]
 				},
 				"storage_method": {
 					"enum": ["file"],
@@ -28645,7 +28645,8 @@
 				"fork-view-image",
 				"fork-context-cache",
 				"fork-context-hash-rows",
-				"fork-apns-push"
+				"fork-apns-push",
+				"fork-sandbox-provisioner"
 			],
 			"x-enum-comments": {
 				"ExperimentAIGatewayReverseProxy": "Uses stateless reverse proxy routing when MCP injection is not configured.",
@@ -28702,6 +28703,7 @@
 				"",
 				"",
 				"",
+				"",
 				""
 			],
 			"x-enum-varnames": [
@@ -28738,7 +28740,8 @@
 				"ExperimentForkViewImage",
 				"ExperimentForkContextCache",
 				"ExperimentForkContextHashRows",
-				"ExperimentForkAPNsPush"
+				"ExperimentForkAPNsPush",
+				"ExperimentForkSandboxProvisioner"
 			]
 		},
 		"codersdk.ExperimentRule": {
