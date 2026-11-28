@@ -182,6 +182,34 @@ jobs:
           FORK_PR_SYNC: ${{ contains(github.event.pull_request.labels.*.name, 'sync') }}
         run: ./.github/fork/pr-size.sh "$BASE_SHA" "$HEAD_SHA"
 
+  # Fails on formatting drift, the same files make fmt formats (#407). It runs
+  # no Go or site linter. check-docs also runs markdownlint, as upstream CI does.
+  fmt:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Go formatting
+        run: ./.github/fork/check-fmt.sh
+      - name: Set up mise tools
+        uses: ./.github/actions/setup-mise
+        with:
+          install-args: "node pnpm"
+      - name: Install pnpm dependencies
+        uses: ./.github/actions/pnpm-install
+      - name: Site formatting
+        run: pnpm run check --linter-enabled=false
+        working-directory: site
+      - name: Markdown formatting
+        run: pnpm run check-docs
+
   build:
     runs-on: ubuntu-latest
     permissions:
