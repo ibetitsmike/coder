@@ -1,7 +1,7 @@
 # pstack adapter evidence
 
 This page holds the code cites for [pstack on Coder Agents](pstack-adapter.md), the fork's pstack adapter.
-Each bullet backs statements on that page.
+Each bullet backs statements on that page or on a page it links.
 This page is fork-only: it isn't in `docs/manifest.json`.
 
 Checked against fork `main` at `2736114cc8`.
